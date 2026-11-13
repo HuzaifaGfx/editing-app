@@ -75,6 +75,7 @@ class DesignLayer {
   bool isRtl;
   String fontFamily;
   double fontSize;
+  int fontWeight;
   double lineHeight;
   Color textColor;
 
@@ -106,6 +107,7 @@ class DesignLayer {
     this.isRtl = false,
     this.fontFamily = 'PlusJakartaSans',
     this.fontSize = 32,
+    this.fontWeight = 400,
     this.lineHeight = 1.4,
     this.textColor = const Color(0xFFFFFFFF),
     this.localImagePath,
@@ -134,6 +136,7 @@ class DesignLayer {
         isRtl: isRtl,
         fontFamily: fontFamily,
         fontSize: fontSize,
+        fontWeight: fontWeight,
         lineHeight: lineHeight,
         textColor: textColor,
         localImagePath: localImagePath,
@@ -162,6 +165,7 @@ class DesignLayer {
         'isRtl': isRtl,
         'fontFamily': fontFamily,
         'fontSize': fontSize,
+        'fontWeight': fontWeight,
         'lineHeight': lineHeight,
         'textColor': textColor.value,
         'localImagePath': localImagePath,
@@ -189,6 +193,7 @@ class DesignLayer {
         isRtl: json['isRtl'] ?? false,
         fontFamily: json['fontFamily'] ?? 'PlusJakartaSans',
         fontSize: (json['fontSize'] ?? 32).toDouble(),
+        fontWeight: (json['fontWeight'] ?? 400).toInt(),
         lineHeight: (json['lineHeight'] ?? 1.4).toDouble(),
         textColor: Color(json['textColor'] ?? 0xFFFFFFFF),
         localImagePath: json['localImagePath'],

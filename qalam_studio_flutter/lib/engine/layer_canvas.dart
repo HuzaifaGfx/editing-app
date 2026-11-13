@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' show FontVariation;
 import 'package:flutter/material.dart';
 import '../models/design_project.dart';
 import 'filter_matrix.dart';
@@ -158,6 +159,8 @@ class LayerCanvas extends StatelessWidget {
             style: TextStyle(
               fontFamily: layer.fontFamily,
               fontSize: layer.fontSize,
+              fontWeight: FontWeight.values[((layer.fontWeight / 100).round() - 1).clamp(0, 8)],
+              fontVariations: [FontVariation('wght', layer.fontWeight.toDouble())],
               height: layer.lineHeight,
               color: layer.textColor,
               shadows: const [],

@@ -690,6 +690,7 @@ class _StudioScreenState extends State<StudioScreen> {
         ('NotoNastaliqUrdu', 'Urdu Nastaliq', true, 2.3),
         ('Gulzar', 'Gulzar Urdu', true, 2.1),
         ('NotoNaskhArabic', 'Naskh Urdu', true, 1.9),
+        ('IBMPlexSansArabicSemiBold', 'Halka Bold (Urdu+Eng)', true, 1.8),
         ('PlusJakartaSans', 'Jakarta Sans', false, 1.35),
         ('PlayfairDisplay', 'Playfair Serif', false, 1.3),
       ];
@@ -720,9 +721,27 @@ class _StudioScreenState extends State<StudioScreen> {
                   layer.fontFamily = f.$1;
                   layer.isRtl = f.$3;
                   layer.lineHeight = f.$4;
+                  if (f.$1 == 'IBMPlexSansArabicSemiBold') layer.fontWeight = 600;
                 }),
               );
             }).toList(),
+          ),
+          Row(
+            children: [
+              ChoiceChip(
+                label: Text('Regular', style: TextStyle(fontSize: 11, color: layer.fontWeight < 550 ? Colors.black : Colors.white)),
+                selected: layer.fontWeight < 550,
+                selectedColor: const Color(0xFFF59E0B),
+                onSelected: (_) => setState(() => layer.fontWeight = 400),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: Text('Halka Bold (SemiBold)', style: TextStyle(fontSize: 11, color: layer.fontWeight >= 550 ? Colors.black : Colors.white)),
+                selected: layer.fontWeight >= 550,
+                selectedColor: const Color(0xFFF59E0B),
+                onSelected: (_) => setState(() => layer.fontWeight = 600),
+              ),
+            ],
           ),
           _sliderRow('Text Scale', layer.fontSize, 12, 200, (v) => setState(() => layer.fontSize = v)),
           Row(

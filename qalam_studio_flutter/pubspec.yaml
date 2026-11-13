@@ -54,3 +54,7 @@ flutter:
         - asset: assets/fonts/PlayfairDisplay-Regular.ttf
         - asset: assets/fonts/PlayfairDisplay-Bold.ttf
           weight: 700
+    - family: IBMPlexSansArabicSemiBold
+      fonts:
+        - asset: assets/fonts/IBMPlexSansArabic-SemiBold.ttf
+          weight: 600
