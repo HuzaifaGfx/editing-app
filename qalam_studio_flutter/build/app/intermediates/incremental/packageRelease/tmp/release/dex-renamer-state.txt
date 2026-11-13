@@ -1,4 +1,0 @@
-#Fri Nov 13 18:01:38 UTC 2026
-base.0=/workspaces/editing-app/qalam_studio_flutter/build/app/intermediates/dex/release/minifyReleaseWithR8/classes.dex
-renamed.0=classes.dex
-path.0=classes.dex
