@@ -1,0 +1,5 @@
+qalam_studio_flutter/build/
+qalam_studio_flutter/.dart_tool/
+qalam_studio_flutter/android/.gradle/
+qalam_studio_flutter/android/local.properties
+*.apk

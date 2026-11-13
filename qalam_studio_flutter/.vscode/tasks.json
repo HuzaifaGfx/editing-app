@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Android APK (build.sh)",
+      "type": "shell",
+      "command": "chmod +x ./build.sh && ./build.sh",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Gradle: assembleDebug",
+      "type": "shell",
+      "command": "cd android && chmod +x ./gradlew && ./gradlew assembleDebug",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Gradle: assembleRelease",
+      "type": "shell",
+      "command": "cd android && chmod +x ./gradlew && ./gradlew assembleRelease",
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}
