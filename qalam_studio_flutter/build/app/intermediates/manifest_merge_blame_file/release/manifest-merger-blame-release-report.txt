@@ -1,0 +1,287 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.qalam.qalam_studio"
+4    android:versionCode="1"
+5    android:versionName="1.0.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="21"
+8-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml
+9        android:targetSdkVersion="34" />
+9-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml
+10
+11    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+11-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:2:5-76
+11-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:2:22-73
+12    <uses-permission
+12-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:3:5-107
+13        android:name="android.permission.READ_EXTERNAL_STORAGE"
+13-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:3:22-77
+14        android:maxSdkVersion="32" />
+14-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:3:78-104
+15    <uses-permission
+15-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:4:5-108
+16        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+16-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:4:22-78
+17        android:maxSdkVersion="29" />
+17-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:4:79-105
+18    <!--
+19         Required to query activities that can process text, see:
+20         https://developer.android.com/training/package-visibility and
+21         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+22
+23         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin.
+24    -->
+25    <queries>
+25-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:42:5-47:15
+26        <intent>
+26-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:43:9-46:18
+27            <action android:name="android.intent.action.PROCESS_TEXT" />
+27-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:44:13-72
+27-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:44:21-70
+28
+29            <data android:mimeType="text/plain" />
+29-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:45:13-50
+29-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:45:19-48
+30        </intent>
+31    </queries>
+32
+33    <permission
+33-->[androidx.core:core:1.13.1] /home/codespace/.gradle/caches/transforms-3/2f6a5506f4dac22f7ab67b13b215ea43/transformed/core-1.13.1/AndroidManifest.xml:22:5-24:47
+34        android:name="com.qalam.qalam_studio.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+34-->[androidx.core:core:1.13.1] /home/codespace/.gradle/caches/transforms-3/2f6a5506f4dac22f7ab67b13b215ea43/transformed/core-1.13.1/AndroidManifest.xml:23:9-81
+35        android:protectionLevel="signature" />
+35-->[androidx.core:core:1.13.1] /home/codespace/.gradle/caches/transforms-3/2f6a5506f4dac22f7ab67b13b215ea43/transformed/core-1.13.1/AndroidManifest.xml:24:9-44
+36
+37    <uses-permission android:name="com.qalam.qalam_studio.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+37-->[androidx.core:core:1.13.1] /home/codespace/.gradle/caches/transforms-3/2f6a5506f4dac22f7ab67b13b215ea43/transformed/core-1.13.1/AndroidManifest.xml:26:5-97
+37-->[androidx.core:core:1.13.1] /home/codespace/.gradle/caches/transforms-3/2f6a5506f4dac22f7ab67b13b215ea43/transformed/core-1.13.1/AndroidManifest.xml:26:22-94
+38
+39    <application
+40        android:name="android.app.Application"
+40-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:7:9-42
+41        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+41-->[androidx.core:core:1.13.1] /home/codespace/.gradle/caches/transforms-3/2f6a5506f4dac22f7ab67b13b215ea43/transformed/core-1.13.1/AndroidManifest.xml:28:18-86
+42        android:icon="@mipmap/ic_launcher"
+42-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:8:9-43
+43        android:label="qalam_studio" >
+43-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:6:9-37
+44        <activity
+44-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:9:9-30:20
+45            android:name="com.qalam.qalam_studio.MainActivity"
+45-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:10:13-41
+46            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+46-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:15:13-163
+47            android:exported="true"
+47-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:11:13-36
+48            android:hardwareAccelerated="true"
+48-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:16:13-47
+49            android:launchMode="singleTop"
+49-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:12:13-43
+50            android:taskAffinity=""
+50-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:13:13-36
+51            android:theme="@style/LaunchTheme"
+51-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:14:13-47
+52            android:windowSoftInputMode="adjustResize" >
+52-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:17:13-55
+53
+54            <!--
+55                 Specifies an Android theme to apply to this Activity as soon as
+56                 the Android process has started. This theme is visible to the user
+57                 while the Flutter UI initializes. After that, this theme continues
+58                 to determine the Window background behind the Flutter UI.
+59            -->
+60            <meta-data
+60-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:22:13-25:17
+61                android:name="io.flutter.embedding.android.NormalTheme"
+61-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:23:15-70
+62                android:resource="@style/NormalTheme" />
+62-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:24:15-52
+63
+64            <intent-filter>
+64-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:26:13-29:29
+65                <action android:name="android.intent.action.MAIN" />
+65-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:27:17-68
+65-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:27:25-66
+66
+67                <category android:name="android.intent.category.LAUNCHER" />
+67-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:28:17-76
+67-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:28:27-74
+68            </intent-filter>
+69        </activity>
+70        <!--
+71             Don't delete the meta-data below.
+72             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java
+73        -->
+74        <meta-data
+74-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:33:9-35:33
+75            android:name="flutterEmbedding"
+75-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:34:13-44
+76            android:value="2" />
+76-->/workspaces/editing-app/qalam_studio_flutter/android/app/src/main/AndroidManifest.xml:35:13-30
+77
+78        <provider
+78-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:11:9-19:20
+79            android:name="io.flutter.plugins.imagepicker.ImagePickerFileProvider"
+79-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:12:13-82
+80            android:authorities="com.qalam.qalam_studio.flutter.image_provider"
+80-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:13:13-74
+81            android:exported="false"
+81-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:14:13-37
+82            android:grantUriPermissions="true" >
+82-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:15:13-47
+83            <meta-data
+83-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:16:13-18:75
+84                android:name="android.support.FILE_PROVIDER_PATHS"
+84-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:17:17-67
+85                android:resource="@xml/flutter_image_picker_file_paths" />
+85-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:18:17-72
+86        </provider> <!-- Trigger Google Play services to install the backported photo picker module. -->
+87        <service
+87-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:21:9-33:19
+88            android:name="com.google.android.gms.metadata.ModuleDependencies"
+88-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:22:13-78
+89            android:enabled="false"
+89-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:23:13-36
+90            android:exported="false" >
+90-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:24:13-37
+91            <intent-filter>
+91-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:26:13-28:29
+92                <action android:name="com.google.android.gms.metadata.MODULE_DEPENDENCIES" />
+92-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:27:17-94
+92-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:27:25-91
+93            </intent-filter>
+94
+95            <meta-data
+95-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:30:13-32:36
+96                android:name="photopicker_activity:0:required"
+96-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:31:17-63
+97                android:value="" />
+97-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:32:17-33
+98        </service>
+99
+100        <provider
+100-->[:printing] /workspaces/editing-app/qalam_studio_flutter/build/printing/intermediates/merged_manifest/release/AndroidManifest.xml:10:9-18:20
+101            android:name="net.nfet.flutter.printing.PrintFileProvider"
+101-->[:printing] /workspaces/editing-app/qalam_studio_flutter/build/printing/intermediates/merged_manifest/release/AndroidManifest.xml:11:13-71
+102            android:authorities="com.qalam.qalam_studio.flutter.printing"
+102-->[:printing] /workspaces/editing-app/qalam_studio_flutter/build/printing/intermediates/merged_manifest/release/AndroidManifest.xml:12:13-68
+103            android:exported="false"
+103-->[:printing] /workspaces/editing-app/qalam_studio_flutter/build/printing/intermediates/merged_manifest/release/AndroidManifest.xml:13:13-37
+104            android:grantUriPermissions="true" >
+104-->[:printing] /workspaces/editing-app/qalam_studio_flutter/build/printing/intermediates/merged_manifest/release/AndroidManifest.xml:14:13-47
+105            <meta-data
+105-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:16:13-18:75
+106                android:name="android.support.FILE_PROVIDER_PATHS"
+106-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:17:17-67
+107                android:resource="@xml/flutter_printing_file_paths" />
+107-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:18:17-72
+108        </provider>
+109        <!--
+110           Declares a provider which allows us to store files to share in
+111           '.../caches/share_plus' and grant the receiving action access
+112        -->
+113        <provider
+113-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:15:9-23:20
+114            android:name="dev.fluttercommunity.plus.share.ShareFileProvider"
+114-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:16:13-77
+115            android:authorities="com.qalam.qalam_studio.flutter.share_provider"
+115-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:17:13-74
+116            android:exported="false"
+116-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:18:13-37
+117            android:grantUriPermissions="true" >
+117-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:19:13-47
+118            <meta-data
+118-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:16:13-18:75
+119                android:name="android.support.FILE_PROVIDER_PATHS"
+119-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:17:17-67
+120                android:resource="@xml/flutter_share_file_paths" />
+120-->[:image_picker_android] /workspaces/editing-app/qalam_studio_flutter/build/image_picker_android/intermediates/merged_manifest/release/AndroidManifest.xml:18:17-72
+121        </provider>
+122        <!--
+123           This manifest declared broadcast receiver allows us to use an explicit
+124           Intent when creating a PendingItent to be informed of the user's choice
+125        -->
+126        <receiver
+126-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:28:9-34:20
+127            android:name="dev.fluttercommunity.plus.share.SharePlusPendingIntent"
+127-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:29:13-82
+128            android:exported="false" >
+128-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:30:13-37
+129            <intent-filter>
+129-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:31:13-33:29
+130                <action android:name="EXTRA_CHOSEN_COMPONENT" />
+130-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:32:17-65
+130-->[:share_plus] /workspaces/editing-app/qalam_studio_flutter/build/share_plus/intermediates/merged_manifest/release/AndroidManifest.xml:32:25-62
+131            </intent-filter>
+132        </receiver>
+133
+134        <uses-library
+134-->[androidx.window:window:1.0.0-beta04] /home/codespace/.gradle/caches/transforms-3/f302e75fb7efd781bcf1a29281c188da/transformed/jetified-window-1.0.0-beta04/AndroidManifest.xml:25:9-27:40
+135            android:name="androidx.window.extensions"
+135-->[androidx.window:window:1.0.0-beta04] /home/codespace/.gradle/caches/transforms-3/f302e75fb7efd781bcf1a29281c188da/transformed/jetified-window-1.0.0-beta04/AndroidManifest.xml:26:13-54
+136            android:required="false" />
+136-->[androidx.window:window:1.0.0-beta04] /home/codespace/.gradle/caches/transforms-3/f302e75fb7efd781bcf1a29281c188da/transformed/jetified-window-1.0.0-beta04/AndroidManifest.xml:27:13-37
+137        <uses-library
+137-->[androidx.window:window:1.0.0-beta04] /home/codespace/.gradle/caches/transforms-3/f302e75fb7efd781bcf1a29281c188da/transformed/jetified-window-1.0.0-beta04/AndroidManifest.xml:28:9-30:40
+138            android:name="androidx.window.sidecar"
+138-->[androidx.window:window:1.0.0-beta04] /home/codespace/.gradle/caches/transforms-3/f302e75fb7efd781bcf1a29281c188da/transformed/jetified-window-1.0.0-beta04/AndroidManifest.xml:29:13-51
+139            android:required="false" />
+139-->[androidx.window:window:1.0.0-beta04] /home/codespace/.gradle/caches/transforms-3/f302e75fb7efd781bcf1a29281c188da/transformed/jetified-window-1.0.0-beta04/AndroidManifest.xml:30:13-37
+140
+141        <provider
+141-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:24:9-32:20
+142            android:name="androidx.startup.InitializationProvider"
+142-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:25:13-67
+143            android:authorities="com.qalam.qalam_studio.androidx-startup"
+143-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:26:13-68
+144            android:exported="false" >
+144-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:27:13-37
+145            <meta-data
+145-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:29:13-31:52
+146                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+146-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:30:17-85
+147                android:value="androidx.startup" />
+147-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:31:17-49
+148        </provider>
+149
+150        <receiver
+150-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:34:9-52:20
+151            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+151-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:35:13-76
+152            android:directBootAware="false"
+152-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:36:13-44
+153            android:enabled="true"
+153-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:37:13-35
+154            android:exported="true"
+154-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:38:13-36
+155            android:permission="android.permission.DUMP" >
+155-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:39:13-57
+156            <intent-filter>
+156-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:40:13-42:29
+157                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+157-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:41:17-91
+157-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:41:25-88
+158            </intent-filter>
+159            <intent-filter>
+159-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:43:13-45:29
+160                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+160-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:44:17-85
+160-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:44:25-82
+161            </intent-filter>
+162            <intent-filter>
+162-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:46:13-48:29
+163                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+163-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:47:17-88
+163-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:47:25-85
+164            </intent-filter>
+165            <intent-filter>
+165-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:49:13-51:29
+166                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+166-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:50:17-95
+166-->[androidx.profileinstaller:profileinstaller:1.3.1] /home/codespace/.gradle/caches/transforms-3/e852edee255e4ba7fa4d5b58ba237ddb/transformed/jetified-profileinstaller-1.3.1/AndroidManifest.xml:50:25-92
+167            </intent-filter>
+168        </receiver>
+169    </application>
+170
+171</manifest>

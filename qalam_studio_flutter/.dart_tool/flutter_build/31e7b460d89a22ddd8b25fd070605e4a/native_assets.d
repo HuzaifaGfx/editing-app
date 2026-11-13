@@ -1,0 +1,1 @@
+ /workspaces/editing-app/qalam_studio_flutter/.dart_tool/flutter_build/31e7b460d89a22ddd8b25fd070605e4a/native_assets.yaml: 
