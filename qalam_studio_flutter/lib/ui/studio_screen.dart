@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -23,6 +24,11 @@ class StudioScreen extends StatefulWidget {
 }
 
 class _StudioScreenState extends State<StudioScreen> {
+  static const String _geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
+  final TextEditingController _aiPromptController = TextEditingController();
+  String? _aiImagePath;
+  bool _aiLoading = false;
+  int _aiFillRevision = 0;
   final ImagePicker _picker = ImagePicker();
   final GlobalKey _canvasExportKey = GlobalKey();
   final TextEditingController _textController = TextEditingController();
@@ -54,6 +60,7 @@ class _StudioScreenState extends State<StudioScreen> {
   @override
   void dispose() {
     _textController.dispose();
+    _aiPromptController.dispose();
     super.dispose();
   }
 
@@ -259,6 +266,182 @@ class _StudioScreenState extends State<StudioScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Replaced "${layer.name}" keeping exact coordinates & filters')),
     );
+  }
+
+
+  Future<void> _pickAiCardImage() async {
+    final picked = await _picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1500,
+      maxHeight: 1500,
+      imageQuality: 84,
+    );
+    if (picked == null) return;
+    setState(() => _aiImagePath = picked.path);
+  }
+
+  Future<void> _runGeminiAutoFill() async {
+    final textFields = _page.layers.where((l) => l.type == LayerType.text).toList();
+    if (textFields.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add and name text layers in Studio first (e.g. Name, Father Name).')),
+      );
+      return;
+    }
+    final rawText = _aiPromptController.text.trim();
+    if (rawText.isEmpty && _aiImagePath == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter details or attach a card/photo first.')),
+      );
+      return;
+    }
+    final apiKey = _geminiApiKey.trim();
+    if (apiKey.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gemini key not bundled. Rebuild APK with --dart-define=GEMINI_API_KEY=YOUR_KEY')),
+      );
+      return;
+    }
+
+    setState(() => _aiLoading = true);
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 20);
+    try {
+      final parts = <Map<String, dynamic>>[];
+      if (_aiImagePath != null && File(_aiImagePath!).existsSync()) {
+        final bytes = await File(_aiImagePath!).readAsBytes();
+        final ext = p.extension(_aiImagePath!).toLowerCase();
+        final mime = ext == '.png'
+            ? 'image/png'
+            : (ext == '.webp' ? 'image/webp' : 'image/jpeg');
+        parts.add({
+          'inlineData': {'mimeType': mime, 'data': base64Encode(bytes)},
+        });
+      }
+
+      final fieldSpec = List.generate(textFields.length, (i) {
+        final l = textFields[i];
+        final sample = l.text.length > 80 ? l.text.substring(0, 80) : l.text;
+        return '${i + 1}. id="${l.id}" | label="${l.name}" | sample="$sample" | dir="${l.isRtl ? "rtl" : "ltr"}"';
+      }).join('\n');
+
+      parts.add({
+        'text': 'TARGET FORM FIELDS (each has an exact id and label):\n$fieldSpec\n\n${rawText.isNotEmpty ? "USER PROVIDED DETAILS:\n$rawText" : "Extract details from the attached image."}\n\nMap each extracted piece of information to the matching layerId. Only include fields that have matching data in the input. Preserve Urdu or English script appropriately.',
+      });
+
+      final isVertexExpress = apiKey.startsWith('AQ.');
+      final genConfig = <String, dynamic>{
+        if (!isVertexExpress) 'thinkingConfig': {'thinkingLevel': 'LOW'},
+        'responseMimeType': 'application/json',
+        'responseSchema': {
+          'type': 'OBJECT',
+          'properties': {
+            'updates': {
+              'type': 'ARRAY',
+              'items': {
+                'type': 'OBJECT',
+                'properties': {
+                  'layerId': {'type': 'STRING'},
+                  'value': {'type': 'STRING'},
+                },
+                'required': ['layerId', 'value'],
+              },
+            },
+            'note': {'type': 'STRING'},
+          },
+          'required': ['updates'],
+        },
+      };
+
+      final body = jsonEncode({
+        'systemInstruction': {
+          'parts': [
+            {
+              'text': 'You are a precise bilingual (Urdu and English) document form-filler assistant for Qalam Studio. Given a list of template text fields (with exact layer id, label/name, sample placeholder, and direction) plus raw user text and/or an image of a document/card/note, extract the relevant values and map them accurately to the matching layerId. Rules: (1) Never invent or guess missing values — omit fields not present in the input. (2) Use exact layerId strings from the target list. (3) Keep values clean without adding the field label prefix unless the sample itself includes a prefix. (4) Match the natural language/script of the input or field sample cleanly.'
+            }
+          ]
+        },
+        'contents': [
+          {'role': 'user', 'parts': parts}
+        ],
+        'generationConfig': genConfig,
+      });
+
+      final uri = Uri.parse(
+        isVertexExpress
+            ? 'https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent'
+            : 'https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent',
+      );
+      final req = await client.postUrl(uri);
+      req.headers.set('Content-Type', 'application/json; charset=utf-8');
+      req.headers.set('x-goog-api-key', apiKey);
+      req.add(utf8.encode(body));
+
+      final res = await req.close().timeout(const Duration(seconds: 45));
+      final resBody = await res.transform(utf8.decoder).join();
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        String msg = 'Gemini HTTP ${res.statusCode}';
+        try {
+          final errJson = jsonDecode(resBody) as Map<String, dynamic>;
+          final errMsg = (errJson['error'] as Map?)?['message']?.toString();
+          if (errMsg != null && errMsg.isNotEmpty) msg = errMsg;
+        } catch (_) {}
+        throw Exception(msg);
+      }
+
+      final jsonRes = jsonDecode(resBody) as Map<String, dynamic>;
+      final candidates = jsonRes['candidates'] as List?;
+      final firstCandidate =
+          (candidates != null && candidates.isNotEmpty) ? candidates[0] as Map? : null;
+      final contentParts = (firstCandidate?['content'] as Map?)?['parts'] as List?;
+      final textOut = contentParts
+              ?.where((part) => part is Map && part['thought'] != true && part['text'] != null)
+              .map((part) => (part as Map)['text'].toString())
+              .join('')
+              .trim() ??
+          '';
+      if (textOut.isEmpty) throw Exception('Empty response from Gemini');
+
+      final parsed = jsonDecode(textOut) as Map<String, dynamic>;
+      final updates = (parsed['updates'] as List?) ?? [];
+      final byId = {for (final l in textFields) l.id: l};
+      int applied = 0;
+
+      setState(() {
+        for (final item in updates) {
+          if (item is! Map) continue;
+          final id = item['layerId']?.toString();
+          final val = item['value']?.toString();
+          if (id != null && val != null && val.trim().isNotEmpty && byId.containsKey(id)) {
+            byId[id]!.text = val.trim();
+            if (_selectedLayerId == id) _textController.text = val.trim();
+            applied++;
+          }
+        }
+        _aiFillRevision++;
+      });
+
+      if (applied > 0) await _saveCurrentProject(showToast: false);
+      if (!mounted) return;
+      final note = parsed['note']?.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            applied > 0
+                ? (note != null && note.isNotEmpty ? note : 'Gemini filled $applied field(s)')
+                : 'No matching fields found in input',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI Auto-Fill error: $e')),
+      );
+    } finally {
+      client.close();
+      if (mounted) setState(() => _aiLoading = false);
+    }
   }
 
   static const MethodChannel _mediaChannel = MethodChannel('com.qalam.studio/media');
@@ -1138,6 +1321,99 @@ class _StudioScreenState extends State<StudioScreen> {
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        Card(
+          color: const Color(0xFF191C22),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Color(0x4DF59E0B)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.auto_awesome, size: 18, color: Color(0xFFF59E0B)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Gemini Smart Auto-Fill',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ),
+                    Text('Gemini AI', style: TextStyle(fontSize: 11, color: Colors.white54)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Paste Urdu/English details or attach a card/ID photo to auto-fill matching layers.',
+                  style: TextStyle(fontSize: 11, color: Colors.white60),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _aiPromptController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    hintText: 'e.g. Name Ali Raza, Father Ahmed Khan, Date 14 Aug 2026...',
+                    border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Color(0xFF111317),
+                    isDense: true,
+                  ),
+                ),
+                if (_aiImagePath != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111317),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.image, size: 16, color: Color(0xFFF59E0B)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(p.basename(_aiImagePath!), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                        ),
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.close, size: 16),
+                          onPressed: () => setState(() => _aiImagePath = null),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _aiLoading ? null : _pickAiCardImage,
+                      icon: const Icon(Icons.photo_camera_outlined, size: 16),
+                      label: Text(_aiImagePath == null ? 'Attach Card / Photo' : 'Change Photo'),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black),
+                        onPressed: _aiLoading ? null : _runGeminiAutoFill,
+                        icon: _aiLoading
+                            ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                            : const Icon(Icons.auto_fix_high, size: 16),
+                        label: Text(_aiLoading ? 'Filling...' : 'Auto-Fill All Fields'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
         if (textFields.length > 1) ...[
           const SizedBox(height: 10),
           SizedBox(
@@ -1253,7 +1529,7 @@ class _StudioScreenState extends State<StudioScreen> {
                       ),
                       const SizedBox(height: 6),
                       TextFormField(
-                        key: ValueKey('${_project.id}_${_page.id}_${l.id}_${l.name}'),
+                        key: ValueKey('${_project.id}_${_page.id}_${l.id}_${l.name}_$_aiFillRevision'),
                         initialValue: l.text,
                         textDirection: l.isRtl ? TextDirection.rtl : TextDirection.ltr,
                         maxLines: null,
