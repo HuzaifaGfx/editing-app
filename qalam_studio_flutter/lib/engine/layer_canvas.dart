@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/design_project.dart';
 import 'filter_matrix.dart';
 
-class LayerCanvas extends StatelessWidget {
+class LayerCanvas extends StatefulWidget {
   final DocumentPage page;
   final String? selectedLayerId;
   final GlobalKey? exportBoundaryKey;
@@ -24,83 +24,174 @@ class LayerCanvas extends StatelessWidget {
   });
 
   @override
+  State<LayerCanvas> createState() => _LayerCanvasState();
+}
+
+class _LayerCanvasState extends State<LayerCanvas> {
+  final TransformationController _transformController = TransformationController();
+  int _pointerCount = 0;
+  bool _isPinching = false;
+  double _currentZoom = 1.0;
+  DateTime _lastMultiTouchAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  bool get _blockLayerInteraction =>
+      _pointerCount > 1 ||
+      _isPinching ||
+      DateTime.now().difference(_lastMultiTouchAt).inMilliseconds < 320;
+
+  @override
+  void dispose() {
+    _transformController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return InteractiveViewer(
-      panEnabled: false,
-      scaleEnabled: true,
-      minScale: 0.85,
-      maxScale: 3.0,
-      boundaryMargin: EdgeInsets.zero,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: AspectRatio(
-            aspectRatio: page.width / math.max(1, page.height),
-            child: FittedBox(
-              fit: BoxFit.contain,
-              child: RepaintBoundary(
-                key: exportBoundaryKey,
-                child: SizedBox(
-                  width: page.width,
-                  height: page.height,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: page.backgroundColor,
-                      boxShadow: const [BoxShadow(blurRadius: 24, color: Colors.black54)],
-                    ),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Positioned.fill(
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.translucent,
-                            onTap: () => onSelectLayer(null),
-                          ),
-                        ),
-                        ...page.layers.where((l) => l.visible).map((layer) {
-                          final selected = showSelectionHandles &&
-                              !layer.isCanvasBackground &&
-                              layer.id == selectedLayerId;
-
-                          final layerChild = Transform.rotate(
-                            angle: layer.rotation * math.pi / 180.0,
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Positioned.fill(
-                                  child: Opacity(
-                                    opacity: layer.opacity.clamp(0.0, 1.0),
-                                    child: _buildLayerContent(layer),
-                                  ),
-                                ),
-                                if (selected) _buildTouchHandles(layer),
-                              ],
+    final page = widget.page;
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) {
+        _pointerCount++;
+        if (_pointerCount > 1) {
+          setState(() {
+            _isPinching = true;
+            _lastMultiTouchAt = DateTime.now();
+          });
+        }
+      },
+      onPointerUp: (_) {
+        _pointerCount = math.max(0, _pointerCount - 1);
+        if (_pointerCount <= 1 && _isPinching) {
+          setState(() {
+            _lastMultiTouchAt = DateTime.now();
+            _isPinching = false;
+          });
+        }
+      },
+      onPointerCancel: (_) {
+        _pointerCount = math.max(0, _pointerCount - 1);
+        if (_pointerCount <= 1 && _isPinching) {
+          setState(() {
+            _lastMultiTouchAt = DateTime.now();
+            _isPinching = false;
+          });
+        }
+      },
+      child: InteractiveViewer(
+        transformationController: _transformController,
+        panEnabled: _pointerCount > 1 || _currentZoom > 1.02,
+        scaleEnabled: true,
+        minScale: 0.85,
+        maxScale: 3.5,
+        boundaryMargin: EdgeInsets.zero,
+        onInteractionStart: (details) {
+          if (details.pointerCount > 1) {
+            setState(() {
+              _isPinching = true;
+              _lastMultiTouchAt = DateTime.now();
+            });
+          }
+        },
+        onInteractionUpdate: (_) {
+          final nextZoom = _transformController.value.getMaxScaleOnAxis();
+          if ((nextZoom - _currentZoom).abs() > 0.02) {
+            setState(() => _currentZoom = nextZoom);
+          }
+        },
+        onInteractionEnd: (_) {
+          final nextZoom = _transformController.value.getMaxScaleOnAxis();
+          setState(() {
+            _currentZoom = nextZoom;
+            if (_isPinching) {
+              _lastMultiTouchAt = DateTime.now();
+              _isPinching = false;
+            }
+          });
+        },
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: AspectRatio(
+              aspectRatio: page.width / math.max(1, page.height),
+              child: FittedBox(
+                fit: BoxFit.contain,
+                child: RepaintBoundary(
+                  key: widget.exportBoundaryKey,
+                  child: SizedBox(
+                    width: page.width,
+                    height: page.height,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: page.backgroundColor,
+                        boxShadow: const [BoxShadow(blurRadius: 24, color: Colors.black54)],
+                      ),
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Positioned.fill(
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.translucent,
+                              onTap: () {
+                                if (_blockLayerInteraction) return;
+                                widget.onSelectLayer(null);
+                              },
                             ),
-                          );
+                          ),
+                          ...page.layers.where((l) => l.visible).map((layer) {
+                            final selected = widget.showSelectionHandles &&
+                                !layer.isCanvasBackground &&
+                                layer.id == widget.selectedLayerId;
 
-                          return Positioned(
-                            left: layer.x,
-                            top: layer.y,
-                            width: layer.width,
-                            height: layer.height,
-                            child: layer.isCanvasBackground
-                                ? IgnorePointer(ignoring: true, child: layerChild)
-                                : GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onTap: () => onSelectLayer(layer.id),
-                                    onPanStart: (_) => onSelectLayer(layer.id),
-                                    onPanUpdate: layer.locked
-                                        ? null
-                                        : (d) {
-                                            layer.x += d.delta.dx;
-                                            layer.y += d.delta.dy;
-                                            onUpdateLayer(layer);
-                                          },
-                                    child: layerChild,
+                            final layerChild = Transform.rotate(
+                              angle: layer.rotation * math.pi / 180.0,
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  Positioned.fill(
+                                    child: Opacity(
+                                      opacity: layer.opacity.clamp(0.0, 1.0),
+                                      child: _buildLayerContent(layer),
+                                    ),
                                   ),
-                          );
-                        }),
-                      ],
+                                  if (selected) _buildTouchHandles(layer),
+                                ],
+                              ),
+                            );
+
+                            return Positioned(
+                              left: layer.x,
+                              top: layer.y,
+                              width: layer.width,
+                              height: layer.height,
+                              child: layer.isCanvasBackground
+                                  ? IgnorePointer(ignoring: true, child: layerChild)
+                                  : GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onTap: () {
+                                        if (_blockLayerInteraction) return;
+                                        widget.onSelectLayer(layer.id);
+                                      },
+                                      onPanStart: (_) {
+                                        if (_blockLayerInteraction) return;
+                                        widget.onSelectLayer(layer.id);
+                                      },
+                                      onPanUpdate: layer.locked
+                                          ? null
+                                          : (d) {
+                                              if (_blockLayerInteraction) return;
+                                              final scale = _transformController.value
+                                                  .getMaxScaleOnAxis()
+                                                  .clamp(0.5, 4.0);
+                                              layer.x += d.delta.dx / scale;
+                                              layer.y += d.delta.dy / scale;
+                                              widget.onUpdateLayer(layer);
+                                            },
+                                      child: layerChild,
+                                    ),
+                            );
+                          }),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -149,6 +240,7 @@ class LayerCanvas extends StatelessWidget {
     }
 
     if (layer.type == LayerType.text) {
+      final weightIndex = ((layer.fontWeight / 100).round() - 1).clamp(0, 8);
       return Directionality(
         textDirection: layer.isRtl ? TextDirection.rtl : TextDirection.ltr,
         child: Align(
@@ -159,7 +251,7 @@ class LayerCanvas extends StatelessWidget {
             style: TextStyle(
               fontFamily: layer.fontFamily,
               fontSize: layer.fontSize,
-              fontWeight: FontWeight.values[((layer.fontWeight / 100).round() - 1).clamp(0, 8)],
+              fontWeight: FontWeight.values[weightIndex],
               fontVariations: [FontVariation('wght', layer.fontWeight.toDouble())],
               height: layer.lineHeight,
               color: layer.textColor,
@@ -190,20 +282,20 @@ class LayerCanvas extends StatelessWidget {
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onPanUpdate: (d) {
+                  if (_blockLayerInteraction) return;
+                  final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
+                  final dx = d.delta.dx / scale;
+                  final dy = d.delta.dy / scale;
                   if (layer.type == LayerType.image && layer.aspectLocked) {
                     final ratio = layer.width / math.max(1.0, layer.height);
-                    final delta = d.delta.dx.abs() >= (d.delta.dy * ratio).abs()
-                        ? d.delta.dx
-                        : d.delta.dy * ratio;
+                    final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
                     final nextW = (layer.width + delta).clamp(48.0, 4000.0);
                     final nextH = (nextW / ratio).clamp(48.0, 4000.0);
                     layer.width = nextW;
                     layer.height = nextH;
                   } else if (layer.type == LayerType.text) {
                     final ratio = layer.width / math.max(1.0, layer.height);
-                    final delta = d.delta.dx.abs() >= (d.delta.dy * ratio).abs()
-                        ? d.delta.dx
-                        : d.delta.dy * ratio;
+                    final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
                     final prevW = math.max(1.0, layer.width);
                     final nextW = (layer.width + delta).clamp(60.0, 4000.0);
                     final nextH = (nextW / ratio).clamp(36.0, 4000.0);
@@ -211,10 +303,10 @@ class LayerCanvas extends StatelessWidget {
                     layer.width = nextW;
                     layer.height = nextH;
                   } else {
-                    layer.width = (layer.width + d.delta.dx).clamp(48.0, 4000.0);
-                    layer.height = (layer.height + d.delta.dy).clamp(48.0, 4000.0);
+                    layer.width = (layer.width + dx).clamp(48.0, 4000.0);
+                    layer.height = (layer.height + dy).clamp(48.0, 4000.0);
                   }
-                  onUpdateLayer(layer);
+                  widget.onUpdateLayer(layer);
                 },
                 child: const SizedBox(
                   width: 56,

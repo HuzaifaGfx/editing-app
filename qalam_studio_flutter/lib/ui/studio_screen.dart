@@ -104,6 +104,40 @@ class _StudioScreenState extends State<StudioScreen> {
         ],
       );
 
+  Future<String> _persistPickedImageOffline(String sourcePath) async {
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final imgDir = Directory(p.join(docsDir.path, 'qalam_images'));
+      if (!imgDir.existsSync()) imgDir.createSync(recursive: true);
+      final ext = p.extension(sourcePath).isEmpty ? '.jpg' : p.extension(sourcePath);
+      final destPath = p.join(imgDir.path, 'img_${DateTime.now().microsecondsSinceEpoch}$ext');
+      await File(sourcePath).copy(destPath);
+      return destPath;
+    } catch (_) {
+      return sourcePath;
+    }
+  }
+
+  Future<void> _rehydrateProjectFilters(DesignProject proj) async {
+    bool changed = false;
+    for (final pg in proj.pages) {
+      for (final l in pg.layers) {
+        if (l.type == LayerType.image &&
+            l.filters.removeWhite > 0 &&
+            l.localImagePath != null &&
+            File(l.localImagePath!).existsSync() &&
+            l.processedWhiteRemovedBytes == null) {
+          final bytes = await removeWhiteBackgroundOffline(l.localImagePath!, l.filters.removeWhite);
+          if (bytes != null) {
+            l.processedWhiteRemovedBytes = bytes;
+            changed = true;
+          }
+        }
+      }
+    }
+    if (changed && mounted) setState(() {});
+  }
+
   Future<void> _loadSavedProjects() async {
     try {
       final list = await LocalProjectStore.instance.loadAllProjects();
@@ -114,6 +148,7 @@ class _StudioScreenState extends State<StudioScreen> {
           _project = list.first;
           _pageIndex = 0;
         });
+        await _rehydrateProjectFilters(_project);
       } else {
         await LocalProjectStore.instance.saveProject(_project);
         if (mounted) setState(() => _projects = [_project]);
@@ -151,6 +186,56 @@ class _StudioScreenState extends State<StudioScreen> {
         const SnackBar(content: Text('Project saved locally offline')),
       );
     }
+  }
+
+  Future<void> _renameLayerDialog(DesignLayer layer) async {
+    final ctrl = TextEditingController(text: layer.name);
+    final nextName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF191C22),
+        title: const Text('Rename Layer'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Layer Name (e.g. Name, Father Name, Photo)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black),
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (nextName != null && nextName.isNotEmpty) {
+      setState(() => layer.name = nextName);
+      await _saveCurrentProject(showToast: false);
+    }
+  }
+
+  Future<void> _replaceLayerImageKeepingConfig(DesignLayer layer) async {
+    final picked = await _picker.pickImage(source: ImageSource.gallery);
+    if (picked == null) return;
+    final permanentPath = await _persistPickedImageOffline(picked.path);
+    setState(() {
+      layer.localImagePath = permanentPath;
+      layer.processedWhiteRemovedBytes = null;
+    });
+    if (layer.filters.removeWhite > 0) {
+      await _applyWhiteRemoval(layer, layer.filters.removeWhite);
+    }
+    await _saveCurrentProject(showToast: false);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Replaced "${layer.name}" keeping exact coordinates & filters')),
+    );
   }
 
   static const MethodChannel _mediaChannel = MethodChannel('com.qalam.studio/media');
@@ -210,7 +295,8 @@ class _StudioScreenState extends State<StudioScreen> {
   Future<void> _importCanvasImage() async {
     final picked = await _picker.pickImage(source: ImageSource.gallery);
     if (picked == null) return;
-    final bytes = await File(picked.path).readAsBytes();
+    final permanentPath = await _persistPickedImageOffline(picked.path);
+    final bytes = await File(permanentPath).readAsBytes();
     final decoded = img.decodeImage(bytes);
     final natW = (decoded?.width ?? 1080).toDouble();
     final natH = (decoded?.height ?? 1080).toDouble();
@@ -225,7 +311,7 @@ class _StudioScreenState extends State<StudioScreen> {
       height: natH,
       locked: true,
       isCanvasBackground: true,
-      localImagePath: picked.path,
+      localImagePath: permanentPath,
       aspectLocked: true,
       objectFit: BoxFit.cover,
     );
@@ -251,7 +337,8 @@ class _StudioScreenState extends State<StudioScreen> {
   Future<void> _addOverlayImage() async {
     final picked = await _picker.pickImage(source: ImageSource.gallery);
     if (picked == null) return;
-    final bytes = await File(picked.path).readAsBytes();
+    final permanentPath = await _persistPickedImageOffline(picked.path);
+    final bytes = await File(permanentPath).readAsBytes();
     final decoded = img.decodeImage(bytes);
     final natW = (decoded?.width ?? 600).toDouble();
     final natH = (decoded?.height ?? 600).toDouble();
@@ -267,7 +354,7 @@ class _StudioScreenState extends State<StudioScreen> {
       y: (_page.height - targetH) / 2,
       width: targetW,
       height: targetH,
-      localImagePath: picked.path,
+      localImagePath: permanentPath,
       aspectLocked: true,
       objectFit: BoxFit.cover,
     );
@@ -350,6 +437,7 @@ class _StudioScreenState extends State<StudioScreen> {
     final pngBytes = await removeWhiteBackgroundOffline(layer.localImagePath!, tolerance);
     if (!mounted) return;
     setState(() => layer.processedWhiteRemovedBytes = pngBytes);
+    await _saveCurrentProject(showToast: false);
   }
 
   @override
@@ -375,6 +463,7 @@ class _StudioScreenState extends State<StudioScreen> {
         index: _navIndex,
         children: [
           _buildStudioView(),
+          _navIndex == 1 ? _buildQuickFillView() : const SizedBox.shrink(),
           _buildPagesView(),
           _buildBatchView(),
           _buildProjectsView(),
@@ -384,9 +473,15 @@ class _StudioScreenState extends State<StudioScreen> {
         selectedIndex: _navIndex,
         backgroundColor: const Color(0xFF16191E),
         indicatorColor: const Color(0xFFF59E0B).withOpacity(0.22),
-        onDestinationSelected: (i) => setState(() => _navIndex = i),
+        onDestinationSelected: (i) => setState(() {
+          _navIndex = i;
+          if (i == 0 && _activeLayer?.type == LayerType.text) {
+            _textController.text = _activeLayer!.text;
+          }
+        }),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.brush_outlined), label: 'Studio'),
+          NavigationDestination(icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
           NavigationDestination(icon: Icon(Icons.description_outlined), label: 'Docs'),
           NavigationDestination(icon: Icon(Icons.auto_awesome_motion_outlined), label: 'Batch'),
           NavigationDestination(icon: Icon(Icons.folder_outlined), label: 'Projects'),
@@ -526,6 +621,17 @@ class _StudioScreenState extends State<StudioScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
+                    tooltip: 'Rename Layer',
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    onPressed: () => _renameLayerDialog(l),
+                  ),
+                  if (l.type == LayerType.image)
+                    IconButton(
+                      tooltip: 'Replace Image (Same Pos & Filters)',
+                      icon: const Icon(Icons.swap_horiz_rounded, size: 18, color: Color(0xFFF59E0B)),
+                      onPressed: () => _replaceLayerImageKeepingConfig(l),
+                    ),
+                  IconButton(
                     icon: Icon(l.visible ? Icons.visibility : Icons.visibility_off, size: 18),
                     onPressed: () => setState(() => l.visible = !l.visible),
                   ),
@@ -589,11 +695,14 @@ class _StudioScreenState extends State<StudioScreen> {
                     backgroundColor: isBw ? const Color(0xFFF59E0B) : Colors.white12,
                     foregroundColor: isBw ? Colors.black : Colors.white,
                   ),
-                  onPressed: () => setState(() {
-                    targetImg.filters.blackAndWhite = !isBw;
-                    targetImg.filters.grayscale = !isBw ? 1.0 : 0.0;
-                    targetImg.filters.contrast = !isBw ? 1.28 : 1.0;
-                  }),
+                  onPressed: () async {
+                    setState(() {
+                      targetImg.filters.blackAndWhite = !isBw;
+                      targetImg.filters.grayscale = !isBw ? 1.0 : 0.0;
+                      targetImg.filters.contrast = !isBw ? 1.28 : 1.0;
+                    });
+                    await _saveCurrentProject(showToast: false);
+                  },
                   icon: const Icon(Icons.contrast, size: 18),
                   label: const Text('Black & White', style: TextStyle(fontSize: 12)),
                 ),
@@ -899,6 +1008,219 @@ class _StudioScreenState extends State<StudioScreen> {
     );
   }
 
+  Widget _buildQuickFillView() {
+    final fields = _page.layers
+        .where((l) => l.type == LayerType.text || l.type == LayerType.image)
+        .toList();
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Quick Fill Form', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text(
+                    'Edit text & replace images by Layer Name — same coordinates & filters kept!',
+                    style: TextStyle(fontSize: 12, color: Colors.white60),
+                  ),
+                ],
+              ),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black),
+              onPressed: () => setState(() => _navIndex = 0),
+              icon: const Icon(Icons.brush_outlined, size: 16),
+              label: const Text('Studio'),
+            ),
+          ],
+        ),
+        if (_project.pages.length > 1) ...[
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: List.generate(_project.pages.length, (i) {
+                final sel = i == _pageIndex;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(_project.pages[i].title),
+                    selected: sel,
+                    selectedColor: const Color(0xFFF59E0B),
+                    onSelected: (_) => setState(() {
+                      _pageIndex = i;
+                      _selectedLayerId = null;
+                    }),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+        if (fields.isEmpty)
+          const Card(
+            color: Color(0xFF191C22),
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Text(
+                'No text or image layers on this page yet. Add layers in Studio and name them (e.g. Name, Father Name, Photo).',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ),
+          )
+        else
+          ...fields.map((l) {
+            if (l.type == LayerType.text) {
+              return Card(
+                color: const Color(0xFF191C22),
+                margin: const EdgeInsets.only(bottom: 12),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.title, size: 16, color: Color(0xFFF59E0B)),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          ),
+                          Text('X:${l.x.round()} Y:${l.y.round()}', style: const TextStyle(fontSize: 11, color: Colors.white54)),
+                          IconButton(
+                            tooltip: 'Rename Field',
+                            icon: const Icon(Icons.edit_outlined, size: 16),
+                            onPressed: () => _renameLayerDialog(l),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        key: ValueKey('${_project.id}_${_page.id}_${l.id}_${l.name}'),
+                        initialValue: l.text,
+                        textDirection: l.isRtl ? TextDirection.rtl : TextDirection.ltr,
+                        maxLines: null,
+                        style: TextStyle(
+                          fontFamily: l.fontFamily,
+                          fontSize: 17,
+                          fontVariations: [ui.FontVariation('wght', l.fontWeight.toDouble())],
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Enter ${l.name}...',
+                          border: const OutlineInputBorder(),
+                          filled: true,
+                          fillColor: const Color(0xFF111317),
+                        ),
+                        onChanged: (val) {
+                          setState(() {
+                            l.text = val;
+                            if (_selectedLayerId == l.id) _textController.text = val;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            final filterTags = <String>[
+              if (l.filters.blackAndWhite || l.filters.grayscale >= 0.99) 'B&W',
+              if (l.filters.removeWhite > 0) 'White BG Removed (${l.filters.removeWhite.round()}%)',
+              if ((l.filters.brightness - 1.0).abs() > 0.02) 'Bright ${l.filters.brightness.toStringAsFixed(1)}',
+              if ((l.filters.contrast - 1.0).abs() > 0.02) 'Contrast ${l.filters.contrast.toStringAsFixed(1)}',
+            ];
+            Widget? thumb;
+            if (l.processedWhiteRemovedBytes != null) {
+              thumb = Image.memory(l.processedWhiteRemovedBytes!, fit: BoxFit.contain);
+            } else if (l.localImagePath != null && File(l.localImagePath!).existsSync()) {
+              thumb = Image.file(File(l.localImagePath!), fit: BoxFit.contain);
+            }
+
+            return Card(
+              color: const Color(0xFF191C22),
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.image_outlined, size: 16, color: Color(0xFFF59E0B)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            l.isCanvasBackground ? '${l.name} (Canvas BG)' : l.name,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                        ),
+                        Text('${l.width.round()}x${l.height.round()}', style: const TextStyle(fontSize: 11, color: Colors.white54)),
+                        IconButton(
+                          tooltip: 'Rename Field',
+                          icon: const Icon(Icons.edit_outlined, size: 16),
+                          onPressed: () => _renameLayerDialog(l),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF111317),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: thumb == null
+                              ? const Icon(Icons.image_outlined, color: Colors.white38)
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(9),
+                                  child: ColorFiltered(
+                                    colorFilter: buildLayerColorFilter(l.filters),
+                                    child: thumb,
+                                  ),
+                                ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                filterTags.isEmpty
+                                    ? 'Same position, size & original filter kept'
+                                    : 'Filters kept: ${filterTags.join(" · ")}',
+                                style: TextStyle(fontSize: 11, color: filterTags.isEmpty ? Colors.white60 : Colors.greenAccent),
+                              ),
+                              const SizedBox(height: 8),
+                              FilledButton.icon(
+                                style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black),
+                                onPressed: () => _replaceLayerImageKeepingConfig(l),
+                                icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                                label: const Text('Replace Image'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
   Widget _buildPagesView() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -1055,12 +1377,15 @@ class _StudioScreenState extends State<StudioScreen> {
             child: ListTile(
               title: Text(proj.name),
               subtitle: Text('${proj.pages.length} page(s) · Saved offline'),
-              onTap: () => setState(() {
-                _project = proj;
-                _pageIndex = 0;
-                _selectedLayerId = null;
-                _navIndex = 0;
-              }),
+              onTap: () async {
+                setState(() {
+                  _project = proj;
+                  _pageIndex = 0;
+                  _selectedLayerId = null;
+                  _navIndex = 0;
+                });
+                await _rehydrateProjectFilters(proj);
+              },
               trailing: _projects.length > 1
                   ? IconButton(
                       icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
