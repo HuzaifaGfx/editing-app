@@ -220,6 +220,29 @@ class _StudioScreenState extends State<StudioScreen> {
     }
   }
 
+  Future<void> _applyFontToAllTextLayers(
+    String fontFamily,
+    int fontWeight,
+    double lineHeight,
+  ) async {
+    int count = 0;
+    setState(() {
+      for (final l in _page.layers) {
+        if (l.type == LayerType.text) {
+          l.fontFamily = fontFamily;
+          l.fontWeight = fontWeight;
+          l.lineHeight = lineHeight;
+          count++;
+        }
+      }
+    });
+    await _saveCurrentProject(showToast: false);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Applied font "$fontFamily" to all $count text layer(s)')),
+    );
+  }
+
   Future<void> _replaceLayerImageKeepingConfig(DesignLayer layer) async {
     final picked = await _picker.pickImage(source: ImageSource.gallery);
     if (picked == null) return;
@@ -771,7 +794,9 @@ class _StudioScreenState extends State<StudioScreen> {
               );
             }).toList(),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
+          _buildExactSizeInputs(layer),
+          const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -1012,6 +1037,7 @@ class _StudioScreenState extends State<StudioScreen> {
     final fields = _page.layers
         .where((l) => l.type == LayerType.text || l.type == LayerType.image)
         .toList();
+    final textFields = _page.layers.where((l) => l.type == LayerType.text).toList();
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -1038,6 +1064,58 @@ class _StudioScreenState extends State<StudioScreen> {
             ),
           ],
         ),
+        if (textFields.length > 1) ...[
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFFF59E0B)),
+                foregroundColor: const Color(0xFFF59E0B),
+              ),
+              onPressed: () async {
+                final chosen = await showModalBottomSheet<(String, String, int, double)>(
+                  context: context,
+                  backgroundColor: const Color(0xFF191C22),
+                  builder: (ctx) {
+                    const presets = [
+                      ('NotoNastaliqUrdu', 'Urdu Nastaliq', 400, 2.3),
+                      ('Gulzar', 'Gulzar Urdu', 400, 2.1),
+                      ('NotoNaskhArabic', 'Naskh Urdu', 400, 1.9),
+                      ('IBMPlexSansArabicSemiBold', 'Halka Bold (Urdu+Eng)', 600, 1.8),
+                      ('PlusJakartaSans', 'Jakarta Sans', 400, 1.35),
+                      ('Montserrat', 'Montserrat', 400, 1.3),
+                      ('Poppins', 'Poppins', 400, 1.35),
+                      ('PlayfairDisplay', 'Playfair Serif', 400, 1.3),
+                      ('Lora', 'Lora Serif', 400, 1.4),
+                      ('Oswald', 'Oswald Bold', 400, 1.2),
+                      ('BebasNeue', 'Bebas Poster', 400, 1.1),
+                    ];
+                    return ListView(
+                      padding: const EdgeInsets.all(12),
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Text('Pick 1 Font for ALL Text Layers', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                        ),
+                        ...presets.map((f) => ListTile(
+                              title: Text(f.$2, style: TextStyle(fontFamily: f.$1)),
+                              trailing: const Icon(Icons.check_circle_outline, color: Color(0xFFF59E0B)),
+                              onTap: () => Navigator.pop(ctx, f),
+                            )),
+                      ],
+                    );
+                  },
+                );
+                if (chosen != null) {
+                  await _applyFontToAllTextLayers(chosen.$1, chosen.$3, chosen.$4);
+                }
+              },
+              icon: const Icon(Icons.font_download_outlined, size: 16),
+              label: Text('Same Font on All Text Layers (${textFields.length})'),
+            ),
+          ),
+        ],
         if (_project.pages.length > 1) ...[
           const SizedBox(height: 10),
           SingleChildScrollView(
@@ -1399,6 +1477,110 @@ class _StudioScreenState extends State<StudioScreen> {
           );
         }),
       ],
+    );
+  }
+}
+
+
+class _ExactNumberBox extends StatefulWidget {
+  final double value;
+  final double min;
+  final double max;
+  final String? labelText;
+  final TextAlign textAlign;
+  final EdgeInsetsGeometry? contentPadding;
+  final TextStyle? style;
+  final ValueChanged<double> onChanged;
+
+  const _ExactNumberBox({
+    super.key,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.onChanged,
+    this.labelText,
+    this.textAlign = TextAlign.start,
+    this.contentPadding,
+    this.style,
+  });
+
+  @override
+  State<_ExactNumberBox> createState() => _ExactNumberBoxState();
+}
+
+class _ExactNumberBoxState extends State<_ExactNumberBox> {
+  late final TextEditingController _ctrl;
+  late final FocusNode _focus;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.value.round().toString());
+    _focus = FocusNode()
+      ..addListener(() {
+        if (!_focus.hasFocus) {
+          final parsed = double.tryParse(_ctrl.text.trim());
+          if (parsed != null) {
+            final clamped = parsed.clamp(widget.min, widget.max).toDouble();
+            if ((clamped - widget.value).abs() > 0.01) {
+              widget.onChanged(clamped);
+            }
+            _ctrl.text = clamped.round().toString();
+          } else {
+            _ctrl.text = widget.value.round().toString();
+          }
+        }
+      });
+  }
+
+  @override
+  void didUpdateWidget(covariant _ExactNumberBox oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_focus.hasFocus && (widget.value - oldWidget.value).abs() > 0.49) {
+      _ctrl.text = widget.value.round().toString();
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _ctrl,
+      focusNode: _focus,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      textAlign: widget.textAlign,
+      style: widget.style,
+      decoration: InputDecoration(
+        labelText: widget.labelText,
+        isDense: true,
+        contentPadding: widget.contentPadding,
+        border: const OutlineInputBorder(),
+      ),
+      onChanged: (raw) {
+        final parsed = double.tryParse(raw.trim());
+        if (parsed == null) return;
+        if (parsed >= widget.min && parsed <= widget.max) {
+          widget.onChanged(parsed);
+        } else if (parsed > widget.max) {
+          widget.onChanged(widget.max);
+        }
+      },
+      onSubmitted: (raw) {
+        final parsed = double.tryParse(raw.trim());
+        if (parsed != null) {
+          final clamped = parsed.clamp(widget.min, widget.max).toDouble();
+          widget.onChanged(clamped);
+          _ctrl.text = clamped.round().toString();
+        } else {
+          _ctrl.text = widget.value.round().toString();
+        }
+      },
     );
   }
 }

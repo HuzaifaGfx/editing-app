@@ -45,20 +45,35 @@ List<String> _processImagesIsolate(BatchJobRequest req) {
 
     if (req.removeWhiteTolerance > 0) {
       final rgba = decoded.numChannels == 4 ? decoded.clone() : decoded.convert(numChannels: 4);
-      final cutoff = (req.removeWhiteTolerance.clamp(1.0, 100.0) / 100.0) * 195.0;
-      final featherStart = cutoff * 0.68;
-      final featherSpan = math.max(1.0, cutoff - featherStart);
+      final tolNorm = req.removeWhiteTolerance.clamp(1.0, 100.0) / 100.0;
+      final hardMinLum = 248.0 - tolNorm * 95.0;
+      final softRange = 28.0 + tolNorm * 34.0;
+      final maxChromaForWhite = 18.0 + tolNorm * 46.0;
       for (final pixel in rgba) {
         final a = pixel.a.toInt();
         if (a == 0) continue;
-        final dr = 255 - pixel.r.toInt();
-        final dg = 255 - pixel.g.toInt();
-        final db = 255 - pixel.b.toInt();
-        final dist = math.sqrt(dr * dr + dg * dg + db * db);
-        if (dist <= featherStart) {
+        final r = pixel.r.toInt();
+        final g = pixel.g.toInt();
+        final b = pixel.b.toInt();
+        final maxC = math.max(r, math.max(g, b));
+        final minC = math.min(r, math.min(g, b));
+        final chroma = maxC - minC;
+        final lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        final chromaPenalty = chroma > maxChromaForWhite ? (chroma - maxChromaForWhite) * 2.1 : 0.0;
+        final effectiveWhiteness = math.min(lum, minC + 14.0) - chromaPenalty;
+        if (effectiveWhiteness >= hardMinLum) {
           pixel.a = 0;
-        } else if (dist < cutoff) {
-          pixel.a = (a * ((dist - featherStart) / featherSpan)).round();
+        } else if (effectiveWhiteness > hardMinLum - softRange) {
+          final t = ((hardMinLum - effectiveWhiteness) / softRange).clamp(0.0, 1.0);
+          final smooth = t * t * (3.0 - 2.0 * t);
+          final nextAlpha = (a * smooth).round();
+          pixel.a = nextAlpha;
+          if (nextAlpha > 8 && nextAlpha < 248) {
+            final af = nextAlpha / 255.0;
+            pixel.r = ((r - 255.0 * (1.0 - af)) / af).clamp(0.0, 255.0).round();
+            pixel.g = ((g - 255.0 * (1.0 - af)) / af).clamp(0.0, 255.0).round();
+            pixel.b = ((b - 255.0 * (1.0 - af)) / af).clamp(0.0, 255.0).round();
+          }
         }
       }
       decoded = rgba;
