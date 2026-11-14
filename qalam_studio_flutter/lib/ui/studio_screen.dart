@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
@@ -151,7 +153,27 @@ class _StudioScreenState extends State<StudioScreen> {
     }
   }
 
-  Future<void> _exportPngAndShare() async {
+  static const MethodChannel _mediaChannel = MethodChannel('com.qalam.studio/media');
+
+  Future<String> _saveBytesToDeviceGallery(Uint8List bytes, String fileName) async {
+    if (Platform.isAndroid) {
+      try {
+        final saved = await _mediaChannel.invokeMethod<String>('saveImageToGallery', {
+          'bytes': bytes,
+          'name': fileName,
+        });
+        if (saved != null && saved.isNotEmpty) return saved;
+      } catch (_) {}
+    }
+    final extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+    final outDir = Directory(p.join(extDir.path, 'QalamStudio'));
+    if (!outDir.existsSync()) outDir.createSync(recursive: true);
+    final outPath = p.join(outDir.path, fileName);
+    await File(outPath).writeAsBytes(bytes);
+    return outPath;
+  }
+
+  Future<void> _exportPngToGallery() async {
     try {
       setState(() => _selectedLayerId = null);
       await Future.delayed(const Duration(milliseconds: 60));
@@ -161,10 +183,24 @@ class _StudioScreenState extends State<StudioScreen> {
       final image = await boundary.toImage(pixelRatio: 2.0);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) return;
-      final dir = await getTemporaryDirectory();
-      final outPath = p.join(dir.path, 'qalam_export_${DateTime.now().millisecondsSinceEpoch}.png');
-      await File(outPath).writeAsBytes(byteData.buffer.asUint8List());
-      await Share.shareXFiles([XFile(outPath)], text: _project.name);
+      final pngBytes = byteData.buffer.asUint8List();
+      final fileName = 'qalam_export_${DateTime.now().millisecondsSinceEpoch}.png';
+      final savedLocation = await _saveBytesToDeviceGallery(pngBytes, fileName);
+      final tmpDir = await getTemporaryDirectory();
+      final tmpPath = p.join(tmpDir.path, fileName);
+      await File(tmpPath).writeAsBytes(pngBytes);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Saved to Gallery: $savedLocation'),
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Share',
+            textColor: const Color(0xFFF59E0B),
+            onPressed: () => Share.shareXFiles([XFile(tmpPath)], text: _project.name),
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export error: $e')));
@@ -331,7 +367,7 @@ class _StudioScreenState extends State<StudioScreen> {
           IconButton(
             tooltip: 'Export PNG',
             icon: const Icon(Icons.download_rounded, color: Color(0xFFF59E0B)),
-            onPressed: _exportPngAndShare,
+            onPressed: _exportPngToGallery,
           ),
         ],
       ),
@@ -692,7 +728,12 @@ class _StudioScreenState extends State<StudioScreen> {
         ('NotoNaskhArabic', 'Naskh Urdu', true, 1.9),
         ('IBMPlexSansArabicSemiBold', 'Halka Bold (Urdu+Eng)', true, 1.8),
         ('PlusJakartaSans', 'Jakarta Sans', false, 1.35),
+        ('Montserrat', 'Montserrat', false, 1.3),
+        ('Poppins', 'Poppins', false, 1.35),
         ('PlayfairDisplay', 'Playfair Serif', false, 1.3),
+        ('Lora', 'Lora Serif', false, 1.4),
+        ('Oswald', 'Oswald Bold', false, 1.2),
+        ('BebasNeue', 'Bebas Poster', false, 1.1),
       ];
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -963,7 +1004,8 @@ class _StudioScreenState extends State<StudioScreen> {
                     _batchProcessing = false;
                   });
                   if (out.isNotEmpty) {
-                    await Share.shareXFiles(out.map((filePath) => XFile(filePath)).toList());
+                    for (final fp in out) { await _saveBytesToDeviceGallery(await File(fp).readAsBytes(), p.basename(fp)); }
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved ${out.length} batch images to Gallery')));
                   }
                 },
           child: Text(_batchProcessing ? 'Processing...' : 'Process & Export Batch'),
