@@ -777,6 +777,8 @@ class _StudioScreenState extends State<StudioScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildExactSizeInputs(layer),
+          const SizedBox(height: 8),
           _sliderRow('Opacity', layer.opacity, 0.0, 1.0, (v) => setState(() => layer.opacity = v)),
           _sliderRow('Rotation', layer.rotation, -180.0, 180.0, (v) => setState(() => layer.rotation = v)),
           const SizedBox(height: 6),
@@ -1015,10 +1017,66 @@ class _StudioScreenState extends State<StudioScreen> {
         (v) => setState(() => layer.borderRadius = v));
   }
 
-  Widget _sliderRow(String label, double val, double min, double max, ValueChanged<double> onChanged) {
+  Widget _buildExactSizeInputs(DesignLayer layer) {
     return Row(
       children: [
-        SizedBox(width: 96, child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.white70))),
+        Expanded(
+          child: _ExactNumberBox(
+            key: ValueKey('w_${layer.id}'),
+            value: layer.width,
+            min: 1.0,
+            max: 20000.0,
+            labelText: 'Width (px)',
+            onChanged: (nextW) {
+              setState(() {
+                if (layer.type == LayerType.image && layer.aspectLocked && layer.width > 0 && layer.height > 0) {
+                  final ratio = layer.width / layer.height;
+                  layer.height = (nextW / ratio).clamp(1.0, 20000.0);
+                }
+                layer.width = nextW;
+              });
+            },
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _ExactNumberBox(
+            key: ValueKey('h_${layer.id}'),
+            value: layer.height,
+            min: 1.0,
+            max: 20000.0,
+            labelText: 'Height (px)',
+            onChanged: (nextH) {
+              setState(() {
+                if (layer.type == LayerType.image && layer.aspectLocked && layer.width > 0 && layer.height > 0) {
+                  final ratio = layer.width / layer.height;
+                  layer.width = (nextH * ratio).clamp(1.0, 20000.0);
+                }
+                layer.height = nextH;
+              });
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _sliderRow(
+    String label,
+    double val,
+    double min,
+    double max,
+    ValueChanged<double> onChanged, {
+    ValueChanged<double>? onChangeEnd,
+    bool allowCustomInput = false,
+    double? inputMin,
+    double? inputMax,
+  }) {
+    final iMin = inputMin ?? min;
+    final iMax = inputMax ?? max;
+    return Row(
+      children: [
+        SizedBox(width: 90, child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.white70))),
         Expanded(
           child: Slider(
             value: val.clamp(min, max),
@@ -1026,9 +1084,25 @@ class _StudioScreenState extends State<StudioScreen> {
             max: max,
             activeColor: const Color(0xFFF59E0B),
             onChanged: onChanged,
+            onChangeEnd: onChangeEnd,
           ),
         ),
-        SizedBox(width: 38, child: Text(val.toStringAsFixed(val > 5 ? 0 : 2), style: const TextStyle(fontSize: 11))),
+        if (allowCustomInput)
+          SizedBox(
+            width: 58,
+            child: _ExactNumberBox(
+              key: ValueKey('num_${label}_${_selectedLayerId ?? "page"}'),
+              value: val,
+              min: iMin,
+              max: iMax,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              onChanged: onChanged,
+            ),
+          )
+        else
+          SizedBox(width: 40, child: Text(val.toStringAsFixed(val > 5 ? 0 : 2), style: const TextStyle(fontSize: 11))),
       ],
     );
   }
