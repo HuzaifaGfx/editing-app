@@ -730,24 +730,13 @@ class _StudioScreenState extends State<StudioScreen> {
         actions: [
           IconButton(
             tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-            icon: Icon(
-              isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-              color: const Color(0xFFF59E0B),
-            ),
+            icon: Icon(isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined, color: const Color(0xFFF59E0B)),
             onPressed: () {
               appThemeMode.value = isDark ? ThemeMode.light : ThemeMode.dark;
             },
           ),
-          IconButton(
-            tooltip: 'Save Offline',
-            icon: const Icon(Icons.save_outlined),
-            onPressed: _saveCurrentProject,
-          ),
-          IconButton(
-            tooltip: 'Export Options',
-            icon: const Icon(Icons.download_rounded, color: Color(0xFFF59E0B)),
-            onPressed: _showExportOptionsSheet,
-          ),
+          IconButton(tooltip: 'Save Offline', icon: const Icon(Icons.save_outlined), onPressed: _saveCurrentProject),
+          IconButton(tooltip: 'Export Options', icon: const Icon(Icons.download_rounded, color: Color(0xFFF59E0B)), onPressed: _showExportOptionsSheet),
         ],
       ),
       body: IndexedStack(
@@ -854,12 +843,13 @@ class _StudioScreenState extends State<StudioScreen> {
   }
 
   Widget _quickBtn(IconData icon, String label, VoidCallback onTap, {bool highlight = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
       child: FilledButton.icon(
         style: FilledButton.styleFrom(
-          backgroundColor: highlight ? const Color(0xFFF59E0B) : Colors.white10,
-          foregroundColor: highlight ? Colors.black : Colors.white,
+          backgroundColor: highlight ? const Color(0xFFF59E0B) : (isDark ? Colors.white10 : Colors.black.withOpacity(0.06)),
+          foregroundColor: highlight ? Colors.black : (isDark ? Colors.white : Colors.black87),
           padding: const EdgeInsets.symmetric(horizontal: 12),
         ),
         onPressed: onTap,
@@ -870,14 +860,15 @@ class _StudioScreenState extends State<StudioScreen> {
   }
 
   Widget _tabChip(int idx, String label) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final active = _inspectorTab == idx;
     return Padding(
       padding: const EdgeInsets.only(left: 6),
       child: ChoiceChip(
-        label: Text(label, style: TextStyle(fontSize: 11, color: active ? Colors.black : Colors.white70)),
+        label: Text(label, style: TextStyle(fontSize: 11, color: active ? Colors.black : (isDark ? Colors.white70 : Colors.black87))),
         selected: active,
         selectedColor: const Color(0xFFF59E0B),
-        backgroundColor: Colors.white10,
+        backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.06),
         onSelected: (_) => setState(() {
           _inspectorTab = idx;
           _sheetExpanded = true;
@@ -1377,9 +1368,12 @@ class _StudioScreenState extends State<StudioScreen> {
   }
 
   Widget _buildQuickFillView() {
-    final fields = _page.layers
-        .where((l) => l.type == LayerType.text || l.type == LayerType.image)
-        .toList();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg = isDark ? const Color(0xFF191C22) : Colors.white;
+    final boxBg = isDark ? const Color(0xFF111317) : const Color(0xFFF1F5F9);
+    final subColor = isDark ? Colors.white60 : Colors.black54;
+    final mutedColor = isDark ? Colors.white54 : Colors.black45;
+    final fields = _page.layers.where((l) => l.type == LayerType.text || l.type == LayerType.image).toList();
     final textFields = _page.layers.where((l) => l.type == LayerType.text).toList();
 
     return ListView(
@@ -1387,15 +1381,12 @@ class _StudioScreenState extends State<StudioScreen> {
       children: [
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Quick Fill Form', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  Text(
-                    'Edit text & replace images by Layer Name — same coordinates & filters kept!',
-                    style: TextStyle(fontSize: 12, color: Colors.white60),
-                  ),
+                  const Text('Quick Fill Form', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text('Edit text & replace images by Layer Name — same coordinates & filters kept!', style: TextStyle(fontSize: 12, color: subColor)),
                 ],
               ),
             ),
@@ -1407,112 +1398,16 @@ class _StudioScreenState extends State<StudioScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 12),
-        Card(
-          color: const Color(0xFF191C22),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: Color(0x4DF59E0B)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.auto_awesome, size: 18, color: Color(0xFFF59E0B)),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Gemini Smart Auto-Fill',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                      ),
-                    ),
-                    Text('Gemini AI', style: TextStyle(fontSize: 11, color: Colors.white54)),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Paste Urdu/English details or attach a card/ID photo to auto-fill matching layers.',
-                  style: TextStyle(fontSize: 11, color: Colors.white60),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _aiPromptController,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    hintText: 'e.g. Name Ali Raza, Father Ahmed Khan, Date 14 Aug 2026...',
-                    border: OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Color(0xFF111317),
-                    isDense: true,
-                  ),
-                ),
-                if (_aiImagePath != null) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF111317),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.image, size: 16, color: Color(0xFFF59E0B)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(p.basename(_aiImagePath!), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
-                        ),
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.close, size: 16),
-                          onPressed: () => setState(() => _aiImagePath = null),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _aiLoading ? null : _pickAiCardImage,
-                      icon: const Icon(Icons.photo_camera_outlined, size: 16),
-                      label: Text(_aiImagePath == null ? 'Attach Card / Photo' : 'Change Photo'),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black),
-                        onPressed: _aiLoading ? null : _runGeminiAutoFill,
-                        icon: _aiLoading
-                            ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                            : const Icon(Icons.auto_fix_high, size: 16),
-                        label: Text(_aiLoading ? 'Filling...' : 'Auto-Fill All Fields'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
         if (textFields.length > 1) ...[
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFFF59E0B)),
-                foregroundColor: const Color(0xFFF59E0B),
-              ),
+              style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFF59E0B)), foregroundColor: const Color(0xFFF59E0B)),
               onPressed: () async {
                 final chosen = await showModalBottomSheet<(String, String, int, double)>(
                   context: context,
-                  backgroundColor: const Color(0xFF191C22),
+                  backgroundColor: cardBg,
                   builder: (ctx) {
                     const presets = [
                       ('NotoNastaliqUrdu', 'Urdu Nastaliq', 400, 2.3),
@@ -1530,10 +1425,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     return ListView(
                       padding: const EdgeInsets.all(12),
                       children: [
-                        const Padding(
-                          padding: EdgeInsets.all(8),
-                          child: Text('Pick 1 Font for ALL Text Layers', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-                        ),
+                        const Padding(padding: EdgeInsets.all(8), child: Text('Pick 1 Font for ALL Text Layers', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
                         ...presets.map((f) => ListTile(
                               title: Text(f.$2, style: TextStyle(fontFamily: f.$1)),
                               trailing: const Icon(Icons.check_circle_outline, color: Color(0xFFF59E0B)),
@@ -1543,9 +1435,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     );
                   },
                 );
-                if (chosen != null) {
-                  await _applyFontToAllTextLayers(chosen.$1, chosen.$3, chosen.$4);
-                }
+                if (chosen != null) await _applyFontToAllTextLayers(chosen.$1, chosen.$3, chosen.$4);
               },
               icon: const Icon(Icons.font_download_outlined, size: 16),
               label: Text('Same Font on All Text Layers (${textFields.length})'),
@@ -1557,92 +1447,54 @@ class _StudioScreenState extends State<StudioScreen> {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
-              children: List.generate(_project.pages.length, (i) {
-                final sel = i == _pageIndex;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(_project.pages[i].title),
-                    selected: sel,
-                    selectedColor: const Color(0xFFF59E0B),
-                    onSelected: (_) => setState(() {
-                      _pageIndex = i;
-                      _selectedLayerId = null;
-                    }),
-                  ),
-                );
-              }),
+              children: List.generate(_project.pages.length, (i) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: Text(_project.pages[i].title),
+                  selected: i == _pageIndex,
+                  selectedColor: const Color(0xFFF59E0B),
+                  onSelected: (_) => setState(() { _pageIndex = i; _selectedLayerId = null; }),
+                ),
+              )),
             ),
           ),
         ],
         const SizedBox(height: 14),
         if (fields.isEmpty)
-          const Card(
-            color: Color(0xFF191C22),
-            child: Padding(
-              padding: EdgeInsets.all(20),
-              child: Text(
-                'No text or image layers on this page yet. Add layers in Studio and name them (e.g. Name, Father Name, Photo).',
-                style: TextStyle(color: Colors.white70),
-              ),
-            ),
-          )
+          Card(color: cardBg, child: Padding(padding: const EdgeInsets.all(20), child: Text('No text or image layers on this page yet. Add layers in Studio and name them (e.g. Name, Father Name, Photo).', style: TextStyle(color: subColor))))
         else
           ...fields.map((l) {
             if (l.type == LayerType.text) {
               return Card(
-                color: const Color(0xFF191C22),
+                color: cardBg,
                 margin: const EdgeInsets.only(bottom: 12),
                 child: Padding(
                   padding: const EdgeInsets.all(14),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.title, size: 16, color: Color(0xFFF59E0B)),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          ),
-                          Text('X:${l.x.round()} Y:${l.y.round()}', style: const TextStyle(fontSize: 11, color: Colors.white54)),
-                          IconButton(
-                            tooltip: 'Rename Field',
-                            icon: const Icon(Icons.edit_outlined, size: 16),
-                            onPressed: () => _renameLayerDialog(l),
-                          ),
-                        ],
-                      ),
+                      Row(children: [
+                        const Icon(Icons.title, size: 16, color: Color(0xFFF59E0B)),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
+                        Text('X:${l.x.round()} Y:${l.y.round()}', style: TextStyle(fontSize: 11, color: mutedColor)),
+                        IconButton(tooltip: 'Rename Field', icon: const Icon(Icons.edit_outlined, size: 16), onPressed: () => _renameLayerDialog(l)),
+                      ]),
                       const SizedBox(height: 6),
                       TextFormField(
-                        key: ValueKey('${_project.id}_${_page.id}_${l.id}_${l.name}_$_aiFillRevision'),
+                        key: ValueKey('${_project.id}_${_page.id}_${l.id}_${l.name}'),
                         initialValue: l.text,
                         textDirection: l.isRtl ? TextDirection.rtl : TextDirection.ltr,
                         maxLines: null,
-                        style: TextStyle(
-                          fontFamily: l.fontFamily,
-                          fontSize: 17,
-                          fontVariations: [ui.FontVariation('wght', l.fontWeight.toDouble())],
-                        ),
-                        decoration: InputDecoration(
-                          hintText: 'Enter ${l.name}...',
-                          border: const OutlineInputBorder(),
-                          filled: true,
-                          fillColor: const Color(0xFF111317),
-                        ),
-                        onChanged: (val) {
-                          setState(() {
-                            l.text = val;
-                            if (_selectedLayerId == l.id) _textController.text = val;
-                          });
-                        },
+                        style: TextStyle(fontFamily: l.fontFamily, fontSize: 17, fontVariations: [ui.FontVariation('wght', l.fontWeight.toDouble())]),
+                        decoration: InputDecoration(hintText: 'Enter ${l.name}...', border: const OutlineInputBorder(), filled: true, fillColor: boxBg),
+                        onChanged: (val) => setState(() { l.text = val; if (_selectedLayerId == l.id) _textController.text = val; }),
                       ),
                     ],
                   ),
                 ),
               );
             }
-
             final filterTags = <String>[
               if (l.filters.blackAndWhite || l.filters.grayscale >= 0.99) 'B&W',
               if (l.filters.removeWhite > 0) 'White BG Removed (${l.filters.removeWhite.round()}%)',
@@ -1655,77 +1507,35 @@ class _StudioScreenState extends State<StudioScreen> {
             } else if (l.localImagePath != null && File(l.localImagePath!).existsSync()) {
               thumb = Image.file(File(l.localImagePath!), fit: BoxFit.contain);
             }
-
             return Card(
-              color: const Color(0xFF191C22),
+              color: cardBg,
               margin: const EdgeInsets.only(bottom: 12),
               child: Padding(
                 padding: const EdgeInsets.all(14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.image_outlined, size: 16, color: Color(0xFFF59E0B)),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            l.isCanvasBackground ? '${l.name} (Canvas BG)' : l.name,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                          ),
-                        ),
-                        Text('${l.width.round()}x${l.height.round()}', style: const TextStyle(fontSize: 11, color: Colors.white54)),
-                        IconButton(
-                          tooltip: 'Rename Field',
-                          icon: const Icon(Icons.edit_outlined, size: 16),
-                          onPressed: () => _renameLayerDialog(l),
-                        ),
-                      ],
-                    ),
+                    Row(children: [
+                      const Icon(Icons.image_outlined, size: 16, color: Color(0xFFF59E0B)),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(l.isCanvasBackground ? '${l.name} (Canvas BG)' : l.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
+                      Text('${l.width.round()}x${l.height.round()}', style: TextStyle(fontSize: 11, color: mutedColor)),
+                      IconButton(tooltip: 'Rename Field', icon: const Icon(Icons.edit_outlined, size: 16), onPressed: () => _renameLayerDialog(l)),
+                    ]),
                     const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Container(
-                          width: 72,
-                          height: 72,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF111317),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.white12),
-                          ),
-                          child: thumb == null
-                              ? const Icon(Icons.image_outlined, color: Colors.white38)
-                              : ClipRRect(
-                                  borderRadius: BorderRadius.circular(9),
-                                  child: ColorFiltered(
-                                    colorFilter: buildLayerColorFilter(l.filters),
-                                    child: thumb,
-                                  ),
-                                ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                filterTags.isEmpty
-                                    ? 'Same position, size & original filter kept'
-                                    : 'Filters kept: ${filterTags.join(" · ")}',
-                                style: TextStyle(fontSize: 11, color: filterTags.isEmpty ? Colors.white60 : Colors.greenAccent),
-                              ),
-                              const SizedBox(height: 8),
-                              FilledButton.icon(
-                                style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black),
-                                onPressed: () => _replaceLayerImageKeepingConfig(l),
-                                icon: const Icon(Icons.swap_horiz_rounded, size: 16),
-                                label: const Text('Replace Image'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                    Row(children: [
+                      Container(
+                        width: 72, height: 72,
+                        decoration: BoxDecoration(color: boxBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: isDark ? Colors.white12 : Colors.black12)),
+                        child: thumb == null ? Icon(Icons.image_outlined, color: mutedColor) : ClipRRect(borderRadius: BorderRadius.circular(9), child: ColorFiltered(colorFilter: buildLayerColorFilter(l.filters), child: thumb)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(filterTags.isEmpty ? 'Same position, size & original filter kept' : 'Filters kept: ${filterTags.join(" · ")}', style: TextStyle(fontSize: 11, color: filterTags.isEmpty ? subColor : (isDark ? Colors.greenAccent : Colors.green.shade700))),
+                        const SizedBox(height: 8),
+                        FilledButton.icon(style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black), onPressed: () => _replaceLayerImageKeepingConfig(l), icon: const Icon(Icons.swap_horiz_rounded, size: 16), label: const Text('Replace Image')),
+                      ])),
+                    ]),
                   ],
                 ),
               ),
