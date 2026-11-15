@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:ui' show FontVariation;
 import 'package:flutter/material.dart';
 import '../models/design_project.dart';
 import 'filter_matrix.dart';
@@ -237,6 +236,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
           ),
         ),
       ),
+            ),
             Positioned(
               right: 10,
               bottom: 10,

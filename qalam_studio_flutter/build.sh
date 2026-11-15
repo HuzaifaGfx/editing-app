@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 1. Pick a working Flutter binary (supports macOS 11 Big Sur via Flutter 3.22.3)
 FLUTTER_BIN=""
 if command -v flutter >/dev/null 2>&1 && flutter --version >/dev/null 2>&1; then
   FLUTTER_BIN="$(command -v flutter)"
 elif [ -x "$HOME/flutter_322/bin/flutter" ] && "$HOME/flutter_322/bin/flutter" --version >/dev/null 2>&1; then
   FLUTTER_BIN="$HOME/flutter_322/bin/flutter"
 else
-  echo "==> System Flutter unavailable or macOS < 14 detected."
-  echo "==> Installing macOS 11-compatible Flutter 3.22.3 into ~/flutter_322..."
   git clone --depth 1 --branch 3.22.3 https://github.com/flutter/flutter.git "$HOME/flutter_322"
   FLUTTER_BIN="$HOME/flutter_322/bin/flutter"
 fi
@@ -17,7 +14,6 @@ fi
 export PATH="$(dirname "$FLUTTER_BIN"):$PATH"
 echo "==> Using Flutter: $FLUTTER_BIN"
 
-# Auto-detect Android SDK & Java 17 (Codespaces Linux or macOS)
 if [ -z "${ANDROID_HOME:-}" ]; then
   if [ -d "$HOME/android-sdk" ]; then
     export ANDROID_HOME="$HOME/android-sdk"
@@ -34,40 +30,38 @@ if ls /usr/lib/jvm/java-17-openjdk-*/bin/java >/dev/null 2>&1; then
   "$FLUTTER_BIN" config --jdk-dir "$JDK17_DIR" >/dev/null 2>&1 || true
 fi
 
-# 2. Download real Urdu & English .ttf fonts automatically if assets/fonts/ is empty (NEVER strip fonts!)
 mkdir -p assets/templates assets/fonts
-download_gfont() {
+download_full_ttf() {
   local fname="$1"
-  local family="$2"
+  local url="$2"
   local target="assets/fonts/$fname"
-  if [ -s "$target" ] && [ "$(wc -c < "$target")" -gt 5000 ]; then
+  if [ -s "$target" ] && [ "$(wc -c < "$target")" -gt 20000 ]; then
     return 0
   fi
-  local ttf_url
-  ttf_url="$(curl -fsSL -A "Wget/1.18" "https://fonts.googleapis.com/css?family=$family" | grep -oE 'https://fonts\.gstatic\.com[^)]*\.ttf' | head -n 1 || true)"
-  if [ -n "$ttf_url" ]; then
-    curl -fsSL "$ttf_url" -o "$target" || true
-  fi
+  rm -f "$target"
+  curl -fsSL "$url" -o "$target"
 }
 
-echo "==> Checking & downloading Urdu + English offline .ttf fonts..."
-download_gfont "NotoNastaliqUrdu-Regular.ttf" "Noto+Nastaliq+Urdu:400"
-download_gfont "NotoNastaliqUrdu-Bold.ttf" "Noto+Nastaliq+Urdu:700"
-download_gfont "Gulzar-Regular.ttf" "Gulzar:400"
-download_gfont "NotoNaskhArabic-Regular.ttf" "Noto+Naskh+Arabic:400"
-download_gfont "NotoNaskhArabic-Bold.ttf" "Noto+Naskh+Arabic:700"
-download_gfont "PlusJakartaSans-Regular.ttf" "Plus+Jakarta+Sans:400"
-download_gfont "PlusJakartaSans-SemiBold.ttf" "Plus+Jakarta+Sans:600"
-download_gfont "PlusJakartaSans-Bold.ttf" "Plus+Jakarta+Sans:700"
-download_gfont "PlayfairDisplay-Regular.ttf" "Playfair+Display:400"
-download_gfont "PlayfairDisplay-Bold.ttf" "Playfair+Display:700"
+echo "==> Checking & downloading Urdu, English & 16 Signature .ttf fonts..."
+download_full_ttf "NotoNastaliqUrdu-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/notonastaliqurdu/NotoNastaliqUrdu%5Bwght%5D.ttf"
+cp -f assets/fonts/NotoNastaliqUrdu-Regular.ttf assets/fonts/NotoNastaliqUrdu-Bold.ttf
+download_full_ttf "Gulzar-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/gulzar/Gulzar-Regular.ttf"
+download_full_ttf "NotoNaskhArabic-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf"
+cp -f assets/fonts/NotoNaskhArabic-Regular.ttf assets/fonts/NotoNaskhArabic-Bold.ttf
+download_full_ttf "PlusJakartaSans-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/plusjakartasans/PlusJakartaSans%5Bwght%5D.ttf"
+cp -f assets/fonts/PlusJakartaSans-Regular.ttf assets/fonts/PlusJakartaSans-SemiBold.ttf
+cp -f assets/fonts/PlusJakartaSans-Regular.ttf assets/fonts/PlusJakartaSans-Bold.ttf
+download_full_ttf "PlayfairDisplay-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf"
+cp -f assets/fonts/PlayfairDisplay-Regular.ttf assets/fonts/PlayfairDisplay-Bold.ttf
+download_full_ttf "IBMPlexSansArabic-SemiBold.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf"
+download_full_ttf "Montserrat-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf"
+download_full_ttf "Poppins-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Regular.ttf"
+download_full_ttf "Poppins-SemiBold.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf"
+download_full_ttf "Poppins-Bold.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Bold.ttf"
+download_full_ttf "BebasNeue-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/bebasneue/BebasNeue-Regular.ttf"
+download_full_ttf "Lora-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/lora/Lora%5Bwght%5D.ttf"
+download_full_ttf "Oswald-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/oswald/Oswald%5Bwght%5D.ttf"
 
-if [ -z "$(ls -A assets/fonts 2>/dev/null || true)" ]; then
-  echo "==> Warning: No fonts downloaded (offline environment)."
-fi
-
-
-# 16 Signature Script & Calligraphy Fonts
 download_full_ttf "GreatVibes-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/greatvibes/GreatVibes-Regular.ttf"
 download_full_ttf "AlexBrush-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/alexbrush/AlexBrush-Regular.ttf"
 download_full_ttf "Allura-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/allura/Allura-Regular.ttf"
@@ -85,38 +79,8 @@ download_full_ttf "Yesteryear-Regular.ttf" "https://raw.githubusercontent.com/go
 download_full_ttf "MarckScript-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/marckscript/MarckScript-Regular.ttf"
 download_full_ttf "ReenieBeanie.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/reeniebeanie/ReenieBeanie.ttf"
 
-# 3. Generate clean official Android v2 Gradle files (android/gradlew, build.gradle, settings.gradle) if missing or missing v2 embedding
-if [ ! -f "android/gradlew" ] || ! grep -q 'flutterEmbedding' android/app/src/main/AndroidManifest.xml 2>/dev/null; then
-  echo "==> Generating clean Android v2 Gradle project..."
-  TMP_DIR="/tmp/qalam_studio_bootstrap_$$"
-  rm -rf "$TMP_DIR" android
-  "$FLUTTER_BIN" create "$TMP_DIR" --platforms=android --org com.qalam --project-name qalam_studio
-  mkdir -p android
-  cp -R "$TMP_DIR/android/"* android/
-  rm -rf "$TMP_DIR"
-
-  # Add offline storage permissions cleanly to the generated v2 AndroidManifest.xml
-  MANIFEST="android/app/src/main/AndroidManifest.xml"
-  if [ -f "$MANIFEST" ] && ! grep -q 'READ_MEDIA_IMAGES' "$MANIFEST"; then
-    awk '
-      /<application/ && !done {
-        print "    <uses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\" />"
-        print "    <uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" android:maxSdkVersion=\"32\" />"
-        print "    <uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\" android:maxSdkVersion=\"29\" />"
-        done=1
-      }
-      { print }
-    ' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
-  fi
-fi
-
 echo "==> Running flutter clean, pub get & building Release APK..."
 "$FLUTTER_BIN" clean
 "$FLUTTER_BIN" pub get
 "$FLUTTER_BIN" build apk --release
-
-echo "==> Running Gradle assembleRelease..."
-cd android
-chmod +x ./gradlew
-./gradlew assembleRelease
 echo "==> Done! APK generated at build/app/outputs/flutter-apk/app-release.apk"

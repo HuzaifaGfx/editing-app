@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -27,10 +26,6 @@ class StudioScreen extends StatefulWidget {
 }
 
 class _StudioScreenState extends State<StudioScreen> {
-  static const String _geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
-  String? _aiImagePath;
-  bool _aiLoading = false;
-  int _aiFillRevision = 0;
   final ImagePicker _picker = ImagePicker();
   final GlobalKey _canvasExportKey = GlobalKey();
   final TextEditingController _textController = TextEditingController();
@@ -1725,6 +1720,252 @@ class _StudioScreenState extends State<StudioScreen> {
       ],
     );
   }
+
+
+  static const List<(String, String, String, bool)> _signatureFonts = [
+    ('GreatVibes', 'Great Vibes', 'Royal Calligraphy', false),
+    ('AlexBrush', 'Alex Brush', 'Clean Executive', false),
+    ('Allura', 'Allura', 'Formal Flow', false),
+    ('Sacramento', 'Sacramento', 'Fine Pen', false),
+    ('Parisienne', 'Parisienne', 'Graceful Cursive', false),
+    ('PinyonScript', 'Pinyon Script', 'Aristocrat', false),
+    ('HerrVonMuellerhoff', 'Muellerhoff', 'Vintage Nib', false),
+    ('MrDafoe', 'Mr Dafoe', 'Bold Marker', false),
+    ('Satisfy', 'Satisfy', 'Classic Sign', false),
+    ('DancingScript', 'Dancing Script', 'Modern Ink', false),
+    ('Pacifico', 'Pacifico', 'Brush Sign', false),
+    ('HomemadeApple', 'Homemade Apple', 'Handwritten', false),
+    ('Caveat', 'Caveat', 'Natural Pen', false),
+    ('MarckScript', 'Marck Script', 'Slanted Ink', false),
+    ('Yesteryear', 'Yesteryear', 'Retro Script', false),
+    ('ReenieBeanie', 'Reenie Beanie', 'Quick Ballpoint', false),
+    ('NotoNastaliqUrdu', 'Urdu Nastaliq', 'Urdu Signature', true),
+    ('Gulzar', 'Gulzar Urdu', 'Urdu Calligraphy', true),
+  ];
+
+  Future<Uint8List?> _renderSignaturePngBytes({bool? forceTransparent}) async {
+    final useTransparent = forceTransparent ?? _sigTransparentBg;
+    const w = 1100.0;
+    const h = 420.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, w, h));
+    if (!useTransparent) {
+      canvas.drawRect(const Rect.fromLTWH(0, 0, w, h), Paint()..color = Colors.white);
+    }
+    if (_sigMode == 0) {
+      final raw = _sigTextController.text.trim();
+      final text = raw.isEmpty ? 'Signature' : raw;
+      final isRtl = RegExp(r'[\u0600-\u06FF]').hasMatch(text) ||
+          _sigFontFamily == 'NotoNastaliqUrdu' ||
+          _sigFontFamily == 'Gulzar';
+      final tp = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: TextStyle(
+            fontFamily: _sigFontFamily,
+            fontSize: _sigFontSize * 1.35,
+            fontWeight: _sigBold ? FontWeight.bold : FontWeight.normal,
+            fontStyle: (_sigSlanted && !isRtl) ? FontStyle.italic : FontStyle.normal,
+            color: _sigInkColor,
+            letterSpacing: _sigLetterSpacing,
+            height: isRtl ? 2.0 : 1.3,
+          ),
+        ),
+        textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+        textAlign: TextAlign.center,
+      )..layout(maxWidth: w - 80);
+      tp.paint(canvas, Offset((w - tp.width) / 2, (h - tp.height) / 2));
+    } else {
+      for (final stroke in _sigStrokes) {
+        final pts = stroke.$1;
+        if (pts.isEmpty) continue;
+        final paint = Paint()
+          ..color = stroke.$2
+          ..strokeWidth = stroke.$3 * 2.4
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..style = PaintingStyle.stroke;
+        if (pts.length == 1) {
+          canvas.drawCircle(Offset(pts[0].dx * (w / 340.0), pts[0].dy * (h / 180.0)), stroke.$3 * 1.2, Paint()..color = stroke.$2);
+          continue;
+        }
+        final path = Path()..moveTo(pts[0].dx * (w / 340.0), pts[0].dy * (h / 180.0));
+        for (int i = 1; i < pts.length; i++) {
+          path.lineTo(pts[i].dx * (w / 340.0), pts[i].dy * (h / 180.0));
+        }
+        canvas.drawPath(path, paint);
+      }
+    }
+    final uiImg = await recorder.endRecording().toImage(w.toInt(), h.toInt());
+    final byteData = await uiImg.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
+  Future<void> _addSignatureToProjectCanvas() async {
+    if (_sigMode == 1 && _sigStrokes.isEmpty) return;
+    final bytes = await _renderSignaturePngBytes(forceTransparent: true);
+    if (bytes == null) return;
+    final docsDir = await getApplicationDocumentsDirectory();
+    final assetsDir = Directory(p.join(docsDir.path, 'qalam_assets'));
+    if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
+    final filePath = p.join(assetsDir.path, 'sig_${DateTime.now().microsecondsSinceEpoch}.png');
+    await File(filePath).writeAsBytes(bytes);
+    final targetW = _page.width * 0.55;
+    final targetH = targetW * (420.0 / 1100.0);
+    final layer = DesignLayer(
+      id: 'sig_${DateTime.now().microsecondsSinceEpoch}',
+      name: _sigMode == 0 ? 'Sign: ${_sigTextController.text.trim()}' : 'Drawn Signature',
+      type: LayerType.image,
+      x: (_page.width - targetW) / 2,
+      y: _page.height * 0.65,
+      width: targetW,
+      height: targetH,
+      localImagePath: filePath,
+      aspectLocked: true,
+      objectFit: BoxFit.contain,
+    );
+    setState(() {
+      _page.layers.add(layer);
+      _selectedLayerId = layer.id;
+      _navIndex = 0;
+    });
+    await _saveCurrentProject(showToast: false);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Signature added to Studio Canvas!')));
+  }
+
+  Future<void> _exportSignaturePng({required bool shareOnly}) async {
+    if (_sigMode == 1 && _sigStrokes.isEmpty) return;
+    final bytes = await _renderSignaturePngBytes();
+    if (bytes == null) return;
+    final fileName = 'qalam_signature_${DateTime.now().millisecondsSinceEpoch}.png';
+    final tmpDir = await getTemporaryDirectory();
+    final tmpPath = p.join(tmpDir.path, fileName);
+    await File(tmpPath).writeAsBytes(bytes);
+    if (shareOnly) {
+      await Share.shareXFiles([XFile(tmpPath)], text: 'Digital Signature');
+      return;
+    }
+    final saved = await _saveBytesToDeviceGallery(bytes, fileName);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Signature saved: $saved')));
+  }
+
+  Widget _buildSignatureView() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg = isDark ? const Color(0xFF191C22) : Colors.white;
+    final boxBg = isDark ? const Color(0xFF111317) : const Color(0xFFF1F5F9);
+    final subColor = isDark ? Colors.white60 : Colors.black54;
+    final inkSwatches = const [Color(0xFF0F172A), Color(0xFF1D4ED8), Color(0xFF1E3A8A), Color(0xFF047857), Color(0xFFB91C1C)];
+    final raw = _sigTextController.text.trim();
+    final previewText = raw.isEmpty ? 'Signature' : raw;
+    final isRtl = RegExp(r'[\u0600-\u06FF]').hasMatch(previewText) || _sigFontFamily == 'NotoNastaliqUrdu' || _sigFontFamily == 'Gulzar';
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(children: [
+          const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Signature Studio', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text('18 calligraphy & script fonts + freehand drawing pad', style: TextStyle(fontSize: 12)),
+          ])),
+          SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 0, label: Text('Fonts'), icon: Icon(Icons.title, size: 15)),
+              ButtonSegment(value: 1, label: Text('Draw'), icon: Icon(Icons.draw, size: 15)),
+            ],
+            selected: {_sigMode},
+            onSelectionChanged: (s) => setState(() => _sigMode = s.first),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        if (_sigMode == 0)
+          Card(color: cardBg, child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            TextField(
+              controller: _sigTextController,
+              textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(labelText: 'Enter Signature Name (English / Urdu)', border: const OutlineInputBorder(), filled: true, fillColor: boxBg),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity, height: 145, padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: _sigTransparentBg ? boxBg : Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: isDark ? Colors.white12 : Colors.black12)),
+              alignment: Alignment.center,
+              child: FittedBox(fit: BoxFit.scaleDown, child: Text(previewText, textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr, style: TextStyle(fontFamily: _sigFontFamily, fontSize: _sigFontSize, fontWeight: _sigBold ? FontWeight.bold : FontWeight.normal, fontStyle: (_sigSlanted && !isRtl) ? FontStyle.italic : FontStyle.normal, letterSpacing: _sigLetterSpacing, height: isRtl ? 2.0 : 1.3, color: _sigInkColor))),
+            ),
+            const SizedBox(height: 10),
+            Row(children: [
+              Text('Ink:', style: TextStyle(fontSize: 12, color: subColor)), const SizedBox(width: 8),
+              ...inkSwatches.map((c) => Padding(padding: const EdgeInsets.only(right: 8), child: GestureDetector(onTap: () => setState(() => _sigInkColor = c), child: Container(width: 26, height: 26, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: _sigInkColor == c ? const Color(0xFFF59E0B) : Colors.grey, width: _sigInkColor == c ? 3 : 1)))))),
+            ]),
+            _sliderRow('Size', _sigFontSize, 42, 130, (v) => setState(() => _sigFontSize = v)),
+            _sliderRow('Spacing', _sigLetterSpacing, -4, 12, (v) => setState(() => _sigLetterSpacing = v)),
+            Wrap(spacing: 8, children: [
+              FilterChip(label: const Text('Slant'), selected: _sigSlanted, selectedColor: const Color(0xFFF59E0B), onSelected: (v) => setState(() => _sigSlanted = v)),
+              FilterChip(label: const Text('Bold Ink'), selected: _sigBold, selectedColor: const Color(0xFFF59E0B), onSelected: (v) => setState(() => _sigBold = v)),
+              FilterChip(label: Text(_sigTransparentBg ? 'BG: Transparent' : 'BG: White'), selected: _sigTransparentBg, selectedColor: const Color(0xFFF59E0B), onSelected: (v) => setState(() => _sigTransparentBg = v)),
+            ]),
+          ])))
+        else
+          Card(color: cardBg, child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              ...inkSwatches.map((c) => Padding(padding: const EdgeInsets.only(right: 8), child: GestureDetector(onTap: () => setState(() => _sigInkColor = c), child: Container(width: 26, height: 26, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: _sigInkColor == c ? const Color(0xFFF59E0B) : Colors.grey, width: _sigInkColor == c ? 3 : 1)))))),
+              const Spacer(),
+              IconButton(tooltip: 'Undo', onPressed: _sigStrokes.isEmpty ? null : () => setState(() => _sigStrokes.removeLast()), icon: const Icon(Icons.undo)),
+              IconButton(tooltip: 'Clear', onPressed: _sigStrokes.isEmpty ? null : () => setState(() => _sigStrokes.clear()), icon: const Icon(Icons.delete_outline, color: Colors.redAccent)),
+            ]),
+            _sliderRow('Pen Size', _sigPenWidth, 2, 12, (v) => setState(() => _sigPenWidth = v)),
+            Container(
+              width: 340, height: 180,
+              decoration: BoxDecoration(color: _sigTransparentBg ? boxBg : Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.5))),
+              child: GestureDetector(
+                onPanStart: (d) => setState(() { _sigCurrentStroke = [d.localPosition]; _sigStrokes.add((_sigCurrentStroke!, _sigInkColor, _sigPenWidth)); }),
+                onPanUpdate: (d) { if (_sigCurrentStroke == null) return; setState(() => _sigCurrentStroke!.add(d.localPosition)); },
+                onPanEnd: (_) => _sigCurrentStroke = null,
+                child: CustomPaint(painter: _SignaturePadPainter(_sigStrokes), size: const Size(340, 180)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            FilterChip(label: Text(_sigTransparentBg ? 'BG: Transparent PNG' : 'BG: White Paper'), selected: _sigTransparentBg, selectedColor: const Color(0xFFF59E0B), onSelected: (v) => setState(() => _sigTransparentBg = v)),
+          ]))),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: FilledButton.icon(style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 13)), onPressed: _addSignatureToProjectCanvas, icon: const Icon(Icons.add_to_photos_outlined, size: 18), label: const Text('Add to Studio'))),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14)), onPressed: () => _exportSignaturePng(shareOnly: false), icon: const Icon(Icons.save_alt_rounded, size: 18), label: const Text('Save PNG')),
+          const SizedBox(width: 8),
+          OutlinedButton(style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12)), onPressed: () => _exportSignaturePng(shareOnly: true), child: const Icon(Icons.share_outlined, size: 18)),
+        ]),
+        if (_sigMode == 0) ...[
+          const SizedBox(height: 14),
+          const Text('Signature Fonts (18 Styles)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          GridView.builder(
+            shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 8, crossAxisSpacing: 8, childAspectRatio: 1.75),
+            itemCount: _signatureFonts.length,
+            itemBuilder: (ctx, i) {
+              final f = _signatureFonts[i];
+              final sel = f.$1 == _sigFontFamily;
+              return InkWell(
+                onTap: () => setState(() => _sigFontFamily = f.$1),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: sel ? const Color(0xFFF59E0B).withOpacity(0.14) : cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: sel ? const Color(0xFFF59E0B) : (isDark ? Colors.white12 : Colors.black12), width: sel ? 1.8 : 1)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(f.$2, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                    Expanded(child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text(previewText, textDirection: f.$4 ? TextDirection.rtl : TextDirection.ltr, style: TextStyle(fontFamily: f.$1, fontSize: f.$4 ? 22 : 28, color: sel ? const Color(0xFFF59E0B) : null))))),
+                  ]),
+                ),
+              );
+            },
+          ),
+        ],
+      ],
+    );
+  }
+
 }
 
 
