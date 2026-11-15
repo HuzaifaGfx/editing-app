@@ -77,3 +77,51 @@ flutter:
     - family: Oswald
       fonts:
         - asset: assets/fonts/Oswald-Regular.ttf
+    - family: GreatVibes
+      fonts:
+        - asset: assets/fonts/GreatVibes-Regular.ttf
+    - family: AlexBrush
+      fonts:
+        - asset: assets/fonts/AlexBrush-Regular.ttf
+    - family: Allura
+      fonts:
+        - asset: assets/fonts/Allura-Regular.ttf
+    - family: Sacramento
+      fonts:
+        - asset: assets/fonts/Sacramento-Regular.ttf
+    - family: Parisienne
+      fonts:
+        - asset: assets/fonts/Parisienne-Regular.ttf
+    - family: PinyonScript
+      fonts:
+        - asset: assets/fonts/PinyonScript-Regular.ttf
+    - family: Pacifico
+      fonts:
+        - asset: assets/fonts/Pacifico-Regular.ttf
+    - family: Satisfy
+      fonts:
+        - asset: assets/fonts/Satisfy-Regular.ttf
+    - family: DancingScript
+      fonts:
+        - asset: assets/fonts/DancingScript-Regular.ttf
+    - family: Caveat
+      fonts:
+        - asset: assets/fonts/Caveat-Regular.ttf
+    - family: HerrVonMuellerhoff
+      fonts:
+        - asset: assets/fonts/HerrVonMuellerhoff-Regular.ttf
+    - family: HomemadeApple
+      fonts:
+        - asset: assets/fonts/HomemadeApple-Regular.ttf
+    - family: MrDafoe
+      fonts:
+        - asset: assets/fonts/MrDafoe-Regular.ttf
+    - family: Yesteryear
+      fonts:
+        - asset: assets/fonts/Yesteryear-Regular.ttf
+    - family: MarckScript
+      fonts:
+        - asset: assets/fonts/MarckScript-Regular.ttf
+    - family: ReenieBeanie
+      fonts:
+        - asset: assets/fonts/ReenieBeanie.ttf

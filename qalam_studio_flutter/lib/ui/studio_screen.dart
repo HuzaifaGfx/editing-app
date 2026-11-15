@@ -1,7 +1,10 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import '../main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -25,13 +28,13 @@ class StudioScreen extends StatefulWidget {
 
 class _StudioScreenState extends State<StudioScreen> {
   static const String _geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
-  final TextEditingController _aiPromptController = TextEditingController();
   String? _aiImagePath;
   bool _aiLoading = false;
   int _aiFillRevision = 0;
   final ImagePicker _picker = ImagePicker();
   final GlobalKey _canvasExportKey = GlobalKey();
   final TextEditingController _textController = TextEditingController();
+  final TextEditingController _sigTextController = TextEditingController(text: 'Huzaifa Khan');
 
   List<DesignProject> _projects = [];
   late DesignProject _project;
@@ -40,6 +43,19 @@ class _StudioScreenState extends State<StudioScreen> {
   int _navIndex = 0; // 0=Studio, 1=Pages, 2=Batch, 3=Projects
   int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Filters, 3=Layers
   bool _sheetExpanded = true;
+  bool _exportTransparentCanvas = false;
+
+  int _sigMode = 0;
+  String _sigFontFamily = 'GreatVibes';
+  Color _sigInkColor = const Color(0xFF0F172A);
+  double _sigFontSize = 78;
+  double _sigLetterSpacing = 0.0;
+  bool _sigSlanted = true;
+  bool _sigBold = false;
+  bool _sigTransparentBg = true;
+  double _sigPenWidth = 4.0;
+  List<(List<Offset>, Color, double)> _sigStrokes = [];
+  List<Offset>? _sigCurrentStroke;
 
   // Batch state
   List<String> _batchInputs = [];
@@ -60,7 +76,7 @@ class _StudioScreenState extends State<StudioScreen> {
   @override
   void dispose() {
     _textController.dispose();
-    _aiPromptController.dispose();
+    _sigTextController.dispose();
     super.dispose();
   }
 
@@ -269,180 +285,9 @@ class _StudioScreenState extends State<StudioScreen> {
   }
 
 
-  Future<void> _pickAiCardImage() async {
-    final picked = await _picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 1500,
-      maxHeight: 1500,
-      imageQuality: 84,
-    );
-    if (picked == null) return;
-    setState(() => _aiImagePath = picked.path);
-  }
 
-  Future<void> _runGeminiAutoFill() async {
-    final textFields = _page.layers.where((l) => l.type == LayerType.text).toList();
-    if (textFields.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add and name text layers in Studio first (e.g. Name, Father Name).')),
-      );
-      return;
-    }
-    final rawText = _aiPromptController.text.trim();
-    if (rawText.isEmpty && _aiImagePath == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter details or attach a card/photo first.')),
-      );
-      return;
-    }
-    final apiKey = _geminiApiKey.trim();
-    if (apiKey.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Gemini key not bundled. Rebuild APK with --dart-define=GEMINI_API_KEY=YOUR_KEY')),
-      );
-      return;
-    }
 
-    setState(() => _aiLoading = true);
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 20);
-    try {
-      final parts = <Map<String, dynamic>>[];
-      if (_aiImagePath != null && File(_aiImagePath!).existsSync()) {
-        final bytes = await File(_aiImagePath!).readAsBytes();
-        final ext = p.extension(_aiImagePath!).toLowerCase();
-        final mime = ext == '.png'
-            ? 'image/png'
-            : (ext == '.webp' ? 'image/webp' : 'image/jpeg');
-        parts.add({
-          'inlineData': {'mimeType': mime, 'data': base64Encode(bytes)},
-        });
-      }
 
-      final fieldSpec = List.generate(textFields.length, (i) {
-        final l = textFields[i];
-        final sample = l.text.length > 80 ? l.text.substring(0, 80) : l.text;
-        return '${i + 1}. id="${l.id}" | label="${l.name}" | sample="$sample" | dir="${l.isRtl ? "rtl" : "ltr"}"';
-      }).join('\n');
-
-      parts.add({
-        'text': 'TARGET FORM FIELDS (each has an exact id and label):\n$fieldSpec\n\n${rawText.isNotEmpty ? "USER PROVIDED DETAILS:\n$rawText" : "Extract details from the attached image."}\n\nMap each extracted piece of information to the matching layerId. Only include fields that have matching data in the input. Preserve Urdu or English script appropriately.',
-      });
-
-      final isVertexExpress = apiKey.startsWith('AQ.');
-      final genConfig = <String, dynamic>{
-        if (!isVertexExpress) 'thinkingConfig': {'thinkingLevel': 'LOW'},
-        'responseMimeType': 'application/json',
-        'responseSchema': {
-          'type': 'OBJECT',
-          'properties': {
-            'updates': {
-              'type': 'ARRAY',
-              'items': {
-                'type': 'OBJECT',
-                'properties': {
-                  'layerId': {'type': 'STRING'},
-                  'value': {'type': 'STRING'},
-                },
-                'required': ['layerId', 'value'],
-              },
-            },
-            'note': {'type': 'STRING'},
-          },
-          'required': ['updates'],
-        },
-      };
-
-      final body = jsonEncode({
-        'systemInstruction': {
-          'parts': [
-            {
-              'text': 'You are a precise bilingual (Urdu and English) document form-filler assistant for Qalam Studio. Given a list of template text fields (with exact layer id, label/name, sample placeholder, and direction) plus raw user text and/or an image of a document/card/note, extract the relevant values and map them accurately to the matching layerId. Rules: (1) Never invent or guess missing values — omit fields not present in the input. (2) Use exact layerId strings from the target list. (3) Keep values clean without adding the field label prefix unless the sample itself includes a prefix. (4) Match the natural language/script of the input or field sample cleanly.'
-            }
-          ]
-        },
-        'contents': [
-          {'role': 'user', 'parts': parts}
-        ],
-        'generationConfig': genConfig,
-      });
-
-      final uri = Uri.parse(
-        isVertexExpress
-            ? 'https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent'
-            : 'https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent',
-      );
-      final req = await client.postUrl(uri);
-      req.headers.set('Content-Type', 'application/json; charset=utf-8');
-      req.headers.set('x-goog-api-key', apiKey);
-      req.add(utf8.encode(body));
-
-      final res = await req.close().timeout(const Duration(seconds: 45));
-      final resBody = await res.transform(utf8.decoder).join();
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        String msg = 'Gemini HTTP ${res.statusCode}';
-        try {
-          final errJson = jsonDecode(resBody) as Map<String, dynamic>;
-          final errMsg = (errJson['error'] as Map?)?['message']?.toString();
-          if (errMsg != null && errMsg.isNotEmpty) msg = errMsg;
-        } catch (_) {}
-        throw Exception(msg);
-      }
-
-      final jsonRes = jsonDecode(resBody) as Map<String, dynamic>;
-      final candidates = jsonRes['candidates'] as List?;
-      final firstCandidate =
-          (candidates != null && candidates.isNotEmpty) ? candidates[0] as Map? : null;
-      final contentParts = (firstCandidate?['content'] as Map?)?['parts'] as List?;
-      final textOut = contentParts
-              ?.where((part) => part is Map && part['thought'] != true && part['text'] != null)
-              .map((part) => (part as Map)['text'].toString())
-              .join('')
-              .trim() ??
-          '';
-      if (textOut.isEmpty) throw Exception('Empty response from Gemini');
-
-      final parsed = jsonDecode(textOut) as Map<String, dynamic>;
-      final updates = (parsed['updates'] as List?) ?? [];
-      final byId = {for (final l in textFields) l.id: l};
-      int applied = 0;
-
-      setState(() {
-        for (final item in updates) {
-          if (item is! Map) continue;
-          final id = item['layerId']?.toString();
-          final val = item['value']?.toString();
-          if (id != null && val != null && val.trim().isNotEmpty && byId.containsKey(id)) {
-            byId[id]!.text = val.trim();
-            if (_selectedLayerId == id) _textController.text = val.trim();
-            applied++;
-          }
-        }
-        _aiFillRevision++;
-      });
-
-      if (applied > 0) await _saveCurrentProject(showToast: false);
-      if (!mounted) return;
-      final note = parsed['note']?.toString();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            applied > 0
-                ? (note != null && note.isNotEmpty ? note : 'Gemini filled $applied field(s)')
-                : 'No matching fields found in input',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('AI Auto-Fill error: $e')),
-      );
-    } finally {
-      client.close();
-      if (mounted) setState(() => _aiLoading = false);
-    }
-  }
 
   static const MethodChannel _mediaChannel = MethodChannel('com.qalam.studio/media');
 
@@ -464,22 +309,84 @@ class _StudioScreenState extends State<StudioScreen> {
     return outPath;
   }
 
-  Future<void> _exportPngToGallery() async {
+  Future<Uint8List?> _captureCanvasBytes({
+    double pixelRatio = 2.0,
+    String format = 'png',
+    bool transparent = false,
+  }) async {
+    final prevNav = _navIndex;
+    setState(() {
+      _navIndex = 0;
+      _selectedLayerId = null;
+      _exportTransparentCanvas = format == 'png' && transparent;
+    });
+    await Future.delayed(const Duration(milliseconds: 90));
     try {
-      setState(() => _selectedLayerId = null);
-      await Future.delayed(const Duration(milliseconds: 60));
       final boundary =
           _canvasExportKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) return;
-      final image = await boundary.toImage(pixelRatio: 2.0);
+      if (boundary == null) return null;
+      final image = await boundary.toImage(pixelRatio: pixelRatio);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) return;
+      if (byteData == null) return null;
       final pngBytes = byteData.buffer.asUint8List();
-      final fileName = 'qalam_export_${DateTime.now().millisecondsSinceEpoch}.png';
-      final savedLocation = await _saveBytesToDeviceGallery(pngBytes, fileName);
+      if (format == 'jpg') {
+        final decoded = img.decodePng(pngBytes);
+        if (decoded != null) {
+          return Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
+        }
+      }
+      return pngBytes;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _exportTransparentCanvas = false;
+          _navIndex = prevNav;
+        });
+      }
+    }
+  }
+
+  Future<void> _executeExport({
+    required String format,
+    required double scale,
+    required bool transparent,
+    required bool shareOnly,
+    required bool asPdf,
+  }) async {
+    try {
+      final bytes = await _captureCanvasBytes(
+        pixelRatio: scale,
+        format: asPdf ? 'png' : format,
+        transparent: !asPdf && transparent,
+      );
+      if (bytes == null) return;
+
+      if (asPdf) {
+        final doc = pw.Document();
+        final pdfImg = pw.MemoryImage(bytes);
+        doc.addPage(
+          pw.Page(
+            pageFormat: PdfPageFormat(_page.width, _page.height),
+            margin: pw.EdgeInsets.zero,
+            build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
+          ),
+        );
+        await Printing.layoutPdf(onLayout: (_) async => doc.save());
+        return;
+      }
+
+      final ext = format == 'jpg' ? 'jpg' : 'png';
+      final fileName = 'qalam_export_${DateTime.now().millisecondsSinceEpoch}.$ext';
       final tmpDir = await getTemporaryDirectory();
       final tmpPath = p.join(tmpDir.path, fileName);
-      await File(tmpPath).writeAsBytes(pngBytes);
+      await File(tmpPath).writeAsBytes(bytes);
+
+      if (shareOnly) {
+        await Share.shareXFiles([XFile(tmpPath)], text: _project.name);
+        return;
+      }
+
+      final savedLocation = await _saveBytesToDeviceGallery(bytes, fileName);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -496,6 +403,169 @@ class _StudioScreenState extends State<StudioScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export error: $e')));
     }
+  }
+
+  Future<void> _showExportOptionsSheet() async {
+    String format = 'png';
+    double scale = 2.0;
+    bool transparent = false;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF191C22) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Export Options',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('File Format', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Center(child: Text('PNG (Lossless)')),
+                          selected: format == 'png',
+                          selectedColor: const Color(0xFFF59E0B),
+                          onSelected: (_) => setSheetState(() => format = 'png'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Center(child: Text('JPG (Compact)')),
+                          selected: format == 'jpg',
+                          selectedColor: const Color(0xFFF59E0B),
+                          onSelected: (_) => setSheetState(() {
+                            format = 'jpg';
+                            transparent = false;
+                          }),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Resolution Quality', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      for (final s in [1.0, 2.0, 3.0]) ...[
+                        Expanded(
+                          child: ChoiceChip(
+                            label: Center(
+                              child: Text('${s.round()}x (${(_page.width * s).round()}px)'),
+                            ),
+                            selected: scale == s,
+                            selectedColor: const Color(0xFFF59E0B),
+                            onSelected: (_) => setSheetState(() => scale = s),
+                          ),
+                        ),
+                        if (s != 3.0) const SizedBox(width: 6),
+                      ],
+                    ],
+                  ),
+                  if (format == 'png') ...[
+                    const SizedBox(height: 6),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Transparent Background (PNG)', style: TextStyle(fontSize: 13)),
+                      value: transparent,
+                      onChanged: (v) => setSheetState(() => transparent = v),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFF59E0B),
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            _executeExport(
+                              format: format,
+                              scale: scale,
+                              transparent: transparent,
+                              shareOnly: false,
+                              asPdf: false,
+                            );
+                          },
+                          icon: const Icon(Icons.save_alt_rounded, size: 18),
+                          label: const Text('Save Gallery'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _executeExport(
+                            format: format,
+                            scale: scale,
+                            transparent: transparent,
+                            shareOnly: true,
+                            asPdf: false,
+                          );
+                        },
+                        icon: const Icon(Icons.share_outlined, size: 18),
+                        label: const Text('Share'),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _executeExport(
+                            format: 'png',
+                            scale: scale,
+                            transparent: false,
+                            shareOnly: false,
+                            asPdf: true,
+                          );
+                        },
+                        icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                        label: const Text('PDF'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _importCanvasImage() async {
@@ -648,28 +718,44 @@ class _StudioScreenState extends State<StudioScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final barBg = isDark ? const Color(0xFF16191E) : Colors.white;
+    final stageBg = isDark ? const Color(0xFF0D0F12) : const Color(0xFFE5E7EB);
+
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF16191E),
+        backgroundColor: barBg,
+        surfaceTintColor: Colors.transparent,
         title: Text(_project.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         actions: [
+          IconButton(
+            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+            icon: Icon(
+              isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+              color: const Color(0xFFF59E0B),
+            ),
+            onPressed: () {
+              appThemeMode.value = isDark ? ThemeMode.light : ThemeMode.dark;
+            },
+          ),
           IconButton(
             tooltip: 'Save Offline',
             icon: const Icon(Icons.save_outlined),
             onPressed: _saveCurrentProject,
           ),
           IconButton(
-            tooltip: 'Export PNG',
+            tooltip: 'Export Options',
             icon: const Icon(Icons.download_rounded, color: Color(0xFFF59E0B)),
-            onPressed: _exportPngToGallery,
+            onPressed: _showExportOptionsSheet,
           ),
         ],
       ),
       body: IndexedStack(
         index: _navIndex,
         children: [
-          _buildStudioView(),
+          _buildStudioView(stageBg, barBg, isDark),
           _navIndex == 1 ? _buildQuickFillView() : const SizedBox.shrink(),
+          _navIndex == 2 ? _buildSignatureView() : const SizedBox.shrink(),
           _buildPagesView(),
           _buildBatchView(),
           _buildProjectsView(),
@@ -677,7 +763,7 @@ class _StudioScreenState extends State<StudioScreen> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _navIndex,
-        backgroundColor: const Color(0xFF16191E),
+        backgroundColor: barBg,
         indicatorColor: const Color(0xFFF59E0B).withOpacity(0.22),
         onDestinationSelected: (i) => setState(() {
           _navIndex = i;
@@ -688,6 +774,7 @@ class _StudioScreenState extends State<StudioScreen> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.brush_outlined), label: 'Studio'),
           NavigationDestination(icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
+          NavigationDestination(icon: Icon(Icons.draw_outlined), label: 'Sign'),
           NavigationDestination(icon: Icon(Icons.description_outlined), label: 'Docs'),
           NavigationDestination(icon: Icon(Icons.auto_awesome_motion_outlined), label: 'Batch'),
           NavigationDestination(icon: Icon(Icons.folder_outlined), label: 'Projects'),
@@ -696,26 +783,26 @@ class _StudioScreenState extends State<StudioScreen> {
     );
   }
 
-  Widget _buildStudioView() {
+  Widget _buildStudioView(Color stageBg, Color barBg, bool isDark) {
     final layer = _activeLayer;
     return Column(
       children: [
         Expanded(
           child: Container(
-            color: const Color(0xFF0D0F12),
+            color: stageBg,
             child: LayerCanvas(
               page: _page,
               selectedLayerId: _selectedLayerId,
               exportBoundaryKey: _canvasExportKey,
+              forceTransparentBackground: _exportTransparentCanvas,
               onSelectLayer: _selectLayer,
               onUpdateLayer: (_) => setState(() {}),
             ),
           ),
         ),
-        // Quick Action Strip
         Container(
           height: 52,
-          color: const Color(0xFF16191E),
+          color: barBg,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: ListView(
             scrollDirection: Axis.horizontal,
@@ -728,12 +815,11 @@ class _StudioScreenState extends State<StudioScreen> {
             ],
           ),
         ),
-        // Collapsible Bottom Inspector Sheet
         Container(
           height: _sheetExpanded ? 275 : 44,
-          decoration: const BoxDecoration(
-            color: Color(0xFF16191E),
-            border: Border(top: BorderSide(color: Colors.white12)),
+          decoration: BoxDecoration(
+            color: barBg,
+            border: Border(top: BorderSide(color: isDark ? Colors.white12 : Colors.black12)),
           ),
           child: Column(
             children: [
@@ -1933,4 +2019,35 @@ class _ExactNumberBoxState extends State<_ExactNumberBox> {
       },
     );
   }
+}
+
+class _SignaturePadPainter extends CustomPainter {
+  final List<(List<Offset>, Color, double)> strokes;
+  _SignaturePadPainter(this.strokes);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final stroke in strokes) {
+      final pts = stroke.$1;
+      if (pts.isEmpty) continue;
+      final paint = Paint()
+        ..color = stroke.$2
+        ..strokeWidth = stroke.$3
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+      if (pts.length == 1) {
+        canvas.drawCircle(pts[0], stroke.$3 / 2, Paint()..color = stroke.$2);
+        continue;
+      }
+      final path = Path()..moveTo(pts[0].dx, pts[0].dy);
+      for (int i = 1; i < pts.length; i++) {
+        path.lineTo(pts[i].dx, pts[i].dy);
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SignaturePadPainter oldDelegate) => true;
 }

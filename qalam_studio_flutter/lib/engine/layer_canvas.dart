@@ -10,6 +10,7 @@ class LayerCanvas extends StatefulWidget {
   final String? selectedLayerId;
   final GlobalKey? exportBoundaryKey;
   final bool showSelectionHandles;
+  final bool forceTransparentBackground;
   final ValueChanged<String?> onSelectLayer;
   final ValueChanged<DesignLayer> onUpdateLayer;
 
@@ -19,6 +20,7 @@ class LayerCanvas extends StatefulWidget {
     required this.selectedLayerId,
     this.exportBoundaryKey,
     this.showSelectionHandles = true,
+    this.forceTransparentBackground = false,
     required this.onSelectLayer,
     required this.onUpdateLayer,
   });
@@ -45,89 +47,124 @@ class _LayerCanvasState extends State<LayerCanvas> {
     super.dispose();
   }
 
+  void _setZoomAroundCenter(double nextZoom, double vw, double vh) {
+    final clamped = nextZoom.clamp(0.5, 3.5).toDouble();
+    final cur = _transformController.value.clone();
+    final curScale = cur.getMaxScaleOnAxis();
+    final ratio = clamped / (curScale <= 0 ? 1.0 : curScale);
+    final cx = vw / 2.0;
+    final cy = vh / 2.0;
+    final nextMatrix = Matrix4.identity()
+      ..translate(cx, cy)
+      ..scale(ratio)
+      ..translate(-cx, -cy)
+      ..multiply(cur);
+    setState(() {
+      _currentZoom = clamped;
+      _transformController.value = nextMatrix;
+    });
+  }
+
+  void _resetZoom() {
+    setState(() {
+      _currentZoom = 1.0;
+      _transformController.value = Matrix4.identity();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final page = widget.page;
-    return Listener(
-      behavior: HitTestBehavior.translucent,
-      onPointerDown: (_) {
-        _pointerCount++;
-        if (_pointerCount > 1) {
-          setState(() {
-            _isPinching = true;
-            _lastMultiTouchAt = DateTime.now();
-          });
-        }
-      },
-      onPointerUp: (_) {
-        _pointerCount = math.max(0, _pointerCount - 1);
-        if (_pointerCount <= 1 && _isPinching) {
-          setState(() {
-            _lastMultiTouchAt = DateTime.now();
-            _isPinching = false;
-          });
-        }
-      },
-      onPointerCancel: (_) {
-        _pointerCount = math.max(0, _pointerCount - 1);
-        if (_pointerCount <= 1 && _isPinching) {
-          setState(() {
-            _lastMultiTouchAt = DateTime.now();
-            _isPinching = false;
-          });
-        }
-      },
-      child: InteractiveViewer(
-        transformationController: _transformController,
-        panEnabled: _pointerCount > 1 || _currentZoom > 1.02,
-        scaleEnabled: true,
-        minScale: 0.85,
-        maxScale: 3.5,
-        boundaryMargin: EdgeInsets.zero,
-        onInteractionStart: (details) {
-          if (details.pointerCount > 1) {
-            setState(() {
-              _isPinching = true;
-              _lastMultiTouchAt = DateTime.now();
-            });
-          }
-        },
-        onInteractionUpdate: (_) {
-          final nextZoom = _transformController.value.getMaxScaleOnAxis();
-          if ((nextZoom - _currentZoom).abs() > 0.02) {
-            setState(() => _currentZoom = nextZoom);
-          }
-        },
-        onInteractionEnd: (_) {
-          final nextZoom = _transformController.value.getMaxScaleOnAxis();
-          setState(() {
-            _currentZoom = nextZoom;
-            if (_isPinching) {
-              _lastMultiTouchAt = DateTime.now();
-              _isPinching = false;
-            }
-          });
-        },
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: AspectRatio(
-              aspectRatio: page.width / math.max(1, page.height),
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: RepaintBoundary(
-                  key: widget.exportBoundaryKey,
-                  child: SizedBox(
-                    width: page.width,
-                    height: page.height,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: page.backgroundColor,
-                        boxShadow: const [BoxShadow(blurRadius: 24, color: Colors.black54)],
-                      ),
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Stack(
+          children: [
+            Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: (_) {
+                _pointerCount++;
+                if (_pointerCount > 1) {
+                  setState(() {
+                    _isPinching = true;
+                    _lastMultiTouchAt = DateTime.now();
+                  });
+                }
+              },
+              onPointerUp: (_) {
+                _pointerCount = math.max(0, _pointerCount - 1);
+                if (_pointerCount <= 1 && _isPinching) {
+                  setState(() {
+                    _lastMultiTouchAt = DateTime.now();
+                    _isPinching = false;
+                  });
+                }
+              },
+              onPointerCancel: (_) {
+                _pointerCount = math.max(0, _pointerCount - 1);
+                if (_pointerCount <= 1 && _isPinching) {
+                  setState(() {
+                    _lastMultiTouchAt = DateTime.now();
+                    _isPinching = false;
+                  });
+                }
+              },
+              child: InteractiveViewer(
+                transformationController: _transformController,
+                panEnabled: _pointerCount > 1 || _currentZoom > 1.02,
+                scaleEnabled: true,
+                minScale: 0.5,
+                maxScale: 3.5,
+                boundaryMargin: EdgeInsets.zero,
+                onInteractionStart: (details) {
+                  if (details.pointerCount > 1) {
+                    setState(() {
+                      _isPinching = true;
+                      _lastMultiTouchAt = DateTime.now();
+                    });
+                  }
+                },
+                onInteractionUpdate: (_) {
+                  final nextZoom = _transformController.value.getMaxScaleOnAxis();
+                  if ((nextZoom - _currentZoom).abs() > 0.02) {
+                    setState(() => _currentZoom = nextZoom);
+                  }
+                },
+                onInteractionEnd: (_) {
+                  final nextZoom = _transformController.value.getMaxScaleOnAxis();
+                  setState(() {
+                    _currentZoom = nextZoom;
+                    if (_isPinching) {
+                      _lastMultiTouchAt = DateTime.now();
+                      _isPinching = false;
+                    }
+                  });
+                },
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: AspectRatio(
+                      aspectRatio: page.width / math.max(1, page.height),
+                      child: FittedBox(
+                        fit: BoxFit.contain,
+                        child: RepaintBoundary(
+                          key: widget.exportBoundaryKey,
+                          child: SizedBox(
+                            width: page.width,
+                            height: page.height,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: widget.forceTransparentBackground
+                                    ? Colors.transparent
+                                    : page.backgroundColor,
+                                boxShadow: widget.forceTransparentBackground
+                                    ? null
+                                    : const [BoxShadow(blurRadius: 24, color: Colors.black54)],
+                              ),
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                children: [
                           Positioned.fill(
                             child: GestureDetector(
                               behavior: HitTestBehavior.translucent,
@@ -200,6 +237,63 @@ class _LayerCanvasState extends State<LayerCanvas> {
           ),
         ),
       ),
+            Positioned(
+              right: 10,
+              bottom: 10,
+              child: Material(
+                elevation: 4,
+                borderRadius: BorderRadius.circular(12),
+                color: isDark
+                    ? const Color(0xFF16191E).withOpacity(0.92)
+                    : Colors.white.withOpacity(0.95),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark ? Colors.white12 : Colors.black12,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Zoom Out',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.zoom_out_rounded, size: 19),
+                        onPressed: () => _setZoomAroundCenter(
+                          _currentZoom - 0.25,
+                          constraints.maxWidth,
+                          constraints.maxHeight,
+                        ),
+                      ),
+                      InkWell(
+                        onTap: _resetZoom,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                          child: Text(
+                            '${(_currentZoom * 100).round()}%',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Zoom In',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.zoom_in_rounded, size: 19),
+                        onPressed: () => _setZoomAroundCenter(
+                          _currentZoom + 0.25,
+                          constraints.maxWidth,
+                          constraints.maxHeight,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -289,22 +383,22 @@ class _LayerCanvasState extends State<LayerCanvas> {
                   if (layer.type == LayerType.image && layer.aspectLocked) {
                     final ratio = layer.width / math.max(1.0, layer.height);
                     final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
-                    final nextW = (layer.width + delta).clamp(48.0, 4000.0);
-                    final nextH = (nextW / ratio).clamp(48.0, 4000.0);
+                    final nextW = (layer.width + delta).clamp(4.0, 10000.0);
+                    final nextH = (nextW / ratio).clamp(4.0, 10000.0);
                     layer.width = nextW;
                     layer.height = nextH;
                   } else if (layer.type == LayerType.text) {
                     final ratio = layer.width / math.max(1.0, layer.height);
                     final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
                     final prevW = math.max(1.0, layer.width);
-                    final nextW = (layer.width + delta).clamp(60.0, 4000.0);
-                    final nextH = (nextW / ratio).clamp(36.0, 4000.0);
-                    layer.fontSize = (layer.fontSize * (nextW / prevW)).clamp(10.0, 220.0);
+                    final nextW = (layer.width + delta).clamp(4.0, 10000.0);
+                    final nextH = (nextW / ratio).clamp(4.0, 10000.0);
+                    layer.fontSize = (layer.fontSize * (nextW / prevW)).clamp(4.0, 800.0);
                     layer.width = nextW;
                     layer.height = nextH;
                   } else {
-                    layer.width = (layer.width + dx).clamp(48.0, 4000.0);
-                    layer.height = (layer.height + dy).clamp(48.0, 4000.0);
+                    layer.width = (layer.width + dx).clamp(4.0, 10000.0);
+                    layer.height = (layer.height + dy).clamp(4.0, 10000.0);
                   }
                   widget.onUpdateLayer(layer);
                 },

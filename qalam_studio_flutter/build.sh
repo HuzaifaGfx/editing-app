@@ -66,6 +66,25 @@ if [ -z "$(ls -A assets/fonts 2>/dev/null || true)" ]; then
   echo "==> Warning: No fonts downloaded (offline environment)."
 fi
 
+
+# 16 Signature Script & Calligraphy Fonts
+download_full_ttf "GreatVibes-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/greatvibes/GreatVibes-Regular.ttf"
+download_full_ttf "AlexBrush-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/alexbrush/AlexBrush-Regular.ttf"
+download_full_ttf "Allura-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/allura/Allura-Regular.ttf"
+download_full_ttf "Sacramento-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/sacramento/Sacramento-Regular.ttf"
+download_full_ttf "Parisienne-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/parisienne/Parisienne-Regular.ttf"
+download_full_ttf "PinyonScript-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/pinyonscript/PinyonScript-Regular.ttf"
+download_full_ttf "Pacifico-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/pacifico/Pacifico-Regular.ttf"
+download_full_ttf "Satisfy-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/apache/satisfy/Satisfy-Regular.ttf"
+download_full_ttf "DancingScript-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/dancingscript/DancingScript%5Bwght%5D.ttf"
+download_full_ttf "Caveat-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/Caveat%5Bwght%5D.ttf"
+download_full_ttf "HerrVonMuellerhoff-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/herrvonmuellerhoff/HerrVonMuellerhoff-Regular.ttf"
+download_full_ttf "HomemadeApple-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/apache/homemadeapple/HomemadeApple-Regular.ttf"
+download_full_ttf "MrDafoe-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/mrdafoe/MrDafoe-Regular.ttf"
+download_full_ttf "Yesteryear-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/yesteryear/Yesteryear-Regular.ttf"
+download_full_ttf "MarckScript-Regular.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/marckscript/MarckScript-Regular.ttf"
+download_full_ttf "ReenieBeanie.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/reeniebeanie/ReenieBeanie.ttf"
+
 # 3. Generate clean official Android v2 Gradle files (android/gradlew, build.gradle, settings.gradle) if missing or missing v2 embedding
 if [ ! -f "android/gradlew" ] || ! grep -q 'flutterEmbedding' android/app/src/main/AndroidManifest.xml 2>/dev/null; then
   echo "==> Generating clean Android v2 Gradle project..."
