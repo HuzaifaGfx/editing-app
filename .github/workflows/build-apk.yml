@@ -50,14 +50,17 @@ jobs:
 
       - name: Commit Release APK to Repository
         run: |
+          cp -f qalam_studio_flutter/build/app/outputs/flutter-apk/app-release.apk /tmp/qalam-release.apk
+          git checkout -- .
+          git clean -fd qalam_studio_flutter/assets/fonts || true
+          git pull --rebase origin main
           mkdir -p release qalam_studio_flutter/release
-          cp -f qalam_studio_flutter/build/app/outputs/flutter-apk/app-release.apk release/qalam-studio.apk
-          cp -f qalam_studio_flutter/build/app/outputs/flutter-apk/app-release.apk qalam_studio_flutter/release/qalam-studio.apk
+          cp -f /tmp/qalam-release.apk release/qalam-studio.apk
+          cp -f /tmp/qalam-release.apk qalam_studio_flutter/release/qalam-studio.apk
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add release/qalam-studio.apk qalam_studio_flutter/release/qalam-studio.apk
           if ! git diff --cached --quiet; then
             git commit -m "chore: build updated release APK [skip ci]"
-            git pull --rebase origin main
             git push origin main
           fi
