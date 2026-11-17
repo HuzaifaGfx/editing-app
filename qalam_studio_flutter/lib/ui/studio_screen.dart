@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -54,8 +55,9 @@ class _StudioScreenState extends State<StudioScreen> {
   bool _sigBold = false;
   bool _sigTransparentBg = true;
   double _sigPenWidth = 4.0;
-  Size _sigDrawPadSize = const Size(340, 195);
+  Size _sigCanvasSize = const Size(1100, 520);
   final List<(List<Offset>, Color, double)> _sigStrokes = [];
+  final List<(List<Offset>, Color, double)> _sigRedoStrokes = [];
   List<Offset>? _sigCurrentStroke;
 
   // Batch state
@@ -599,6 +601,23 @@ class _StudioScreenState extends State<StudioScreen> {
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          side: BorderSide(color: _borderColor),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _shareProjectFile(_project);
+                        },
+                        icon: Icon(Icons.folder_shared_outlined, size: 18, color: _accentText),
+                        label: const Text('Share Editable Project (.qalam.json)'),
+                      ),
                     ),
                   ],
                 ),
@@ -2331,37 +2350,297 @@ class _StudioScreenState extends State<StudioScreen> {
     );
   }
 
+  Future<void> _shareProjectFile(DesignProject proj) async {
+    try {
+      final embedded = <String, String>{};
+      for (final pg in proj.pages) {
+        for (final l in pg.layers) {
+          if (l.type == LayerType.image && l.localImagePath != null && l.localImagePath!.isNotEmpty) {
+            final f = File(l.localImagePath!);
+            if (f.existsSync() && !embedded.containsKey(l.localImagePath!)) {
+              embedded[l.localImagePath!] = base64Encode(await f.readAsBytes());
+            }
+          }
+        }
+      }
+      final bundle = <String, dynamic>{
+        'format': 'qalam_project_v1',
+        'exportedAt': DateTime.now().millisecondsSinceEpoch,
+        'project': jsonDecode(proj.encode()),
+        'embeddedImages': embedded,
+      };
+      final safeName = proj.name
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+          .replaceAll(RegExp(r'^-|-$'), '');
+      final fileName = '${safeName.isEmpty ? "qalam-project" : safeName}.qalam.json';
+      final tmpDir = await getTemporaryDirectory();
+      final outPath = p.join(tmpDir.path, fileName);
+      await File(outPath).writeAsString(jsonEncode(bundle));
+      await Share.shareXFiles(
+        [XFile(outPath)],
+        subject: 'Qalam Studio Project: ${proj.name}',
+        text: 'Qalam Studio Project (${proj.pages.length} page(s))',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Share project error: $e')));
+    }
+  }
+
+  Future<String?> _writeBase64ToLocalImage(String b64OrDataUri, String prefix) async {
+    try {
+      var raw = b64OrDataUri.trim();
+      var ext = '.png';
+      if (raw.startsWith('data:')) {
+        final comma = raw.indexOf(',');
+        if (comma == -1) return null;
+        final header = raw.substring(0, comma).toLowerCase();
+        if (header.contains('jpeg') || header.contains('jpg')) ext = '.jpg';
+        raw = raw.substring(comma + 1);
+      }
+      final bytes = base64Decode(raw);
+      final docsDir = await getApplicationDocumentsDirectory();
+      final imgDir = Directory(p.join(docsDir.path, 'qalam_images'));
+      if (!imgDir.existsSync()) imgDir.createSync(recursive: true);
+      final dest = p.join(imgDir.path, '${prefix}_${DateTime.now().microsecondsSinceEpoch}$ext');
+      await File(dest).writeAsBytes(bytes);
+      return dest;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Color _parseColorAny(dynamic raw, Color fallback) {
+    if (raw is int) return Color(raw);
+    if (raw is String) {
+      final clean = raw.trim().toLowerCase();
+      if (clean == 'transparent') return Colors.transparent;
+      if (clean.startsWith('#')) {
+        var hex = clean.substring(1);
+        if (hex.length == 3) {
+          hex = '${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}';
+        }
+        if (hex.length == 6) hex = 'ff$hex';
+        final val = int.tryParse(hex, radix: 16);
+        if (val != null) return Color(val);
+      }
+    }
+    return fallback;
+  }
+
+  BlendMode _parseBlendModeAny(dynamic raw) {
+    if (raw is int && raw >= 0 && raw < BlendMode.values.length) {
+      return BlendMode.values[raw];
+    }
+    if (raw is String) {
+      switch (raw.toLowerCase()) {
+        case 'multiply':
+          return BlendMode.multiply;
+        case 'screen':
+          return BlendMode.screen;
+        case 'overlay':
+          return BlendMode.overlay;
+        case 'darken':
+          return BlendMode.darken;
+        case 'lighten':
+          return BlendMode.lighten;
+        default:
+          return BlendMode.srcOver;
+      }
+    }
+    return BlendMode.srcOver;
+  }
+
+  Future<void> _importProjectFile() async {
+    try {
+      String? raw;
+      if (Platform.isAndroid) {
+        raw = await _mediaChannel.invokeMethod<String>('pickProjectFile');
+      }
+      if (raw == null || raw.trim().isEmpty) return;
+
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('Invalid JSON object');
+      }
+
+      Map<String, dynamic> projMap;
+      final embedded = <String, String>{};
+      if (decoded['format'] == 'qalam_project_v1' && decoded['project'] is Map<String, dynamic>) {
+        projMap = Map<String, dynamic>.from(decoded['project'] as Map);
+        final embRaw = decoded['embeddedImages'];
+        if (embRaw is Map) {
+          for (final entry in embRaw.entries) {
+            if (entry.key is String && entry.value is String) {
+              embedded[entry.key as String] = entry.value as String;
+            }
+          }
+        }
+      } else if (decoded['pages'] is List) {
+        projMap = Map<String, dynamic>.from(decoded);
+      } else {
+        throw const FormatException('Not a Qalam Studio project file');
+      }
+
+      final restoredPaths = <String, String>{};
+      for (final entry in embedded.entries) {
+        final local = await _writeBase64ToLocalImage(entry.value, 'imp');
+        if (local != null) restoredPaths[entry.key] = local;
+      }
+
+      final rawPages = (projMap['pages'] as List? ?? []);
+      if (rawPages.isEmpty) throw const FormatException('Project has no pages');
+
+      final pages = <DocumentPage>[];
+      for (int pi = 0; pi < rawPages.length; pi++) {
+        final pgRaw = Map<String, dynamic>.from(rawPages[pi] as Map);
+        final rawLayers = (pgRaw['layers'] as List? ?? []);
+        final layers = <DesignLayer>[];
+        for (int li = 0; li < rawLayers.length; li++) {
+          final lRaw = Map<String, dynamic>.from(rawLayers[li] as Map);
+          final typeStr = (lRaw['type'] ?? 'text').toString();
+          final lType = LayerType.values.firstWhere(
+            (t) => t.name == typeStr,
+            orElse: () => LayerType.text,
+          );
+          String? imgPath = lRaw['localImagePath'] as String?;
+          if (imgPath != null && restoredPaths.containsKey(imgPath)) {
+            imgPath = restoredPaths[imgPath];
+          } else if (lType == LayerType.image && lRaw['src'] is String) {
+            final src = lRaw['src'] as String;
+            if (src.startsWith('data:image')) {
+              imgPath = await _writeBase64ToLocalImage(src, 'webimg');
+            }
+          }
+          final fMap = (lRaw['filters'] is Map)
+              ? Map<String, dynamic>.from(lRaw['filters'] as Map)
+              : <String, dynamic>{};
+          layers.add(DesignLayer(
+            id: (lRaw['id'] ?? 'l_${pi}_$li').toString(),
+            name: (lRaw['name'] ?? 'Layer ${li + 1}').toString(),
+            type: lType,
+            x: (lRaw['x'] ?? 40).toDouble(),
+            y: (lRaw['y'] ?? 40).toDouble(),
+            width: (lRaw['width'] ?? 240).toDouble(),
+            height: (lRaw['height'] ?? 160).toDouble(),
+            rotation: (lRaw['rotation'] ?? 0).toDouble(),
+            opacity: (lRaw['opacity'] ?? 1.0).toDouble(),
+            blendMode: _parseBlendModeAny(lRaw['blendMode']),
+            visible: lRaw['visible'] ?? true,
+            locked: lRaw['locked'] ?? false,
+            isCanvasBackground: lRaw['isCanvasBackground'] ?? false,
+            text: (lRaw['text'] ?? '').toString(),
+            isRtl: lRaw['isRtl'] ?? (lRaw['direction'] == 'rtl'),
+            fontFamily: (lRaw['fontFamily'] ?? 'PlusJakartaSans').toString(),
+            fontSize: (lRaw['fontSize'] ?? 32).toDouble(),
+            fontWeight: ((lRaw['fontWeight'] ?? 400) as num).toInt(),
+            lineHeight: (lRaw['lineHeight'] ?? 1.4).toDouble(),
+            textColor: _parseColorAny(
+              lRaw['textColor'] ?? lRaw['color'] ?? lRaw['fillColor'],
+              const Color(0xFFFFFFFF),
+            ),
+            localImagePath: imgPath,
+            aspectLocked: lRaw['aspectLocked'] ?? true,
+            objectFit: lRaw['objectFit'] is int
+                ? BoxFit.values[(lRaw['objectFit'] as int).clamp(0, BoxFit.values.length - 1)]
+                : BoxFit.cover,
+            borderRadius: (lRaw['borderRadius'] ?? 0).toDouble(),
+            filters: FilterSettings.fromJson(fMap),
+          ));
+        }
+        pages.add(DocumentPage(
+          id: (pgRaw['id'] ?? 'pg_$pi').toString(),
+          title: (pgRaw['title'] ?? 'Page ${pi + 1}').toString(),
+          width: (pgRaw['width'] ?? 900).toDouble(),
+          height: (pgRaw['height'] ?? 1200).toDouble(),
+          backgroundColor: _parseColorAny(pgRaw['backgroundColor'], const Color(0xFF191C22)),
+          layers: layers,
+        ));
+      }
+
+      final imported = DesignProject(
+        id: 'proj_imp_${DateTime.now().millisecondsSinceEpoch}',
+        name: (projMap['name'] ?? 'Imported Project').toString(),
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+        pages: pages,
+      );
+
+      await LocalProjectStore.instance.saveProject(imported);
+      final list = await LocalProjectStore.instance.loadAllProjects();
+      if (!mounted) return;
+      setState(() {
+        _projects = list;
+        _project = imported;
+        _pageIndex = 0;
+        _selectedLayerId = null;
+        _navIndex = 0;
+      });
+      await _rehydrateProjectFilters(imported);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Imported "${imported.name}" successfully!')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not import project file: $e')),
+      );
+    }
+  }
+
   Widget _buildProjectsView() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const Text('Offline Projects', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text('${_projects.length} saved locally on device', style: TextStyle(fontSize: 12, color: _subColor)),
+            const SizedBox(height: 12),
+            Row(
               children: [
-                const Text('Offline Projects', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                Text('${_projects.length} saved locally on device', style: TextStyle(fontSize: 12, color: _subColor)),
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _amber,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                    ),
+                    onPressed: () async {
+                      final fresh = _buildDefaultProject();
+                      await LocalProjectStore.instance.saveProject(fresh);
+                      final list = await LocalProjectStore.instance.loadAllProjects();
+                      if (!mounted) return;
+                      setState(() {
+                        _projects = list;
+                        _project = fresh;
+                        _pageIndex = 0;
+                        _selectedLayerId = null;
+                        _navIndex = 0;
+                      });
+                    },
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('New Project', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: BorderSide(color: _amber.withOpacity(0.7)),
+                      foregroundColor: _accentText,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                    ),
+                    onPressed: _importProjectFile,
+                    icon: const Icon(Icons.file_open_outlined, size: 18),
+                    label: const Text('Import .qalam', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
               ],
-            ),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
-              onPressed: () async {
-                final fresh = _buildDefaultProject();
-                await LocalProjectStore.instance.saveProject(fresh);
-                final list = await LocalProjectStore.instance.loadAllProjects();
-                if (!mounted) return;
-                setState(() {
-                  _projects = list;
-                  _project = fresh;
-                  _pageIndex = 0;
-                  _selectedLayerId = null;
-                  _navIndex = 0;
-                });
-              },
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('New Project'),
             ),
           ],
         ),
@@ -2429,9 +2708,15 @@ class _StudioScreenState extends State<StudioScreen> {
                         ],
                       ),
                     ),
+                    IconButton(
+                      tooltip: 'Share Project (.qalam.json)',
+                      icon: Icon(Icons.share_outlined, size: 20, color: _accentText),
+                      onPressed: () => _shareProjectFile(proj),
+                    ),
                     if (_projects.length > 1)
                       IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                        tooltip: 'Delete Project',
+                        icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
                         onPressed: () async {
                           await LocalProjectStore.instance.deleteProject(proj.id);
                           await _loadSavedProjects();
@@ -2468,6 +2753,266 @@ class _StudioScreenState extends State<StudioScreen> {
     ('Gulzar', 'Gulzar Urdu', 'Urdu Calligraphy', true),
   ];
 
+  Offset _toCanonicalPadPoint(Offset localPos, Size widgetSize) {
+    final sx = widgetSize.width / math.max(1.0, _sigCanvasSize.width);
+    final sy = widgetSize.height / math.max(1.0, _sigCanvasSize.height);
+    final scale = math.min(sx, sy);
+    final dx = (widgetSize.width - _sigCanvasSize.width * scale) / 2.0;
+    final dy = (widgetSize.height - _sigCanvasSize.height * scale) / 2.0;
+    return Offset((localPos.dx - dx) / math.max(0.001, scale), (localPos.dy - dy) / math.max(0.001, scale));
+  }
+
+  void _undoSignatureStroke() {
+    if (_sigStrokes.isEmpty) return;
+    setState(() {
+      _sigRedoStrokes.add(_sigStrokes.removeLast());
+    });
+  }
+
+  void _redoSignatureStroke() {
+    if (_sigRedoStrokes.isEmpty) return;
+    setState(() {
+      _sigStrokes.add(_sigRedoStrokes.removeLast());
+    });
+  }
+
+  void _clearSignatureStrokes() {
+    if (_sigStrokes.isEmpty) return;
+    setState(() {
+      _sigStrokes.clear();
+      _sigRedoStrokes.clear();
+    });
+  }
+
+  Future<void> _openFullScreenSignaturePad() async {
+    const inkSwatches = [
+      Color(0xFF0F172A),
+      Color(0xFF1D4ED8),
+      Color(0xFF1E3A8A),
+      Color(0xFF047857),
+      Color(0xFFB91C1C),
+    ];
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (routeCtx) {
+          return StatefulBuilder(
+            builder: (ctx, setModalState) {
+              return Scaffold(
+                backgroundColor: _isDark ? const Color(0xFF0D0F12) : const Color(0xFFF3F5F8),
+                appBar: AppBar(
+                  backgroundColor: _cardBg,
+                  leading: IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                  title: const Text('Draw Signature', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  actions: [
+                    IconButton(
+                      tooltip: 'Undo',
+                      onPressed: _sigStrokes.isEmpty
+                          ? null
+                          : () {
+                              _undoSignatureStroke();
+                              setModalState(() {});
+                            },
+                      icon: const Icon(Icons.undo_rounded),
+                    ),
+                    IconButton(
+                      tooltip: 'Redo',
+                      onPressed: _sigRedoStrokes.isEmpty
+                          ? null
+                          : () {
+                              _redoSignatureStroke();
+                              setModalState(() {});
+                            },
+                      icon: const Icon(Icons.redo_rounded),
+                    ),
+                    IconButton(
+                      tooltip: 'Clear All',
+                      onPressed: _sigStrokes.isEmpty
+                          ? null
+                          : () {
+                              _clearSignatureStrokes();
+                              setModalState(() {});
+                            },
+                      icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 10, left: 4),
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _amber,
+                          foregroundColor: Colors.black,
+                          minimumSize: const Size(0, 34),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(Icons.check_rounded, size: 17),
+                        label: const Text('Done', style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                  ],
+                ),
+                body: SafeArea(
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final padSize = Size(constraints.maxWidth, constraints.maxHeight);
+                              if (_sigStrokes.isEmpty) {
+                                _sigCanvasSize = padSize;
+                              }
+                              return ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: Container(
+                                  width: padSize.width,
+                                  height: padSize.height,
+                                  decoration: BoxDecoration(
+                                    color: _sigTransparentBg ? const Color(0xFFF8FAFC) : Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: _amber.withOpacity(0.75), width: 1.6),
+                                  ),
+                                  child: Stack(
+                                    children: [
+                                      Positioned(
+                                        left: 24,
+                                        right: 24,
+                                        bottom: padSize.height * 0.28,
+                                        child: Container(
+                                          height: 1,
+                                          color: const Color(0xFFCBD5E1),
+                                        ),
+                                      ),
+                                      if (_sigStrokes.isEmpty)
+                                        const Center(
+                                          child: Text(
+                                            'Draw your signature freely with your finger',
+                                            style: TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
+                                          ),
+                                        ),
+                                      GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onPanStart: (d) {
+                                          if (_sigStrokes.isEmpty) {
+                                            _sigCanvasSize = padSize;
+                                          }
+                                          final pt = _toCanonicalPadPoint(d.localPosition, padSize);
+                                          _sigCurrentStroke = [pt];
+                                          _sigRedoStrokes.clear();
+                                          _sigStrokes.add((_sigCurrentStroke!, _sigInkColor, _sigPenWidth));
+                                          setModalState(() {});
+                                          setState(() {});
+                                        },
+                                        onPanUpdate: (d) {
+                                          if (_sigCurrentStroke == null) return;
+                                          _sigCurrentStroke!.add(_toCanonicalPadPoint(d.localPosition, padSize));
+                                          setModalState(() {});
+                                          setState(() {});
+                                        },
+                                        onPanEnd: (_) => _sigCurrentStroke = null,
+                                        child: CustomPaint(
+                                          painter: _SignaturePadPainter(_sigStrokes, _sigCanvasSize),
+                                          size: padSize,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                        decoration: BoxDecoration(
+                          color: _cardBg,
+                          border: Border(top: BorderSide(color: _borderColor)),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              children: [
+                                Text('Ink:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                                const SizedBox(width: 8),
+                                ...inkSwatches.map(
+                                  (c) => Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setState(() => _sigInkColor = c);
+                                        setModalState(() {});
+                                      },
+                                      child: Container(
+                                        width: 28,
+                                        height: 28,
+                                        decoration: BoxDecoration(
+                                          color: c,
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: _sigInkColor == c ? _amber : _borderColor,
+                                            width: _sigInkColor == c ? 3 : 1.2,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const Spacer(),
+                                _choicePill(
+                                  label: _sigTransparentBg ? 'Transparent' : 'White BG',
+                                  selected: _sigTransparentBg,
+                                  onTap: () {
+                                    setState(() => _sigTransparentBg = !_sigTransparentBg);
+                                    setModalState(() {});
+                                  },
+                                ),
+                              ],
+                            ),
+                            Row(
+                              children: [
+                                SizedBox(
+                                  width: 68,
+                                  child: Text('Pen Size', style: TextStyle(fontSize: 12, color: _subColor)),
+                                ),
+                                Expanded(
+                                  child: Slider(
+                                    value: _sigPenWidth.clamp(2.0, 14.0),
+                                    min: 2.0,
+                                    max: 14.0,
+                                    activeColor: _amber,
+                                    onChanged: (v) {
+                                      setState(() => _sigPenWidth = v);
+                                      setModalState(() {});
+                                    },
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 32,
+                                  child: Text('${_sigPenWidth.round()}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
   Future<Uint8List?> _renderSignaturePngBytes({bool? forceTransparent}) async {
     final useTransparent = forceTransparent ?? _sigTransparentBg;
     const w = 1100.0;
@@ -2500,27 +3045,45 @@ class _StudioScreenState extends State<StudioScreen> {
         textAlign: TextAlign.center,
       )..layout(maxWidth: w - 80);
       tp.paint(canvas, Offset((w - tp.width) / 2, (h - tp.height) / 2));
-    } else {
-      final padW = math.max(1.0, _sigDrawPadSize.width);
-      final padH = math.max(1.0, _sigDrawPadSize.height);
-      final sx = w / padW;
-      final sy = h / padH;
+    } else if (_sigStrokes.isNotEmpty) {
+      double minX = double.infinity, minY = double.infinity;
+      double maxX = -double.infinity, maxY = -double.infinity;
+      for (final s in _sigStrokes) {
+        for (final pt in s.$1) {
+          if (pt.dx < minX) minX = pt.dx;
+          if (pt.dy < minY) minY = pt.dy;
+          if (pt.dx > maxX) maxX = pt.dx;
+          if (pt.dy > maxY) maxY = pt.dy;
+        }
+      }
+      final bw = math.max(20.0, maxX - minX);
+      final bh = math.max(20.0, maxY - minY);
+      const pad = 44.0;
+      final scale = math.min((w - pad * 2) / bw, (h - pad * 2) / bh);
+      final offX = (w - bw * scale) / 2.0 - minX * scale;
+      final offY = (h - bh * scale) / 2.0 - minY * scale;
+
       for (final stroke in _sigStrokes) {
         final pts = stroke.$1;
         if (pts.isEmpty) continue;
+        final strokeW = (stroke.$3 * math.min(2.6, math.max(1.2, scale * 0.85))).clamp(2.5, 22.0);
         final paint = Paint()
           ..color = stroke.$2
-          ..strokeWidth = stroke.$3 * 2.4
+          ..strokeWidth = strokeW
           ..strokeCap = StrokeCap.round
           ..strokeJoin = StrokeJoin.round
           ..style = PaintingStyle.stroke;
         if (pts.length == 1) {
-          canvas.drawCircle(Offset(pts[0].dx * sx, pts[0].dy * sy), stroke.$3 * 1.2, Paint()..color = stroke.$2);
+          canvas.drawCircle(
+            Offset(pts[0].dx * scale + offX, pts[0].dy * scale + offY),
+            strokeW / 2,
+            Paint()..color = stroke.$2,
+          );
           continue;
         }
-        final path = Path()..moveTo(pts[0].dx * sx, pts[0].dy * sy);
+        final path = Path()..moveTo(pts[0].dx * scale + offX, pts[0].dy * scale + offY);
         for (int i = 1; i < pts.length; i++) {
-          path.lineTo(pts[i].dx * sx, pts[i].dy * sy);
+          path.lineTo(pts[i].dx * scale + offX, pts[i].dy * scale + offY);
         }
         canvas.drawPath(path, paint);
       }
@@ -2600,7 +3163,7 @@ class _StudioScreenState extends State<StudioScreen> {
       children: [
         const Text('Signature Studio', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         const SizedBox(height: 2),
-        Text('18 calligraphy & script fonts + responsive freehand draw pad', style: TextStyle(fontSize: 12, color: _subColor)),
+        Text('18 calligraphy & script fonts + full-screen drawing pad', style: TextStyle(fontSize: 12, color: _subColor)),
         const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
@@ -2739,6 +3302,21 @@ class _StudioScreenState extends State<StudioScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: _amber.withOpacity(0.8)),
+                        foregroundColor: _accentText,
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: _openFullScreenSignaturePad,
+                      icon: const Icon(Icons.open_in_full_rounded, size: 17),
+                      label: const Text('Open Full-Screen Draw Pad (Easier Signing)', style: TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   Row(
                     children: [
                       ...inkSwatches.map(
@@ -2764,22 +3342,30 @@ class _StudioScreenState extends State<StudioScreen> {
                       const Spacer(),
                       IconButton(
                         tooltip: 'Undo',
-                        onPressed: _sigStrokes.isEmpty ? null : () => setState(() => _sigStrokes.removeLast()),
+                        onPressed: _sigStrokes.isEmpty ? null : _undoSignatureStroke,
                         icon: const Icon(Icons.undo_rounded),
                       ),
                       IconButton(
+                        tooltip: 'Redo',
+                        onPressed: _sigRedoStrokes.isEmpty ? null : _redoSignatureStroke,
+                        icon: const Icon(Icons.redo_rounded),
+                      ),
+                      IconButton(
                         tooltip: 'Clear',
-                        onPressed: _sigStrokes.isEmpty ? null : () => setState(() => _sigStrokes.clear()),
+                        onPressed: _sigStrokes.isEmpty ? null : _clearSignatureStrokes,
                         icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
                       ),
                     ],
                   ),
-                  _sliderRow('Pen Size', _sigPenWidth, 2, 12, (v) => setState(() => _sigPenWidth = v)),
+                  _sliderRow('Pen Size', _sigPenWidth, 2, 14, (v) => setState(() => _sigPenWidth = v)),
                   LayoutBuilder(
                     builder: (context, padConstraints) {
                       final padW = padConstraints.maxWidth;
                       const padH = 195.0;
-                      _sigDrawPadSize = Size(padW, padH);
+                      final padSize = Size(padW, padH);
+                      if (_sigStrokes.isEmpty) {
+                        _sigCanvasSize = padSize;
+                      }
                       return ClipRRect(
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
@@ -2795,23 +3381,48 @@ class _StudioScreenState extends State<StudioScreen> {
                               if (_sigStrokes.isEmpty)
                                 const Center(
                                   child: Text(
-                                    'Sign here with your finger',
-                                    style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                                    'Sign here or open Full-Screen Pad above',
+                                    style: TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
                                   ),
                                 ),
                               GestureDetector(
                                 onPanStart: (d) => setState(() {
-                                  _sigCurrentStroke = [d.localPosition];
+                                  if (_sigStrokes.isEmpty) _sigCanvasSize = padSize;
+                                  _sigCurrentStroke = [_toCanonicalPadPoint(d.localPosition, padSize)];
+                                  _sigRedoStrokes.clear();
                                   _sigStrokes.add((_sigCurrentStroke!, _sigInkColor, _sigPenWidth));
                                 }),
                                 onPanUpdate: (d) {
                                   if (_sigCurrentStroke == null) return;
-                                  setState(() => _sigCurrentStroke!.add(d.localPosition));
+                                  setState(() => _sigCurrentStroke!.add(_toCanonicalPadPoint(d.localPosition, padSize)));
                                 },
                                 onPanEnd: (_) => _sigCurrentStroke = null,
                                 child: CustomPaint(
-                                  painter: _SignaturePadPainter(_sigStrokes),
-                                  size: Size(padW, padH),
+                                  painter: _SignaturePadPainter(_sigStrokes, _sigCanvasSize),
+                                  size: padSize,
+                                ),
+                              ),
+                              Positioned(
+                                right: 6,
+                                bottom: 6,
+                                child: InkWell(
+                                  onTap: _openFullScreenSignaturePad,
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withOpacity(0.72),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.fullscreen_rounded, size: 15, color: Colors.white),
+                                        SizedBox(width: 4),
+                                        Text('Big Pad', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.white)),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
                             ],
@@ -3053,26 +3664,37 @@ class _ExactNumberBoxState extends State<_ExactNumberBox> {
 
 class _SignaturePadPainter extends CustomPainter {
   final List<(List<Offset>, Color, double)> strokes;
-  _SignaturePadPainter(this.strokes);
+  final Size sourceSize;
+  _SignaturePadPainter(this.strokes, this.sourceSize);
 
   @override
   void paint(Canvas canvas, Size size) {
+    final sw = math.max(1.0, sourceSize.width);
+    final sh = math.max(1.0, sourceSize.height);
+    final scale = math.min(size.width / sw, size.height / sh);
+    final ox = (size.width - sw * scale) / 2.0;
+    final oy = (size.height - sh * scale) / 2.0;
+
     for (final stroke in strokes) {
       final pts = stroke.$1;
       if (pts.isEmpty) continue;
       final paint = Paint()
         ..color = stroke.$2
-        ..strokeWidth = stroke.$3
+        ..strokeWidth = (stroke.$3 * scale).clamp(1.5, 24.0)
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
       if (pts.length == 1) {
-        canvas.drawCircle(pts[0], stroke.$3 / 2, Paint()..color = stroke.$2);
+        canvas.drawCircle(
+          Offset(pts[0].dx * scale + ox, pts[0].dy * scale + oy),
+          (stroke.$3 * scale) / 2,
+          Paint()..color = stroke.$2,
+        );
         continue;
       }
-      final path = Path()..moveTo(pts[0].dx, pts[0].dy);
+      final path = Path()..moveTo(pts[0].dx * scale + ox, pts[0].dy * scale + oy);
       for (int i = 1; i < pts.length; i++) {
-        path.lineTo(pts[i].dx, pts[i].dy);
+        path.lineTo(pts[i].dx * scale + ox, pts[i].dy * scale + oy);
       }
       canvas.drawPath(path, paint);
     }

@@ -30,10 +30,16 @@ class LayerCanvas extends StatefulWidget {
 
 class _LayerCanvasState extends State<LayerCanvas> {
   final TransformationController _transformController = TransformationController();
+  final GlobalKey _canvasStackKey = GlobalKey();
+
   int _pointerCount = 0;
   bool _isPinching = false;
   double _currentZoom = 1.0;
   DateTime _lastMultiTouchAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  double _rotateStartAngle = 0.0;
+  double _rotateStartDeg = 0.0;
+  Offset _rotateCenterGlobal = Offset.zero;
 
   bool get _blockLayerInteraction =>
       _pointerCount > 1 ||
@@ -69,6 +75,12 @@ class _LayerCanvasState extends State<LayerCanvas> {
       _currentZoom = 1.0;
       _transformController.value = Matrix4.identity();
     });
+  }
+
+  Offset _layerCenterGlobal(DesignLayer layer) {
+    final box = _canvasStackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return Offset.zero;
+    return box.localToGlobal(Offset(layer.x + layer.width / 2, layer.y + layer.height / 2));
   }
 
   @override
@@ -172,6 +184,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                     ? Colors.transparent
                                     : page.backgroundColor,
                                 child: Stack(
+                                  key: _canvasStackKey,
                                   clipBehavior: Clip.none,
                                   children: [
                                     Positioned.fill(
@@ -416,55 +429,172 @@ class _LayerCanvasState extends State<LayerCanvas> {
   }
 
   Widget _buildTouchHandles(DesignLayer layer) {
+    final hitSize = (layer.width < 110 || layer.height < 100) ? 38.0 : 52.0;
+
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFFF59E0B), width: 3),
+        border: Border.all(color: const Color(0xFFF59E0B), width: 2.5),
       ),
       child: layer.locked
           ? const SizedBox.shrink()
-          : Align(
-              alignment: Alignment.bottomRight,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onPanUpdate: (d) {
-                  if (_blockLayerInteraction) return;
-                  final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
-                  final dx = d.delta.dx / scale;
-                  final dy = d.delta.dy / scale;
-                  if (layer.type == LayerType.image && layer.aspectLocked) {
-                    final ratio = layer.width / math.max(1.0, layer.height);
-                    final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
-                    final nextW = (layer.width + delta).clamp(4.0, 10000.0);
-                    final nextH = (nextW / ratio).clamp(4.0, 10000.0);
-                    layer.width = nextW;
-                    layer.height = nextH;
-                  } else if (layer.type == LayerType.text) {
-                    final ratio = layer.width / math.max(1.0, layer.height);
-                    final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
-                    final prevW = math.max(1.0, layer.width);
-                    final nextW = (layer.width + delta).clamp(4.0, 10000.0);
-                    final nextH = (nextW / ratio).clamp(4.0, 10000.0);
-                    layer.fontSize = (layer.fontSize * (nextW / prevW)).clamp(4.0, 800.0);
-                    layer.width = nextW;
-                    layer.height = nextH;
-                  } else {
-                    layer.width = (layer.width + dx).clamp(4.0, 10000.0);
-                    layer.height = (layer.height + dy).clamp(4.0, 10000.0);
-                  }
-                  widget.onUpdateLayer(layer);
-                },
-                child: const SizedBox(
-                  width: 56,
-                  height: 56,
-                  child: Center(
-                    child: CircleAvatar(
-                      radius: 14,
-                      backgroundColor: Color(0xFFF59E0B),
-                      child: Icon(Icons.open_in_full, size: 14, color: Colors.black),
+          : Stack(
+              children: [
+                // 1. TOP-RIGHT: Rotate Handle (Text, Image & Shape)
+                Align(
+                  alignment: Alignment.topRight,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onPanStart: (d) {
+                      if (_blockLayerInteraction) return;
+                      _rotateCenterGlobal = _layerCenterGlobal(layer);
+                      _rotateStartAngle = math.atan2(
+                        d.globalPosition.dy - _rotateCenterGlobal.dy,
+                        d.globalPosition.dx - _rotateCenterGlobal.dx,
+                      );
+                      _rotateStartDeg = layer.rotation;
+                    },
+                    onPanUpdate: (d) {
+                      if (_blockLayerInteraction) return;
+                      final curAngle = math.atan2(
+                        d.globalPosition.dy - _rotateCenterGlobal.dy,
+                        d.globalPosition.dx - _rotateCenterGlobal.dx,
+                      );
+                      var deg = _rotateStartDeg + (curAngle - _rotateStartAngle) * 180.0 / math.pi;
+                      // Normalize to -180..180
+                      while (deg > 180.0) {
+                        deg -= 360.0;
+                      }
+                      while (deg < -180.0) {
+                        deg += 360.0;
+                      }
+                      // Gentle snap on 0, ±90, ±180
+                      final nearest90 = (deg / 90.0).round() * 90.0;
+                      if ((deg - nearest90).abs() <= 3.0) {
+                        deg = nearest90;
+                      }
+                      layer.rotation = deg;
+                      widget.onUpdateLayer(layer);
+                    },
+                    child: SizedBox(
+                      width: hitSize,
+                      height: hitSize,
+                      child: Center(
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0EA5E9),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                            boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)],
+                          ),
+                          child: const Icon(Icons.rotate_right_rounded, size: 15, color: Colors.white),
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
+
+                // 2. BOTTOM-LEFT: Box Resize Handle for Text (adjust W & H without scaling font size)
+                if (layer.type == LayerType.text)
+                  Align(
+                    alignment: Alignment.bottomLeft,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanUpdate: (d) {
+                        if (_blockLayerInteraction) return;
+                        final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
+                        final rawDx = d.delta.dx / scale;
+                        final rawDy = d.delta.dy / scale;
+                        final rad = layer.rotation * math.pi / 180.0;
+                        final localDx = rawDx * math.cos(-rad) - rawDy * math.sin(-rad);
+                        final localDy = rawDx * math.sin(-rad) + rawDy * math.cos(-rad);
+
+                        final prevW = layer.width;
+                        final nextW = (prevW - localDx).clamp(60.0, 10000.0);
+                        final shiftLeft = prevW - nextW;
+                        layer.x += shiftLeft * math.cos(rad);
+                        layer.y += shiftLeft * math.sin(rad);
+                        layer.width = nextW;
+                        layer.height = (layer.height + localDy).clamp(40.0, 10000.0);
+                        widget.onUpdateLayer(layer);
+                      },
+                      child: SizedBox(
+                        width: hitSize,
+                        height: hitSize,
+                        child: Center(
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                              boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)],
+                            ),
+                            child: const Icon(Icons.aspect_ratio_rounded, size: 14, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // 3. BOTTOM-RIGHT: Scale Size +/- Handle (Text Font+Box Scale, Image & Shape Scale)
+                Align(
+                  alignment: Alignment.bottomRight,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onPanUpdate: (d) {
+                      if (_blockLayerInteraction) return;
+                      final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
+                      final rawDx = d.delta.dx / scale;
+                      final rawDy = d.delta.dy / scale;
+                      final rad = -layer.rotation * math.pi / 180.0;
+                      final dx = rawDx * math.cos(rad) - rawDy * math.sin(rad);
+                      final dy = rawDx * math.sin(rad) + rawDy * math.cos(rad);
+
+                      if (layer.type == LayerType.image && layer.aspectLocked) {
+                        final ratio = layer.width / math.max(1.0, layer.height);
+                        final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
+                        final nextW = (layer.width + delta).clamp(20.0, 10000.0);
+                        final nextH = (nextW / ratio).clamp(20.0, 10000.0);
+                        layer.width = nextW;
+                        layer.height = nextH;
+                      } else if (layer.type == LayerType.text) {
+                        final ratio = layer.width / math.max(1.0, layer.height);
+                        final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
+                        final prevW = math.max(1.0, layer.width);
+                        final nextW = (layer.width + delta).clamp(40.0, 10000.0);
+                        final nextH = (nextW / ratio).clamp(24.0, 10000.0);
+                        layer.fontSize = (layer.fontSize * (nextW / prevW)).clamp(8.0, 600.0);
+                        layer.width = nextW;
+                        layer.height = nextH;
+                      } else {
+                        layer.width = (layer.width + dx).clamp(20.0, 10000.0);
+                        layer.height = (layer.height + dy).clamp(20.0, 10000.0);
+                      }
+                      widget.onUpdateLayer(layer);
+                    },
+                    child: SizedBox(
+                      width: hitSize,
+                      height: hitSize,
+                      child: Center(
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF59E0B),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                            boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)],
+                          ),
+                          child: const Icon(Icons.open_in_full_rounded, size: 14, color: Colors.black),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
     );
   }
