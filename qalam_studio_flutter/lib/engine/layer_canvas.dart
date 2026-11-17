@@ -115,7 +115,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 scaleEnabled: true,
                 minScale: 0.5,
                 maxScale: 3.5,
-                boundaryMargin: EdgeInsets.zero,
+                boundaryMargin: const EdgeInsets.all(140),
                 onInteractionStart: (details) {
                   if (details.pointerCount > 1) {
                     setState(() {
@@ -142,145 +142,172 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 },
                 child: Center(
                   child: Padding(
-                    padding: const EdgeInsets.all(14),
+                    padding: const EdgeInsets.all(16),
                     child: AspectRatio(
                       aspectRatio: page.width / math.max(1, page.height),
                       child: FittedBox(
                         fit: BoxFit.contain,
-                        child: RepaintBoundary(
-                          key: widget.exportBoundaryKey,
-                          child: SizedBox(
-                            width: page.width,
-                            height: page.height,
-                            child: Container(
-                              decoration: BoxDecoration(
+                        child: Container(
+                          decoration: widget.forceTransparentBackground
+                              ? null
+                              : BoxDecoration(
+                                  boxShadow: [
+                                    BoxShadow(
+                                      blurRadius: 32,
+                                      spreadRadius: 2,
+                                      offset: const Offset(0, 10),
+                                      color: isDark
+                                          ? Colors.black.withOpacity(0.65)
+                                          : Colors.black.withOpacity(0.18),
+                                    ),
+                                  ],
+                                ),
+                          child: RepaintBoundary(
+                            key: widget.exportBoundaryKey,
+                            child: SizedBox(
+                              width: page.width,
+                              height: page.height,
+                              child: Container(
                                 color: widget.forceTransparentBackground
                                     ? Colors.transparent
                                     : page.backgroundColor,
-                                boxShadow: widget.forceTransparentBackground
-                                    ? null
-                                    : const [BoxShadow(blurRadius: 24, color: Colors.black54)],
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    Positioned.fill(
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.translucent,
+                                        onTap: () {
+                                          if (_blockLayerInteraction) return;
+                                          widget.onSelectLayer(null);
+                                        },
+                                      ),
+                                    ),
+                                    ...page.layers.where((l) => l.visible).map((layer) {
+                                      final selected = widget.showSelectionHandles &&
+                                          !layer.isCanvasBackground &&
+                                          layer.id == widget.selectedLayerId;
+
+                                      final layerChild = Transform.rotate(
+                                        angle: layer.rotation * math.pi / 180.0,
+                                        child: Stack(
+                                          clipBehavior: Clip.none,
+                                          children: [
+                                            Positioned.fill(
+                                              child: Opacity(
+                                                opacity: layer.opacity.clamp(0.0, 1.0),
+                                                child: _buildLayerContent(layer),
+                                              ),
+                                            ),
+                                            if (selected) _buildTouchHandles(layer),
+                                          ],
+                                        ),
+                                      );
+
+                                      return Positioned(
+                                        left: layer.x,
+                                        top: layer.y,
+                                        width: layer.width,
+                                        height: layer.height,
+                                        child: layer.isCanvasBackground
+                                            ? IgnorePointer(ignoring: true, child: layerChild)
+                                            : GestureDetector(
+                                                behavior: HitTestBehavior.opaque,
+                                                onTap: () {
+                                                  if (_blockLayerInteraction) return;
+                                                  widget.onSelectLayer(layer.id);
+                                                },
+                                                onPanStart: (_) {
+                                                  if (_blockLayerInteraction) return;
+                                                  widget.onSelectLayer(layer.id);
+                                                },
+                                                onPanUpdate: layer.locked
+                                                    ? null
+                                                    : (d) {
+                                                        if (_blockLayerInteraction) return;
+                                                        final scale = _transformController.value
+                                                            .getMaxScaleOnAxis()
+                                                            .clamp(0.5, 4.0);
+                                                        layer.x += d.delta.dx / scale;
+                                                        layer.y += d.delta.dy / scale;
+                                                        widget.onUpdateLayer(layer);
+                                                      },
+                                                child: layerChild,
+                                              ),
+                                      );
+                                    }),
+                                  ],
+                                ),
                               ),
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                          Positioned.fill(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.translucent,
-                              onTap: () {
-                                if (_blockLayerInteraction) return;
-                                widget.onSelectLayer(null);
-                              },
                             ),
                           ),
-                          ...page.layers.where((l) => l.visible).map((layer) {
-                            final selected = widget.showSelectionHandles &&
-                                !layer.isCanvasBackground &&
-                                layer.id == widget.selectedLayerId;
-
-                            final layerChild = Transform.rotate(
-                              angle: layer.rotation * math.pi / 180.0,
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  Positioned.fill(
-                                    child: Opacity(
-                                      opacity: layer.opacity.clamp(0.0, 1.0),
-                                      child: _buildLayerContent(layer),
-                                    ),
-                                  ),
-                                  if (selected) _buildTouchHandles(layer),
-                                ],
-                              ),
-                            );
-
-                            return Positioned(
-                              left: layer.x,
-                              top: layer.y,
-                              width: layer.width,
-                              height: layer.height,
-                              child: layer.isCanvasBackground
-                                  ? IgnorePointer(ignoring: true, child: layerChild)
-                                  : GestureDetector(
-                                      behavior: HitTestBehavior.opaque,
-                                      onTap: () {
-                                        if (_blockLayerInteraction) return;
-                                        widget.onSelectLayer(layer.id);
-                                      },
-                                      onPanStart: (_) {
-                                        if (_blockLayerInteraction) return;
-                                        widget.onSelectLayer(layer.id);
-                                      },
-                                      onPanUpdate: layer.locked
-                                          ? null
-                                          : (d) {
-                                              if (_blockLayerInteraction) return;
-                                              final scale = _transformController.value
-                                                  .getMaxScaleOnAxis()
-                                                  .clamp(0.5, 4.0);
-                                              layer.x += d.delta.dx / scale;
-                                              layer.y += d.delta.dy / scale;
-                                              widget.onUpdateLayer(layer);
-                                            },
-                                      child: layerChild,
-                                    ),
-                            );
-                          }),
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        ),
-      ),
-            ),
             Positioned(
-              right: 10,
-              bottom: 10,
+              right: 12,
+              bottom: 12,
               child: Material(
-                elevation: 4,
-                borderRadius: BorderRadius.circular(12),
+                elevation: isDark ? 6 : 3,
+                shadowColor: Colors.black.withOpacity(0.28),
+                borderRadius: BorderRadius.circular(10),
                 color: isDark
-                    ? const Color(0xFF16191E).withOpacity(0.92)
-                    : Colors.white.withOpacity(0.95),
+                    ? const Color(0xFF1A1E26).withOpacity(0.94)
+                    : Colors.white.withOpacity(0.96),
                 child: Container(
+                  height: 36,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: isDark ? Colors.white12 : Colors.black12,
+                      color: isDark ? const Color(0xFF2D3340) : const Color(0xFFE2E8F0),
                     ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      IconButton(
+                      _zoomStepBtn(
+                        icon: Icons.remove_rounded,
                         tooltip: 'Zoom Out',
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.zoom_out_rounded, size: 19),
-                        onPressed: () => _setZoomAroundCenter(
+                        isDark: isDark,
+                        onTap: () => _setZoomAroundCenter(
                           _currentZoom - 0.25,
                           constraints.maxWidth,
                           constraints.maxHeight,
                         ),
                       ),
+                      Container(
+                        width: 1,
+                        height: 18,
+                        color: isDark ? Colors.white12 : Colors.black12,
+                      ),
                       InkWell(
                         onTap: _resetZoom,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
                           child: Text(
                             '${(_currentZoom * 100).round()}%',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                            ),
                           ),
                         ),
                       ),
-                      IconButton(
+                      Container(
+                        width: 1,
+                        height: 18,
+                        color: isDark ? Colors.white12 : Colors.black12,
+                      ),
+                      _zoomStepBtn(
+                        icon: Icons.add_rounded,
                         tooltip: 'Zoom In',
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.zoom_in_rounded, size: 19),
-                        onPressed: () => _setZoomAroundCenter(
+                        isDark: isDark,
+                        onTap: () => _setZoomAroundCenter(
                           _currentZoom + 0.25,
                           constraints.maxWidth,
                           constraints.maxHeight,
@@ -294,6 +321,30 @@ class _LayerCanvasState extends State<LayerCanvas> {
           ],
         );
       },
+    );
+  }
+
+  Widget _zoomStepBtn({
+    required IconData icon,
+    required String tooltip,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 34,
+          height: 34,
+          child: Icon(
+            icon,
+            size: 17,
+            color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+          ),
+        ),
+      ),
     );
   }
 

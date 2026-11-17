@@ -1,9 +1,6 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import '../main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -11,10 +8,14 @@ import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 import '../engine/batch_processor.dart';
 import '../engine/filter_matrix.dart';
 import '../engine/layer_canvas.dart';
+import '../main.dart';
 import '../models/design_project.dart';
 import '../storage/local_project_store.dart';
 
@@ -26,6 +27,9 @@ class StudioScreen extends StatefulWidget {
 }
 
 class _StudioScreenState extends State<StudioScreen> {
+  static const Color _amber = Color(0xFFF59E0B);
+  static const MethodChannel _mediaChannel = MethodChannel('com.qalam.studio/media');
+
   final ImagePicker _picker = ImagePicker();
   final GlobalKey _canvasExportKey = GlobalKey();
   final TextEditingController _textController = TextEditingController();
@@ -35,11 +39,12 @@ class _StudioScreenState extends State<StudioScreen> {
   late DesignProject _project;
   int _pageIndex = 0;
   String? _selectedLayerId;
-  int _navIndex = 0; // 0=Studio, 1=Pages, 2=Batch, 3=Projects
+  int _navIndex = 0; // 0=Studio, 1=Fill, 2=Sign, 3=Docs, 4=Batch, 5=Projects
   int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Filters, 3=Layers
   bool _sheetExpanded = true;
   bool _exportTransparentCanvas = false;
 
+  // Signature Studio state
   int _sigMode = 0;
   String _sigFontFamily = 'GreatVibes';
   Color _sigInkColor = const Color(0xFF0F172A);
@@ -49,7 +54,8 @@ class _StudioScreenState extends State<StudioScreen> {
   bool _sigBold = false;
   bool _sigTransparentBg = true;
   double _sigPenWidth = 4.0;
-  List<(List<Offset>, Color, double)> _sigStrokes = [];
+  Size _sigDrawPadSize = const Size(340, 195);
+  final List<(List<Offset>, Color, double)> _sigStrokes = [];
   List<Offset>? _sigCurrentStroke;
 
   // Batch state
@@ -60,6 +66,17 @@ class _StudioScreenState extends State<StudioScreen> {
   double _batchRemoveWhite = 0.0;
   double _batchBrightness = 1.0;
   double _batchContrast = 1.0;
+
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _cardBg => _isDark ? const Color(0xFF16191E) : Colors.white;
+  Color get _panelBg => _isDark ? const Color(0xFF16191E) : Colors.white;
+  Color get _inputBg => _isDark ? const Color(0xFF111317) : const Color(0xFFF8FAFC);
+  Color get _chipBg => _isDark ? const Color(0xFF222731) : const Color(0xFFF1F5F9);
+  Color get _borderColor => _isDark ? const Color(0xFF262B35) : const Color(0xFFE2E8F0);
+  Color get _textColor => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
+  Color get _subColor => _isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569);
+  Color get _mutedColor => _isDark ? const Color(0xFF64748B) : const Color(0xFF64748B);
+  Color get _accentText => _isDark ? _amber : const Color(0xFFB45309);
 
   @override
   void initState() {
@@ -115,7 +132,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 fontFamily: 'PlusJakartaSans',
                 fontSize: 24,
                 lineHeight: 1.4,
-                textColor: const Color(0xFFF59E0B),
+                textColor: _amber,
               ),
             ],
           ),
@@ -211,20 +228,20 @@ class _StudioScreenState extends State<StudioScreen> {
     final nextName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF191C22),
-        title: const Text('Rename Layer'),
+        backgroundColor: _cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Rename Layer', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           decoration: const InputDecoration(
-            labelText: 'Layer Name (e.g. Name, Father Name, Photo)',
-            border: OutlineInputBorder(),
+            labelText: 'Layer Name (e.g. Name, Photo, Signature)',
           ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black),
+            style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
             child: const Text('Save'),
           ),
@@ -278,13 +295,6 @@ class _StudioScreenState extends State<StudioScreen> {
       SnackBar(content: Text('Replaced "${layer.name}" keeping exact coordinates & filters')),
     );
   }
-
-
-
-
-
-
-  static const MethodChannel _mediaChannel = MethodChannel('com.qalam.studio/media');
 
   Future<String> _saveBytesToDeviceGallery(Uint8List bytes, String fileName) async {
     if (Platform.isAndroid) {
@@ -389,7 +399,7 @@ class _StudioScreenState extends State<StudioScreen> {
           duration: const Duration(seconds: 4),
           action: SnackBarAction(
             label: 'Share',
-            textColor: const Color(0xFFF59E0B),
+            textColor: _amber,
             onPressed: () => Share.shareXFiles([XFile(tmpPath)], text: _project.name),
           ),
         ),
@@ -404,122 +414,129 @@ class _StudioScreenState extends State<StudioScreen> {
     String format = 'png';
     double scale = 2.0;
     bool transparent = false;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: isDark ? const Color(0xFF191C22) : Colors.white,
+      backgroundColor: _cardBg,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Export Options',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            return SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: _mutedColor.withOpacity(0.4),
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('File Format', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Center(child: Text('PNG (Lossless)')),
-                          selected: format == 'png',
-                          selectedColor: const Color(0xFFF59E0B),
-                          onSelected: (_) => setSheetState(() => format = 'png'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Center(child: Text('JPG (Compact)')),
-                          selected: format == 'jpg',
-                          selectedColor: const Color(0xFFF59E0B),
-                          onSelected: (_) => setSheetState(() {
-                            format = 'jpg';
-                            transparent = false;
-                          }),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('Resolution Quality', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      for (final s in [1.0, 2.0, 3.0]) ...[
-                        Expanded(
-                          child: ChoiceChip(
-                            label: Center(
-                              child: Text('${s.round()}x (${(_page.width * s).round()}px)'),
-                            ),
-                            selected: scale == s,
-                            selectedColor: const Color(0xFFF59E0B),
-                            onSelected: (_) => setSheetState(() => scale = s),
-                          ),
-                        ),
-                        if (s != 3.0) const SizedBox(width: 6),
-                      ],
-                    ],
-                  ),
-                  if (format == 'png') ...[
-                    const SizedBox(height: 6),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Transparent Background (PNG)', style: TextStyle(fontSize: 13)),
-                      value: transparent,
-                      onChanged: (v) => setSheetState(() => transparent = v),
                     ),
-                  ],
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFFF59E0B),
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 13),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: _amber.withOpacity(0.16),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          onPressed: () {
-                            Navigator.pop(ctx);
-                            _executeExport(
-                              format: format,
-                              scale: scale,
-                              transparent: transparent,
-                              shareOnly: false,
-                              asPdf: false,
-                            );
-                          },
-                          icon: const Icon(Icons.save_alt_rounded, size: 18),
-                          label: const Text('Save Gallery'),
+                          child: Icon(Icons.download_rounded, color: _accentText, size: 20),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Export Options', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                              Text(
+                                '${_page.width.round()} × ${_page.height.round()} px · ${(scale).toInt()}x Output',
+                                style: TextStyle(fontSize: 12, color: _subColor),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Text('File Format', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _optionTile(
+                            label: 'PNG (Lossless)',
+                            selected: format == 'png',
+                            onTap: () => setSheetState(() => format = 'png'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _optionTile(
+                            label: 'JPG (Compact)',
+                            selected: format == 'jpg',
+                            onTap: () => setSheetState(() {
+                              format = 'jpg';
+                              transparent = false;
+                            }),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Text('Resolution Scale', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        for (final s in [1.0, 2.0, 3.0]) ...[
+                          Expanded(
+                            child: _optionTile(
+                              label: s == 1.0 ? '1x Std' : (s == 2.0 ? '2x HD' : '3x Ultra'),
+                              selected: scale == s,
+                              onTap: () => setSheetState(() => scale = s),
+                            ),
+                          ),
+                          if (s != 3.0) const SizedBox(width: 8),
+                        ],
+                      ],
+                    ),
+                    if (format == 'png') ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: _inputBg,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: _borderColor),
+                        ),
+                        child: SwitchListTile(
+                          dense: true,
+                          title: const Text('Transparent Background', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                          subtitle: Text('Export overlays without canvas fill', style: TextStyle(fontSize: 11, color: _subColor)),
+                          value: transparent,
+                          activeColor: _amber,
+                          onChanged: (v) => setSheetState(() => transparent = v),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+                    ],
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _amber,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                         onPressed: () {
                           Navigator.pop(ctx);
@@ -527,39 +544,99 @@ class _StudioScreenState extends State<StudioScreen> {
                             format: format,
                             scale: scale,
                             transparent: transparent,
-                            shareOnly: true,
+                            shareOnly: false,
                             asPdf: false,
                           );
                         },
-                        icon: const Icon(Icons.share_outlined, size: 18),
-                        label: const Text('Share'),
+                        icon: const Icon(Icons.save_alt_rounded, size: 19),
+                        label: const Text('Save to Gallery', style: TextStyle(fontWeight: FontWeight.w700)),
                       ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 13),
+                              side: BorderSide(color: _borderColor),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _executeExport(
+                                format: format,
+                                scale: scale,
+                                transparent: transparent,
+                                shareOnly: true,
+                                asPdf: false,
+                              );
+                            },
+                            icon: const Icon(Icons.share_outlined, size: 18),
+                            label: const Text('Share'),
+                          ),
                         ),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _executeExport(
-                            format: 'png',
-                            scale: scale,
-                            transparent: false,
-                            shareOnly: false,
-                            asPdf: true,
-                          );
-                        },
-                        icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-                        label: const Text('PDF'),
-                      ),
-                    ],
-                  ),
-                ],
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 13),
+                              side: BorderSide(color: _borderColor),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _executeExport(
+                                format: 'png',
+                                scale: scale,
+                                transparent: false,
+                                shareOnly: false,
+                                asPdf: true,
+                              );
+                            },
+                            icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                            label: const Text('Print / PDF'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             );
           },
         );
       },
+    );
+  }
+
+  Widget _optionTile({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? _amber : _chipBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? _amber : _borderColor),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w700,
+            color: selected ? Colors.black : _textColor,
+          ),
+        ),
+      ),
     );
   }
 
@@ -598,8 +675,8 @@ class _StudioScreenState extends State<StudioScreen> {
       } else {
         _page.layers.insert(0, canvasLayer);
       }
-      _selectedLayerId = null; // Never select or move canvas photo on canvas
-      _inspectorTab = 2; // Open Filters tab right away
+      _selectedLayerId = null;
+      _inspectorTab = 2;
       _sheetExpanded = true;
     });
     await _saveCurrentProject(showToast: false);
@@ -695,6 +772,28 @@ class _StudioScreenState extends State<StudioScreen> {
     });
   }
 
+  void _deleteSelectedLayer() {
+    final l = _activeLayer;
+    if (l == null || l.isCanvasBackground) return;
+    setState(() {
+      _page.layers.removeWhere((x) => x.id == l.id);
+      _selectedLayerId = null;
+    });
+  }
+
+  void _moveLayerOrder(DesignLayer layer, int delta) {
+    if (layer.isCanvasBackground) return;
+    final idx = _page.layers.indexWhere((x) => x.id == layer.id);
+    if (idx == -1) return;
+    final minIdx = _page.layers.isNotEmpty && _page.layers.first.isCanvasBackground ? 1 : 0;
+    final target = (idx + delta).clamp(minIdx, _page.layers.length - 1);
+    if (target == idx) return;
+    setState(() {
+      final item = _page.layers.removeAt(idx);
+      _page.layers.insert(target, item);
+    });
+  }
+
   Future<void> _applyWhiteRemoval(DesignLayer layer, double tolerance) async {
     if (layer.localImagePath == null) return;
     if (tolerance <= 0) {
@@ -713,31 +812,96 @@ class _StudioScreenState extends State<StudioScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final barBg = isDark ? const Color(0xFF16191E) : Colors.white;
-    final stageBg = isDark ? const Color(0xFF0D0F12) : const Color(0xFFE5E7EB);
+    final stageBg = _isDark ? const Color(0xFF0A0C0F) : const Color(0xFFE5E7EB);
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: barBg,
-        surfaceTintColor: Colors.transparent,
-        title: Text(_project.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        toolbarHeight: 58,
+        titleSpacing: 14,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: _borderColor),
+        ),
+        title: Row(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: _amber,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              alignment: Alignment.center,
+              child: const Text(
+                'Q',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _project.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    '${_page.title} · ${_page.width.round()}×${_page.height.round()}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: _subColor),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
-            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-            icon: Icon(isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined, color: const Color(0xFFF59E0B)),
+            tooltip: _isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+            icon: Icon(
+              _isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              color: _accentText,
+              size: 21,
+            ),
             onPressed: () {
-              appThemeMode.value = isDark ? ThemeMode.light : ThemeMode.dark;
+              appThemeMode.value = _isDark ? ThemeMode.light : ThemeMode.dark;
             },
           ),
-          IconButton(tooltip: 'Save Offline', icon: const Icon(Icons.save_outlined), onPressed: _saveCurrentProject),
-          IconButton(tooltip: 'Export Options', icon: const Icon(Icons.download_rounded, color: Color(0xFFF59E0B)), onPressed: _showExportOptionsSheet),
+          IconButton(
+            tooltip: 'Save Offline',
+            icon: const Icon(Icons.save_outlined, size: 21),
+            onPressed: _saveCurrentProject,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 10, left: 2),
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: _amber,
+                foregroundColor: Colors.black,
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+              onPressed: _showExportOptionsSheet,
+              icon: const Icon(Icons.download_rounded, size: 17),
+              label: const Text('Export', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+            ),
+          ),
         ],
       ),
       body: IndexedStack(
         index: _navIndex,
         children: [
-          _buildStudioView(stageBg, barBg, isDark),
+          _buildStudioView(stageBg),
           _navIndex == 1 ? _buildQuickFillView() : const SizedBox.shrink(),
           _navIndex == 2 ? _buildSignatureView() : const SizedBox.shrink(),
           _buildPagesView(),
@@ -745,30 +909,36 @@ class _StudioScreenState extends State<StudioScreen> {
           _buildProjectsView(),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _navIndex,
-        backgroundColor: barBg,
-        indicatorColor: const Color(0xFFF59E0B).withOpacity(0.22),
-        onDestinationSelected: (i) => setState(() {
-          _navIndex = i;
-          if (i == 0 && _activeLayer?.type == LayerType.text) {
-            _textController.text = _activeLayer!.text;
-          }
-        }),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.brush_outlined), label: 'Studio'),
-          NavigationDestination(icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
-          NavigationDestination(icon: Icon(Icons.draw_outlined), label: 'Sign'),
-          NavigationDestination(icon: Icon(Icons.description_outlined), label: 'Docs'),
-          NavigationDestination(icon: Icon(Icons.auto_awesome_motion_outlined), label: 'Batch'),
-          NavigationDestination(icon: Icon(Icons.folder_outlined), label: 'Projects'),
-        ],
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: _borderColor)),
+        ),
+        child: NavigationBar(
+          selectedIndex: _navIndex,
+          onDestinationSelected: (i) => setState(() {
+            _navIndex = i;
+            if (i == 0 && _activeLayer?.type == LayerType.text) {
+              _textController.text = _activeLayer!.text;
+            }
+          }),
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.brush_outlined), selectedIcon: Icon(Icons.brush_rounded), label: 'Studio'),
+            NavigationDestination(icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
+            NavigationDestination(icon: Icon(Icons.draw_outlined), selectedIcon: Icon(Icons.draw_rounded), label: 'Sign'),
+            NavigationDestination(icon: Icon(Icons.description_outlined), selectedIcon: Icon(Icons.description_rounded), label: 'Docs'),
+            NavigationDestination(icon: Icon(Icons.auto_awesome_motion_outlined), selectedIcon: Icon(Icons.auto_awesome_motion_rounded), label: 'Batch'),
+            NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder_rounded), label: 'Projects'),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildStudioView(Color stageBg, Color barBg, bool isDark) {
+  Widget _buildStudioView(Color stageBg) {
     final layer = _activeLayer;
+    final screenH = MediaQuery.of(context).size.height;
+    final expandedH = math.min(285.0, math.max(210.0, screenH * 0.35));
+
     return Column(
       children: [
         Expanded(
@@ -785,39 +955,63 @@ class _StudioScreenState extends State<StudioScreen> {
           ),
         ),
         Container(
-          height: 52,
-          color: barBg,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          height: 48,
+          decoration: BoxDecoration(
+            color: _panelBg,
+            border: Border(top: BorderSide(color: _borderColor)),
+          ),
           child: ListView(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             children: [
               _quickBtn(Icons.photo_size_select_large, 'Canvas Pic', _importCanvasImage, highlight: true),
-              _quickBtn(Icons.title, 'Add Text', _addTextLayer),
-              _quickBtn(Icons.add_photo_alternate_outlined, 'Add Overlay', _addOverlayImage),
+              _quickBtn(Icons.title_rounded, 'Add Text', _addTextLayer),
+              _quickBtn(Icons.add_photo_alternate_outlined, 'Overlay', _addOverlayImage),
               _quickBtn(Icons.crop_square_rounded, 'Shape', _addShapeLayer),
-              if (layer != null) _quickBtn(Icons.copy_rounded, 'Duplicate', _duplicateSelectedLayer),
+              if (layer != null) ...[
+                _quickBtn(Icons.copy_rounded, 'Duplicate', _duplicateSelectedLayer),
+                if (!layer.isCanvasBackground)
+                  _quickBtn(Icons.delete_outline_rounded, 'Delete', _deleteSelectedLayer, danger: true),
+              ],
             ],
           ),
         ),
         Container(
-          height: _sheetExpanded ? 275 : 44,
+          height: _sheetExpanded ? expandedH : 44,
           decoration: BoxDecoration(
-            color: barBg,
-            border: Border(top: BorderSide(color: isDark ? Colors.white12 : Colors.black12)),
+            color: _panelBg,
+            border: Border(top: BorderSide(color: _borderColor)),
           ),
           child: Column(
             children: [
-              SizedBox(
+              Container(
                 height: 43,
+                padding: const EdgeInsets.only(left: 8, right: 4),
+                decoration: BoxDecoration(
+                  border: _sheetExpanded ? Border(bottom: BorderSide(color: _borderColor)) : null,
+                ),
                 child: Row(
                   children: [
-                    _tabChip(0, 'Design'),
-                    _tabChip(1, 'Overlay'),
-                    _tabChip(2, 'Filters'),
-                    _tabChip(3, 'Layers (${_page.layers.length})'),
-                    const Spacer(),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            _tabChip(0, 'Design', Icons.tune_rounded),
+                            _tabChip(1, 'Overlay', Icons.layers_outlined),
+                            _tabChip(2, 'Filters', Icons.auto_fix_high_rounded),
+                            _tabChip(3, 'Layers (${_page.layers.length})', Icons.format_list_bulleted_rounded),
+                          ],
+                        ),
+                      ),
+                    ),
                     IconButton(
-                      icon: Icon(_sheetExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up),
+                      visualDensity: VisualDensity.compact,
+                      tooltip: _sheetExpanded ? 'Collapse Panel' : 'Expand Panel',
+                      icon: Icon(
+                        _sheetExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
+                        color: _subColor,
+                      ),
                       onPressed: () => setState(() => _sheetExpanded = !_sheetExpanded),
                     ),
                   ],
@@ -837,37 +1031,77 @@ class _StudioScreenState extends State<StudioScreen> {
     );
   }
 
-  Widget _quickBtn(IconData icon, String label, VoidCallback onTap, {bool highlight = false}) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  Widget _quickBtn(
+    IconData icon,
+    String label,
+    VoidCallback onTap, {
+    bool highlight = false,
+    bool danger = false,
+  }) {
+    final bg = highlight
+        ? _amber
+        : (danger ? Colors.redAccent.withOpacity(0.12) : _chipBg);
+    final fg = highlight
+        ? Colors.black
+        : (danger ? Colors.redAccent : _textColor);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-      child: FilledButton.icon(
-        style: FilledButton.styleFrom(
-          backgroundColor: highlight ? const Color(0xFFF59E0B) : (isDark ? Colors.white10 : Colors.black.withOpacity(0.06)),
-          foregroundColor: highlight ? Colors.black : (isDark ? Colors.white : Colors.black87),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.only(right: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(9),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(9),
+            border: highlight ? null : Border.all(color: danger ? Colors.redAccent.withOpacity(0.3) : _borderColor),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 15, color: fg),
+              const SizedBox(width: 5),
+              Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg)),
+            ],
+          ),
         ),
-        onPressed: onTap,
-        icon: Icon(icon, size: 16),
-        label: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
       ),
     );
   }
 
-  Widget _tabChip(int idx, String label) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  Widget _tabChip(int idx, String label, IconData icon) {
     final active = _inspectorTab == idx;
     return Padding(
-      padding: const EdgeInsets.only(left: 6),
-      child: ChoiceChip(
-        label: Text(label, style: TextStyle(fontSize: 11, color: active ? Colors.black : (isDark ? Colors.white70 : Colors.black87))),
-        selected: active,
-        selectedColor: const Color(0xFFF59E0B),
-        backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.06),
-        onSelected: (_) => setState(() {
+      padding: const EdgeInsets.only(right: 6),
+      child: InkWell(
+        onTap: () => setState(() {
           _inspectorTab = idx;
           _sheetExpanded = true;
         }),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: active ? _amber : _chipBg,
+            borderRadius: BorderRadius.circular(8),
+            border: active ? null : Border.all(color: _borderColor),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: active ? Colors.black : _subColor),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+                  color: active ? Colors.black : _textColor,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -875,65 +1109,116 @@ class _StudioScreenState extends State<StudioScreen> {
   Widget _buildInspectorBody(DesignLayer? layer) {
     // TAB 3: LAYERS
     if (_inspectorTab == 3) {
+      if (_page.layers.isEmpty) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text('No layers yet. Use Add Text, Overlay, or Canvas Pic above.', style: TextStyle(color: _subColor)),
+        );
+      }
       final reversed = _page.layers.reversed.toList();
       return Column(
         children: reversed.map((l) {
           final isSel = !l.isCanvasBackground && l.id == _selectedLayerId;
-          return Card(
-            color: isSel ? const Color(0xFFF59E0B).withOpacity(0.15) : Colors.white.withOpacity(0.04),
-            child: ListTile(
-              dense: true,
-              onTap: l.isCanvasBackground
-                  ? () => setState(() {
-                        _selectedLayerId = null;
-                        _inspectorTab = 2;
-                      })
-                  : () => _selectLayer(l.id),
-              title: Text(
-                l.isCanvasBackground ? '${l.name} (Fixed Canvas BG)' : l.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text('${(l.opacity * 100).round()}% · ${l.blendMode.name}'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Rename Layer',
-                    icon: const Icon(Icons.edit_outlined, size: 18),
-                    onPressed: () => _renameLayerDialog(l),
+          final typeIcon = l.isCanvasBackground
+              ? Icons.wallpaper_rounded
+              : (l.type == LayerType.text
+                  ? Icons.title_rounded
+                  : (l.type == LayerType.image ? Icons.image_outlined : Icons.crop_square_rounded));
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.fromLTRB(10, 8, 8, 6),
+            decoration: BoxDecoration(
+              color: isSel ? _amber.withOpacity(0.12) : _inputBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: isSel ? _amber : _borderColor, width: isSel ? 1.4 : 1),
+            ),
+            child: Column(
+              children: [
+                InkWell(
+                  onTap: l.isCanvasBackground
+                      ? () => setState(() {
+                            _selectedLayerId = null;
+                            _inspectorTab = 2;
+                          })
+                      : () => _selectLayer(l.id),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: isSel ? _amber.withOpacity(0.22) : _chipBg,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(typeIcon, size: 16, color: isSel ? _accentText : _subColor),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l.isCanvasBackground ? '${l.name} (Fixed Canvas BG)' : l.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              '${(l.opacity * 100).round()}% · ${l.blendMode.name} · ${l.width.round()}×${l.height.round()}',
+                              style: TextStyle(fontSize: 11, color: _subColor),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  if (l.type == LayerType.image)
-                    IconButton(
-                      tooltip: 'Replace Image (Same Pos & Filters)',
-                      icon: const Icon(Icons.swap_horiz_rounded, size: 18, color: Color(0xFFF59E0B)),
-                      onPressed: () => _replaceLayerImageKeepingConfig(l),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (!l.isCanvasBackground) ...[
+                      _compactLayerIcon(Icons.arrow_upward_rounded, 'Bring Forward', () => _moveLayerOrder(l, 1)),
+                      _compactLayerIcon(Icons.arrow_downward_rounded, 'Send Backward', () => _moveLayerOrder(l, -1)),
+                    ],
+                    _compactLayerIcon(Icons.edit_outlined, 'Rename Layer', () => _renameLayerDialog(l)),
+                    if (l.type == LayerType.image)
+                      _compactLayerIcon(
+                        Icons.swap_horiz_rounded,
+                        'Replace Image',
+                        () => _replaceLayerImageKeepingConfig(l),
+                        color: _accentText,
+                      ),
+                    _compactLayerIcon(
+                      l.visible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      l.visible ? 'Hide' : 'Show',
+                      () => setState(() => l.visible = !l.visible),
                     ),
-                  IconButton(
-                    icon: Icon(l.visible ? Icons.visibility : Icons.visibility_off, size: 18),
-                    onPressed: () => setState(() => l.visible = !l.visible),
-                  ),
-                  if (!l.isCanvasBackground)
-                    IconButton(
-                      icon: Icon(l.locked ? Icons.lock : Icons.lock_open, size: 18),
-                      onPressed: () => setState(() => l.locked = !l.locked),
+                    if (!l.isCanvasBackground)
+                      _compactLayerIcon(
+                        l.locked ? Icons.lock_outline : Icons.lock_open_rounded,
+                        l.locked ? 'Unlock' : 'Lock',
+                        () => setState(() => l.locked = !l.locked),
+                      ),
+                    _compactLayerIcon(
+                      Icons.delete_outline_rounded,
+                      'Delete',
+                      () => setState(() {
+                        _page.layers.removeWhere((x) => x.id == l.id);
+                        if (_selectedLayerId == l.id) _selectedLayerId = null;
+                      }),
+                      color: Colors.redAccent,
                     ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-                    onPressed: () => setState(() {
-                      _page.layers.removeWhere((x) => x.id == l.id);
-                      if (_selectedLayerId == l.id) _selectedLayerId = null;
-                    }),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ),
           );
         }).toList(),
       );
     }
 
-    // TAB 2: FILTERS (supports selected overlay OR locked Canvas Background photo!)
+    // TAB 2: FILTERS
     if (_inspectorTab == 2) {
       DesignLayer? bgPhoto;
       for (final l in _page.layers) {
@@ -944,10 +1229,12 @@ class _StudioScreenState extends State<StudioScreen> {
       }
       final targetImg = (layer != null && layer.type == LayerType.image) ? layer : bgPhoto;
       if (targetImg == null) {
-        return const Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('Import a Canvas Pic or select an Overlay Image to apply Black & White, Remove White BG, or color filters.',
-              style: TextStyle(color: Colors.white70)),
+        return Padding(
+          padding: const EdgeInsets.all(14),
+          child: Text(
+            'Import a Canvas Pic or select an Overlay Image to apply Black & White, Remove White BG, or color filters.',
+            style: TextStyle(color: _subColor, fontSize: 13),
+          ),
         );
       }
       final isBw = targetImg.filters.blackAndWhite || targetImg.filters.grayscale >= 0.99;
@@ -956,22 +1243,45 @@ class _StudioScreenState extends State<StudioScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              targetImg.isCanvasBackground
-                  ? 'Canvas Photo: ${targetImg.name}'
-                  : 'Image: ${targetImg.name}',
-              style: const TextStyle(fontSize: 12, color: Colors.amber, fontWeight: FontWeight.w600),
-            ),
+          Row(
+            children: [
+              Icon(Icons.auto_fix_high_rounded, size: 15, color: _accentText),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  targetImg.isCanvasBackground
+                      ? 'Canvas Photo: ${targetImg.name}'
+                      : 'Image: ${targetImg.name}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12.5, color: _accentText, fontWeight: FontWeight.w700),
+                ),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                onPressed: () async {
+                  setState(() {
+                    targetImg.filters = FilterSettings();
+                    targetImg.processedWhiteRemovedBytes = null;
+                  });
+                  await _saveCurrentProject(showToast: false);
+                },
+                child: const Text('Reset', style: TextStyle(fontSize: 12)),
+              ),
+            ],
           ),
+          const SizedBox(height: 6),
           Row(
             children: [
               Expanded(
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: isBw ? const Color(0xFFF59E0B) : Colors.white12,
-                    foregroundColor: isBw ? Colors.black : Colors.white,
+                    backgroundColor: isBw ? _amber : _chipBg,
+                    foregroundColor: isBw ? Colors.black : _textColor,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () async {
                     setState(() {
@@ -981,26 +1291,28 @@ class _StudioScreenState extends State<StudioScreen> {
                     });
                     await _saveCurrentProject(showToast: false);
                   },
-                  icon: const Icon(Icons.contrast, size: 18),
-                  label: const Text('Black & White', style: TextStyle(fontSize: 12)),
+                  icon: const Icon(Icons.contrast, size: 17),
+                  label: const Text('Black & White', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: isWhiteRemoved ? const Color(0xFF10B981) : Colors.white12,
-                    foregroundColor: isWhiteRemoved ? Colors.black : Colors.white,
+                    backgroundColor: isWhiteRemoved ? const Color(0xFF10B981) : _chipBg,
+                    foregroundColor: isWhiteRemoved ? Colors.black : _textColor,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () => _applyWhiteRemoval(targetImg, isWhiteRemoved ? 0.0 : 35.0),
-                  icon: const Icon(Icons.auto_fix_high, size: 18),
-                  label: const Text('Remove White BG', style: TextStyle(fontSize: 12)),
+                  icon: const Icon(Icons.auto_fix_high, size: 17),
+                  label: const Text('Remove White BG', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 ),
               ),
             ],
           ),
+          const SizedBox(height: 6),
           if (isWhiteRemoved)
-            _sliderRow('White Tolerance', targetImg.filters.removeWhite, 5, 95,
+            _sliderRow('White Tol.', targetImg.filters.removeWhite, 5, 95,
                 (v) => _applyWhiteRemoval(targetImg, v)),
           _sliderRow('Brightness', targetImg.filters.brightness, 0.4, 1.8,
               (v) => setState(() => targetImg.filters.brightness = v)),
@@ -1015,10 +1327,12 @@ class _StudioScreenState extends State<StudioScreen> {
     // TAB 1: OVERLAY & TRANSFORM
     if (_inspectorTab == 1) {
       if (layer == null) {
-        return const Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('Tap any layer on the canvas to adjust Opacity, Blend Mode, Rotation, or Nudge.',
-              style: TextStyle(color: Colors.white70)),
+        return Padding(
+          padding: const EdgeInsets.all(14),
+          child: Text(
+            'Tap any layer on the canvas to adjust exact Size, Opacity, Blend Mode, Rotation, or Nudge.',
+            style: TextStyle(color: _subColor, fontSize: 13),
+          ),
         );
       }
       final blends = [
@@ -1033,35 +1347,57 @@ class _StudioScreenState extends State<StudioScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildExactSizeInputs(layer),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _sliderRow('Opacity', layer.opacity, 0.0, 1.0, (v) => setState(() => layer.opacity = v)),
           _sliderRow('Rotation', layer.rotation, -180.0, 180.0, (v) => setState(() => layer.rotation = v)),
           const SizedBox(height: 6),
-          const Text('Blend Mode', style: TextStyle(fontSize: 12, color: Colors.white70)),
+          Text('Blend Mode', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 6,
+            runSpacing: 6,
             children: blends.map((b) {
               final sel = layer.blendMode == b;
-              return ChoiceChip(
-                label: Text(b.name, style: TextStyle(fontSize: 11, color: sel ? Colors.black : Colors.white)),
+              return _choicePill(
+                label: b.name,
                 selected: sel,
-                selectedColor: const Color(0xFFF59E0B),
-                onSelected: (_) => setState(() => layer.blendMode = b),
+                onTap: () => setState(() => layer.blendMode = b),
               );
             }).toList(),
           ),
-          const SizedBox(height: 8),
-          _buildExactSizeInputs(layer),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(onPressed: () => setState(() => layer.x -= 5), icon: const Icon(Icons.arrow_back)),
-              IconButton(onPressed: () => setState(() => layer.y -= 5), icon: const Icon(Icons.arrow_upward)),
-              IconButton(onPressed: () => setState(() => layer.y += 5), icon: const Icon(Icons.arrow_downward)),
-              IconButton(onPressed: () => setState(() => layer.x += 5), icon: const Icon(Icons.arrow_forward)),
-            ],
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: _inputBg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _borderColor),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Nudge (5px)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _compactLayerIcon(Icons.arrow_back_rounded, 'Left', () => setState(() => layer.x -= 5)),
+                    _compactLayerIcon(Icons.arrow_upward_rounded, 'Up', () => setState(() => layer.y -= 5)),
+                    _compactLayerIcon(Icons.arrow_downward_rounded, 'Down', () => setState(() => layer.y += 5)),
+                    _compactLayerIcon(Icons.arrow_forward_rounded, 'Right', () => setState(() => layer.x += 5)),
+                    const SizedBox(width: 4),
+                    _compactLayerIcon(
+                      Icons.center_focus_strong_outlined,
+                      'Center on Canvas',
+                      () => setState(() {
+                        layer.x = (_page.width - layer.width) / 2;
+                        layer.y = (_page.height - layer.height) / 2;
+                      }),
+                      color: _accentText,
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
       );
@@ -1069,41 +1405,57 @@ class _StudioScreenState extends State<StudioScreen> {
 
     // TAB 0: DESIGN
     if (layer == null) {
+      final bgColors = [
+        const Color(0xFF191C22),
+        const Color(0xFF000000),
+        const Color(0xFFFFFFFF),
+        const Color(0xFFFAF9F6),
+        Colors.transparent,
+      ];
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           FilledButton.icon(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black),
+            style: FilledButton.styleFrom(
+              backgroundColor: _amber,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
             onPressed: _importCanvasImage,
-            icon: const Icon(Icons.upload_rounded),
-            label: const Text('Import Canvas Image (Match Photo Size)'),
+            icon: const Icon(Icons.upload_rounded, size: 18),
+            label: const Text('Import Canvas Image (Match Photo Size)', style: TextStyle(fontWeight: FontWeight.w700)),
           ),
           const SizedBox(height: 12),
-          const Text('Canvas Background', style: TextStyle(fontSize: 12, color: Colors.white70)),
+          Text('Canvas Background', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 8),
           Wrap(
-            spacing: 8,
-            children: [
-              const Color(0xFF191C22),
-              const Color(0xFF000000),
-              const Color(0xFFFFFFFF),
-              const Color(0xFFFAF9F6),
-              Colors.transparent,
-            ].map((c) {
+            spacing: 10,
+            runSpacing: 8,
+            children: bgColors.map((c) {
+              final sel = _page.backgroundColor.value == c.value;
               return GestureDetector(
                 onTap: () => setState(() => _page.backgroundColor = c),
                 child: Container(
-                  width: 34,
-                  height: 34,
+                  width: 38,
+                  height: 38,
                   decoration: BoxDecoration(
-                    color: c == Colors.transparent ? Colors.grey.shade800 : c,
-                    borderRadius: BorderRadius.circular(8),
+                    color: c == Colors.transparent ? _chipBg : c,
+                    borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: _page.backgroundColor == c ? const Color(0xFFF59E0B) : Colors.white24,
-                      width: 2,
+                      color: sel ? _amber : _borderColor,
+                      width: sel ? 2.5 : 1.2,
                     ),
                   ),
-                  child: c == Colors.transparent ? const Icon(Icons.grid_on, size: 16) : null,
+                  child: c == Colors.transparent
+                      ? Icon(Icons.grid_on_rounded, size: 17, color: _subColor)
+                      : (sel
+                          ? Icon(
+                              Icons.check_rounded,
+                              size: 18,
+                              color: c.computeLuminance() > 0.5 ? Colors.black : Colors.white,
+                            )
+                          : null),
                 ),
               );
             }).toList(),
@@ -1113,7 +1465,7 @@ class _StudioScreenState extends State<StudioScreen> {
     }
 
     if (layer.type == LayerType.text) {
-      final fontItems = const [
+      const fontItems = [
         ('NotoNastaliqUrdu', 'Urdu Nastaliq', true, 2.3),
         ('Gulzar', 'Gulzar Urdu', true, 2.1),
         ('NotoNaskhArabic', 'Naskh Urdu', true, 1.9),
@@ -1132,24 +1484,23 @@ class _StudioScreenState extends State<StudioScreen> {
           TextField(
             controller: _textController,
             textDirection: layer.isRtl ? TextDirection.rtl : TextDirection.ltr,
-            maxLines: 3,
+            maxLines: 2,
             decoration: const InputDecoration(
               labelText: 'Edit Text (Urdu / English)',
-              border: OutlineInputBorder(),
             ),
             onChanged: (val) => setState(() => layer.text = val),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+          Text('Font Family', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: fontItems.map((f) {
-              final sel = layer.fontFamily == f.$1;
-              return ChoiceChip(
-                label: Text(f.$2, style: TextStyle(fontSize: 11, color: sel ? Colors.black : Colors.white)),
-                selected: sel,
-                selectedColor: const Color(0xFFF59E0B),
-                onSelected: (_) => setState(() {
+              return _choicePill(
+                label: f.$2,
+                selected: layer.fontFamily == f.$1,
+                onTap: () => setState(() {
                   layer.fontFamily = f.$1;
                   layer.isRtl = f.$3;
                   layer.lineHeight = f.$4;
@@ -1158,28 +1509,29 @@ class _StudioScreenState extends State<StudioScreen> {
               );
             }).toList(),
           ),
+          const SizedBox(height: 8),
           Row(
             children: [
-              ChoiceChip(
-                label: Text('Regular', style: TextStyle(fontSize: 11, color: layer.fontWeight < 550 ? Colors.black : Colors.white)),
+              _choicePill(
+                label: 'Regular',
                 selected: layer.fontWeight < 550,
-                selectedColor: const Color(0xFFF59E0B),
-                onSelected: (_) => setState(() => layer.fontWeight = 400),
+                onTap: () => setState(() => layer.fontWeight = 400),
               ),
               const SizedBox(width: 8),
-              ChoiceChip(
-                label: Text('Halka Bold (SemiBold)', style: TextStyle(fontSize: 11, color: layer.fontWeight >= 550 ? Colors.black : Colors.white)),
+              _choicePill(
+                label: 'Halka Bold (SemiBold)',
                 selected: layer.fontWeight >= 550,
-                selectedColor: const Color(0xFFF59E0B),
-                onSelected: (_) => setState(() => layer.fontWeight = 600),
+                onTap: () => setState(() => layer.fontWeight = 600),
               ),
             ],
           ),
+          const SizedBox(height: 4),
           _sliderRow('Text Scale', layer.fontSize, 12, 200, (v) => setState(() => layer.fontSize = v)),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
                   onPressed: () => setState(() => layer.fontSize = (layer.fontSize - 6).clamp(12.0, 200.0)),
                   child: const Text('A− Smaller'),
                 ),
@@ -1187,25 +1539,39 @@ class _StudioScreenState extends State<StudioScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
                   onPressed: () => setState(() => layer.fontSize = (layer.fontSize + 6).clamp(12.0, 200.0)),
                   child: const Text('A+ Larger'),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 8,
+            spacing: 10,
             children: [
               const Color(0xFFFFFFFF),
-              const Color(0xFFF59E0B),
+              _amber,
               const Color(0xFF0F172A),
               const Color(0xFF10B981),
               const Color(0xFFE11D48),
+              const Color(0xFF2563EB),
             ].map((c) {
+              final sel = layer.textColor.value == c.value;
               return GestureDetector(
                 onTap: () => setState(() => layer.textColor = c),
-                child: CircleAvatar(radius: 14, backgroundColor: c),
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: c,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: sel ? _amber : _borderColor,
+                      width: sel ? 3 : 1.2,
+                    ),
+                  ),
+                ),
               );
             }).toList(),
           ),
@@ -1234,12 +1600,14 @@ class _StudioScreenState extends State<StudioScreen> {
               Expanded(
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: layer.aspectLocked ? const Color(0xFFF59E0B) : Colors.white12,
-                    foregroundColor: layer.aspectLocked ? Colors.black : Colors.white,
+                    backgroundColor: layer.aspectLocked ? _amber : _chipBg,
+                    foregroundColor: layer.aspectLocked ? Colors.black : _textColor,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () => setState(() => layer.aspectLocked = !layer.aspectLocked),
                   icon: Icon(layer.aspectLocked ? Icons.lock : Icons.lock_open, size: 16),
-                  label: Text(layer.aspectLocked ? 'Ratio Locked' : 'Free Stretch'),
+                  label: Text(layer.aspectLocked ? 'Ratio Locked' : 'Free Stretch',
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                 ),
               ),
             ],
@@ -1249,6 +1617,7 @@ class _StudioScreenState extends State<StudioScreen> {
             children: [
               Expanded(
                 child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
                   onPressed: () => applyImageScale(curScale - 10),
                   child: const Text('− Smaller'),
                 ),
@@ -1256,6 +1625,7 @@ class _StudioScreenState extends State<StudioScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
                   onPressed: () => applyImageScale(curScale + 10),
                   child: const Text('+ Larger'),
                 ),
@@ -1268,8 +1638,82 @@ class _StudioScreenState extends State<StudioScreen> {
       );
     }
 
-    return _sliderRow('Corner Radius', layer.borderRadius, 0, 120,
-        (v) => setState(() => layer.borderRadius = v));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sliderRow('Corner Radius', layer.borderRadius, 0, 120,
+            (v) => setState(() => layer.borderRadius = v)),
+        const SizedBox(height: 6),
+        Text('Shape Color', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 10,
+          children: [
+            const Color(0xFF111317),
+            const Color(0xFFFFFFFF),
+            _amber,
+            const Color(0xFF10B981),
+            const Color(0xFFE11D48),
+            const Color(0xFF2563EB),
+          ].map((c) {
+            final sel = layer.textColor.value == c.value;
+            return GestureDetector(
+              onTap: () => setState(() => layer.textColor = c),
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: c,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: sel ? _amber : _borderColor, width: sel ? 3 : 1.2),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _choicePill({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? _amber : _chipBg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: selected ? _amber : _borderColor),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected ? Colors.black : _textColor,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _compactLayerIcon(IconData icon, String tooltip, VoidCallback onTap, {Color? color}) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(icon, size: 17, color: color ?? _subColor),
+        ),
+      ),
+    );
   }
 
   Widget _buildExactSizeInputs(DesignLayer layer) {
@@ -1331,13 +1775,21 @@ class _StudioScreenState extends State<StudioScreen> {
     final iMax = inputMax ?? max;
     return Row(
       children: [
-        SizedBox(width: 90, child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.white70))),
+        SizedBox(
+          width: 88,
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: _subColor),
+          ),
+        ),
         Expanded(
           child: Slider(
             value: val.clamp(min, max),
             min: min,
             max: max,
-            activeColor: const Color(0xFFF59E0B),
+            activeColor: _amber,
             onChanged: onChanged,
             onChangeEnd: onChangeEnd,
           ),
@@ -1357,17 +1809,19 @@ class _StudioScreenState extends State<StudioScreen> {
             ),
           )
         else
-          SizedBox(width: 40, child: Text(val.toStringAsFixed(val > 5 ? 0 : 2), style: const TextStyle(fontSize: 11))),
+          SizedBox(
+            width: 42,
+            child: Text(
+              val.toStringAsFixed(val > 5 ? 0 : 2),
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _textColor),
+            ),
+          ),
       ],
     );
   }
 
   Widget _buildQuickFillView() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark ? const Color(0xFF191C22) : Colors.white;
-    final boxBg = isDark ? const Color(0xFF111317) : const Color(0xFFF1F5F9);
-    final subColor = isDark ? Colors.white60 : Colors.black54;
-    final mutedColor = isDark ? Colors.white54 : Colors.black45;
     final fields = _page.layers.where((l) => l.type == LayerType.text || l.type == LayerType.image).toList();
     final textFields = _page.layers.where((l) => l.type == LayerType.text).toList();
 
@@ -1380,13 +1834,17 @@ class _StudioScreenState extends State<StudioScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Quick Fill Form', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  Text('Edit text & replace images by Layer Name — same coordinates & filters kept!', style: TextStyle(fontSize: 12, color: subColor)),
+                  const Text('Quick Fill Form', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  Text(
+                    'Update text & photos by Layer Name — exact coordinates & filters kept',
+                    style: TextStyle(fontSize: 12, color: _subColor),
+                  ),
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black),
+              style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
               onPressed: () => setState(() => _navIndex = 0),
               icon: const Icon(Icons.brush_outlined, size: 16),
               label: const Text('Studio'),
@@ -1394,15 +1852,19 @@ class _StudioScreenState extends State<StudioScreen> {
           ],
         ),
         if (textFields.length > 1) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFF59E0B)), foregroundColor: const Color(0xFFF59E0B)),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: _amber.withOpacity(0.8)),
+                foregroundColor: _accentText,
+                padding: const EdgeInsets.symmetric(vertical: 11),
+              ),
               onPressed: () async {
                 final chosen = await showModalBottomSheet<(String, String, int, double)>(
                   context: context,
-                  backgroundColor: cardBg,
+                  backgroundColor: _cardBg,
                   builder: (ctx) {
                     const presets = [
                       ('NotoNastaliqUrdu', 'Urdu Nastaliq', 400, 2.3),
@@ -1417,79 +1879,115 @@ class _StudioScreenState extends State<StudioScreen> {
                       ('Oswald', 'Oswald Bold', 400, 1.2),
                       ('BebasNeue', 'Bebas Poster', 400, 1.1),
                     ];
-                    return ListView(
-                      padding: const EdgeInsets.all(12),
-                      children: [
-                        const Padding(padding: EdgeInsets.all(8), child: Text('Pick 1 Font for ALL Text Layers', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
-                        ...presets.map((f) => ListTile(
-                              title: Text(f.$2, style: TextStyle(fontFamily: f.$1)),
-                              trailing: const Icon(Icons.check_circle_outline, color: Color(0xFFF59E0B)),
-                              onTap: () => Navigator.pop(ctx, f),
-                            )),
-                      ],
+                    return SafeArea(
+                      child: ListView(
+                        padding: const EdgeInsets.all(14),
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.all(8),
+                            child: Text('Pick 1 Font for ALL Text Layers', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          ),
+                          ...presets.map((f) => ListTile(
+                                title: Text(f.$2, style: TextStyle(fontFamily: f.$1)),
+                                trailing: Icon(Icons.check_circle_outline, color: _accentText),
+                                onTap: () => Navigator.pop(ctx, f),
+                              )),
+                        ],
+                      ),
                     );
                   },
                 );
                 if (chosen != null) await _applyFontToAllTextLayers(chosen.$1, chosen.$3, chosen.$4);
               },
-              icon: const Icon(Icons.font_download_outlined, size: 16),
-              label: Text('Same Font on All Text Layers (${textFields.length})'),
+              icon: const Icon(Icons.font_download_outlined, size: 17),
+              label: Text('Apply Same Font to All (${textFields.length} Text Layers)'),
             ),
           ),
         ],
         if (_project.pages.length > 1) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
-              children: List.generate(_project.pages.length, (i) => Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(_project.pages[i].title),
-                  selected: i == _pageIndex,
-                  selectedColor: const Color(0xFFF59E0B),
-                  onSelected: (_) => setState(() { _pageIndex = i; _selectedLayerId = null; }),
+              children: List.generate(
+                _project.pages.length,
+                (i) => Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _choicePill(
+                    label: _project.pages[i].title,
+                    selected: i == _pageIndex,
+                    onTap: () => setState(() {
+                      _pageIndex = i;
+                      _selectedLayerId = null;
+                    }),
+                  ),
                 ),
-              )),
+              ),
             ),
           ),
         ],
         const SizedBox(height: 14),
         if (fields.isEmpty)
-          Card(color: cardBg, child: Padding(padding: const EdgeInsets.all(20), child: Text('No text or image layers on this page yet. Add layers in Studio and name them (e.g. Name, Father Name, Photo).', style: TextStyle(color: subColor))))
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Text(
+                'No text or image layers on this page yet. Add layers in Studio and name them (e.g. Name, Father Name, Photo).',
+                style: TextStyle(color: _subColor),
+              ),
+            ),
+          )
         else
           ...fields.map((l) {
             if (l.type == LayerType.text) {
-              return Card(
-                color: cardBg,
-                margin: const EdgeInsets.only(bottom: 12),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
-                        const Icon(Icons.title, size: 16, color: Color(0xFFF59E0B)),
-                        const SizedBox(width: 6),
-                        Expanded(child: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
-                        Text('X:${l.x.round()} Y:${l.y.round()}', style: TextStyle(fontSize: 11, color: mutedColor)),
-                        IconButton(tooltip: 'Rename Field', icon: const Icon(Icons.edit_outlined, size: 16), onPressed: () => _renameLayerDialog(l)),
-                      ]),
-                      const SizedBox(height: 6),
-                      TextFormField(
-                        key: ValueKey('${_project.id}_${_page.id}_${l.id}_${l.name}'),
-                        initialValue: l.text,
-                        textDirection: l.isRtl ? TextDirection.rtl : TextDirection.ltr,
-                        maxLines: null,
-                        style: TextStyle(fontFamily: l.fontFamily, fontSize: 17, fontVariations: [ui.FontVariation('wght', l.fontWeight.toDouble())]),
-                        decoration: InputDecoration(hintText: 'Enter ${l.name}...', border: const OutlineInputBorder(), filled: true, fillColor: boxBg),
-                        onChanged: (val) => setState(() { l.text = val; if (_selectedLayerId == l.id) _textController.text = val; }),
-                      ),
-                    ],
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.title_rounded, size: 16, color: _accentText),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(l.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                            ),
+                            Text('X:${l.x.round()} Y:${l.y.round()}', style: TextStyle(fontSize: 11, color: _mutedColor)),
+                            IconButton(
+                              tooltip: 'Rename Field',
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(Icons.edit_outlined, size: 16),
+                              onPressed: () => _renameLayerDialog(l),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          key: ValueKey('${_project.id}_${_page.id}_${l.id}_${l.name}'),
+                          initialValue: l.text,
+                          textDirection: l.isRtl ? TextDirection.rtl : TextDirection.ltr,
+                          maxLines: null,
+                          style: TextStyle(
+                            fontFamily: l.fontFamily,
+                            fontSize: 17,
+                            fontVariations: [ui.FontVariation('wght', l.fontWeight.toDouble())],
+                          ),
+                          decoration: InputDecoration(hintText: 'Enter ${l.name}...'),
+                          onChanged: (val) => setState(() {
+                            l.text = val;
+                            if (_selectedLayerId == l.id) _textController.text = val;
+                          }),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
             }
+
             final filterTags = <String>[
               if (l.filters.blackAndWhite || l.filters.grayscale >= 0.99) 'B&W',
               if (l.filters.removeWhite > 0) 'White BG Removed (${l.filters.removeWhite.round()}%)',
@@ -1502,36 +2000,81 @@ class _StudioScreenState extends State<StudioScreen> {
             } else if (l.localImagePath != null && File(l.localImagePath!).existsSync()) {
               thumb = Image.file(File(l.localImagePath!), fit: BoxFit.contain);
             }
-            return Card(
-              color: cardBg,
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      const Icon(Icons.image_outlined, size: 16, color: Color(0xFFF59E0B)),
-                      const SizedBox(width: 6),
-                      Expanded(child: Text(l.isCanvasBackground ? '${l.name} (Canvas BG)' : l.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
-                      Text('${l.width.round()}x${l.height.round()}', style: TextStyle(fontSize: 11, color: mutedColor)),
-                      IconButton(tooltip: 'Rename Field', icon: const Icon(Icons.edit_outlined, size: 16), onPressed: () => _renameLayerDialog(l)),
-                    ]),
-                    const SizedBox(height: 8),
-                    Row(children: [
-                      Container(
-                        width: 72, height: 72,
-                        decoration: BoxDecoration(color: boxBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: isDark ? Colors.white12 : Colors.black12)),
-                        child: thumb == null ? Icon(Icons.image_outlined, color: mutedColor) : ClipRRect(borderRadius: BorderRadius.circular(9), child: ColorFiltered(colorFilter: buildLayerColorFilter(l.filters), child: thumb)),
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.image_outlined, size: 16, color: _accentText),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              l.isCanvasBackground ? '${l.name} (Canvas BG)' : l.name,
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                            ),
+                          ),
+                          Text('${l.width.round()}×${l.height.round()}', style: TextStyle(fontSize: 11, color: _mutedColor)),
+                          IconButton(
+                            tooltip: 'Rename Field',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.edit_outlined, size: 16),
+                            onPressed: () => _renameLayerDialog(l),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(filterTags.isEmpty ? 'Same position, size & original filter kept' : 'Filters kept: ${filterTags.join(" · ")}', style: TextStyle(fontSize: 11, color: filterTags.isEmpty ? subColor : (isDark ? Colors.greenAccent : Colors.green.shade700))),
-                        const SizedBox(height: 8),
-                        FilledButton.icon(style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black), onPressed: () => _replaceLayerImageKeepingConfig(l), icon: const Icon(Icons.swap_horiz_rounded, size: 16), label: const Text('Replace Image')),
-                      ])),
-                    ]),
-                  ],
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Container(
+                            width: 72,
+                            height: 72,
+                            decoration: BoxDecoration(
+                              color: _inputBg,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: _borderColor),
+                            ),
+                            child: thumb == null
+                                ? Icon(Icons.image_outlined, color: _mutedColor)
+                                : ClipRRect(
+                                    borderRadius: BorderRadius.circular(9),
+                                    child: ColorFiltered(colorFilter: buildLayerColorFilter(l.filters), child: thumb),
+                                  ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  filterTags.isEmpty
+                                      ? 'Same position, size & original filter kept'
+                                      : 'Filters kept: ${filterTags.join(" · ")}',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: filterTags.isEmpty
+                                        ? _subColor
+                                        : (_isDark ? Colors.greenAccent : Colors.green.shade700),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                FilledButton.icon(
+                                  style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
+                                  onPressed: () => _replaceLayerImageKeepingConfig(l),
+                                  icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                                  label: const Text('Replace Image'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -1547,8 +2090,15 @@ class _StudioScreenState extends State<StudioScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Document Pages', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Document Pages', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                Text('${_project.pages.length} page(s) in current project', style: TextStyle(fontSize: 12, color: _subColor)),
+              ],
+            ),
             FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
               onPressed: () {
                 setState(() {
                   _project.pages.add(DocumentPage(
@@ -1563,33 +2113,90 @@ class _StudioScreenState extends State<StudioScreen> {
                   _navIndex = 0;
                 });
               },
-              icon: const Icon(Icons.add),
+              icon: const Icon(Icons.add, size: 18),
               label: const Text('Add A4 Page'),
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         ...List.generate(_project.pages.length, (i) {
           final pg = _project.pages[i];
-          return Card(
-            color: i == _pageIndex ? const Color(0xFFF59E0B).withOpacity(0.15) : const Color(0xFF191C22),
-            child: ListTile(
-              title: Text(pg.title),
-              subtitle: Text('${pg.width.round()} x ${pg.height.round()} · ${pg.layers.length} layers'),
+          final active = i == _pageIndex;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: InkWell(
               onTap: () => setState(() {
                 _pageIndex = i;
                 _selectedLayerId = null;
                 _navIndex = 0;
               }),
-              trailing: _project.pages.length > 1
-                  ? IconButton(
-                      icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                      onPressed: () => setState(() {
-                        _project.pages.removeAt(i);
-                        _pageIndex = 0;
-                      }),
-                    )
-                  : null,
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: active ? _amber.withOpacity(0.12) : _cardBg,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: active ? _amber : _borderColor, width: active ? 1.5 : 1),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: pg.backgroundColor == Colors.transparent ? _chipBg : pg.backgroundColor,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: _borderColor),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        '${i + 1}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: pg.backgroundColor.computeLuminance() > 0.5 ? Colors.black : Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(pg.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                              if (active) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: _amber,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text('ACTIVE', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Colors.black)),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${pg.width.round()} × ${pg.height.round()} px · ${pg.layers.length} layer(s)',
+                            style: TextStyle(fontSize: 12, color: _subColor),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_project.pages.length > 1)
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                        onPressed: () => setState(() {
+                          _project.pages.removeAt(i);
+                          _pageIndex = 0;
+                        }),
+                      ),
+                  ],
+                ),
+              ),
             ),
           );
         }),
@@ -1601,61 +2208,124 @@ class _StudioScreenState extends State<StudioScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text('Offline Batch Processor', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: () async {
-            final imgs = await _picker.pickMultiImage();
-            if (imgs.isNotEmpty) setState(() => _batchInputs = imgs.map((e) => e.path).toList());
-          },
-          icon: const Icon(Icons.photo_library_outlined),
-          label: Text(_batchInputs.isEmpty ? 'Select Multiple Photos' : '${_batchInputs.length} Photos Selected'),
+        const Text('Offline Batch Processor', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 3),
+        Text('Process multiple scanned documents or images offline at once', style: TextStyle(fontSize: 12, color: _subColor)),
+        const SizedBox(height: 14),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _chipBg,
+                    foregroundColor: _textColor,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () async {
+                    final imgs = await _picker.pickMultiImage();
+                    if (imgs.isNotEmpty) setState(() => _batchInputs = imgs.map((e) => e.path).toList());
+                  },
+                  icon: Icon(Icons.photo_library_outlined, color: _accentText),
+                  label: Text(
+                    _batchInputs.isEmpty ? 'Select Multiple Photos' : '${_batchInputs.length} Photo(s) Selected',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Black & White Scan Filter', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  activeColor: _amber,
+                  value: _batchBw,
+                  onChanged: (v) => setState(() => _batchBw = v),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Remove White Background (PNG)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  activeColor: _amber,
+                  value: _batchRemoveWhite > 0,
+                  onChanged: (v) => setState(() => _batchRemoveWhite = v ? 35.0 : 0.0),
+                ),
+                const Divider(),
+                _sliderRow('Brightness', _batchBrightness, 0.5, 1.8, (v) => setState(() => _batchBrightness = v)),
+                _sliderRow('Contrast', _batchContrast, 0.5, 2.0, (v) => setState(() => _batchContrast = v)),
+              ],
+            ),
+          ),
         ),
-        SwitchListTile(
-          title: const Text('Black & White Filter'),
-          value: _batchBw,
-          onChanged: (v) => setState(() => _batchBw = v),
-        ),
-        SwitchListTile(
-          title: const Text('Remove White Background (PNG)'),
-          value: _batchRemoveWhite > 0,
-          onChanged: (v) => setState(() => _batchRemoveWhite = v ? 35.0 : 0.0),
-        ),
-        _sliderRow('Brightness', _batchBrightness, 0.5, 1.8, (v) => setState(() => _batchBrightness = v)),
-        _sliderRow('Contrast', _batchContrast, 0.5, 2.0, (v) => setState(() => _batchContrast = v)),
-        const SizedBox(height: 12),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black),
-          onPressed: _batchInputs.isEmpty || _batchProcessing
-              ? null
-              : () async {
-                  setState(() => _batchProcessing = true);
-                  final dir = await getTemporaryDirectory();
-                  final out = await runBatchOffline(BatchJobRequest(
-                    inputPaths: _batchInputs,
-                    outputDir: dir.path,
-                    brightness: _batchBrightness,
-                    contrast: _batchContrast,
-                    blackAndWhite: _batchBw,
-                    removeWhiteTolerance: _batchRemoveWhite,
-                  ));
-                  if (!mounted) return;
-                  setState(() {
-                    _batchOutputs = out;
-                    _batchProcessing = false;
-                  });
-                  if (out.isNotEmpty) {
-                    for (final fp in out) { await _saveBytesToDeviceGallery(await File(fp).readAsBytes(), p.basename(fp)); }
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved ${out.length} batch images to Gallery')));
-                  }
-                },
-          child: Text(_batchProcessing ? 'Processing...' : 'Process & Export Batch'),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: _amber,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: _batchInputs.isEmpty || _batchProcessing
+                ? null
+                : () async {
+                    setState(() => _batchProcessing = true);
+                    final dir = await getTemporaryDirectory();
+                    final out = await runBatchOffline(BatchJobRequest(
+                      inputPaths: _batchInputs,
+                      outputDir: dir.path,
+                      brightness: _batchBrightness,
+                      contrast: _batchContrast,
+                      blackAndWhite: _batchBw,
+                      removeWhiteTolerance: _batchRemoveWhite,
+                    ));
+                    if (!mounted) return;
+                    setState(() {
+                      _batchOutputs = out;
+                      _batchProcessing = false;
+                    });
+                    if (out.isNotEmpty) {
+                      for (final fp in out) {
+                        await _saveBytesToDeviceGallery(await File(fp).readAsBytes(), p.basename(fp));
+                      }
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Saved ${out.length} batch images to Gallery')),
+                      );
+                    }
+                  },
+            icon: Icon(_batchProcessing ? Icons.hourglass_top_rounded : Icons.auto_awesome_motion_rounded, size: 18),
+            label: Text(
+              _batchProcessing ? 'Processing...' : 'Process & Export Batch',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
         ),
         if (_batchOutputs.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Text('Processed ${_batchOutputs.length} images locally!',
-                style: const TextStyle(color: Colors.greenAccent)),
+          Container(
+            margin: const EdgeInsets.only(top: 14),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.green.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.green.withOpacity(0.4)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle_rounded, color: _isDark ? Colors.greenAccent : Colors.green.shade700, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Processed & saved ${_batchOutputs.length} image(s) to Gallery!',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: _isDark ? Colors.greenAccent : Colors.green.shade800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
       ],
     );
@@ -1668,8 +2338,15 @@ class _StudioScreenState extends State<StudioScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Offline Projects', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Offline Projects', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                Text('${_projects.length} saved locally on device', style: TextStyle(fontSize: 12, color: _subColor)),
+              ],
+            ),
             FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
               onPressed: () async {
                 final fresh = _buildDefaultProject();
                 await LocalProjectStore.instance.saveProject(fresh);
@@ -1683,19 +2360,17 @@ class _StudioScreenState extends State<StudioScreen> {
                   _navIndex = 0;
                 });
               },
-              icon: const Icon(Icons.add),
+              icon: const Icon(Icons.add, size: 18),
               label: const Text('New Project'),
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         ..._projects.map((proj) {
           final isCurrent = proj.id == _project.id;
-          return Card(
-            color: isCurrent ? const Color(0xFFF59E0B).withOpacity(0.15) : const Color(0xFF191C22),
-            child: ListTile(
-              title: Text(proj.name),
-              subtitle: Text('${proj.pages.length} page(s) · Saved offline'),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: InkWell(
               onTap: () async {
                 setState(() {
                   _project = proj;
@@ -1705,22 +2380,72 @@ class _StudioScreenState extends State<StudioScreen> {
                 });
                 await _rehydrateProjectFilters(proj);
               },
-              trailing: _projects.length > 1
-                  ? IconButton(
-                      icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                      onPressed: () async {
-                        await LocalProjectStore.instance.deleteProject(proj.id);
-                        await _loadSavedProjects();
-                      },
-                    )
-                  : null,
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: isCurrent ? _amber.withOpacity(0.12) : _cardBg,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: isCurrent ? _amber : _borderColor, width: isCurrent ? 1.5 : 1),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: isCurrent ? _amber : _chipBg,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.folder_open_rounded, color: isCurrent ? Colors.black : _subColor, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  proj.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              if (isCurrent) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(color: _amber, borderRadius: BorderRadius.circular(6)),
+                                  child: const Text('OPEN', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Colors.black)),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text('${proj.pages.length} page(s) · Stored offline', style: TextStyle(fontSize: 12, color: _subColor)),
+                        ],
+                      ),
+                    ),
+                    if (_projects.length > 1)
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                        onPressed: () async {
+                          await LocalProjectStore.instance.deleteProject(proj.id);
+                          await _loadSavedProjects();
+                        },
+                      ),
+                  ],
+                ),
+              ),
             ),
           );
         }),
       ],
     );
   }
-
 
   static const List<(String, String, String, bool)> _signatureFonts = [
     ('GreatVibes', 'Great Vibes', 'Royal Calligraphy', false),
@@ -1776,6 +2501,10 @@ class _StudioScreenState extends State<StudioScreen> {
       )..layout(maxWidth: w - 80);
       tp.paint(canvas, Offset((w - tp.width) / 2, (h - tp.height) / 2));
     } else {
+      final padW = math.max(1.0, _sigDrawPadSize.width);
+      final padH = math.max(1.0, _sigDrawPadSize.height);
+      final sx = w / padW;
+      final sy = h / padH;
       for (final stroke in _sigStrokes) {
         final pts = stroke.$1;
         if (pts.isEmpty) continue;
@@ -1786,12 +2515,12 @@ class _StudioScreenState extends State<StudioScreen> {
           ..strokeJoin = StrokeJoin.round
           ..style = PaintingStyle.stroke;
         if (pts.length == 1) {
-          canvas.drawCircle(Offset(pts[0].dx * (w / 340.0), pts[0].dy * (h / 180.0)), stroke.$3 * 1.2, Paint()..color = stroke.$2);
+          canvas.drawCircle(Offset(pts[0].dx * sx, pts[0].dy * sy), stroke.$3 * 1.2, Paint()..color = stroke.$2);
           continue;
         }
-        final path = Path()..moveTo(pts[0].dx * (w / 340.0), pts[0].dy * (h / 180.0));
+        final path = Path()..moveTo(pts[0].dx * sx, pts[0].dy * sy);
         for (int i = 1; i < pts.length; i++) {
-          path.lineTo(pts[i].dx * (w / 340.0), pts[i].dy * (h / 180.0));
+          path.lineTo(pts[i].dx * sx, pts[i].dy * sy);
         }
         canvas.drawPath(path, paint);
       }
@@ -1852,97 +2581,313 @@ class _StudioScreenState extends State<StudioScreen> {
   }
 
   Widget _buildSignatureView() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark ? const Color(0xFF191C22) : Colors.white;
-    final boxBg = isDark ? const Color(0xFF111317) : const Color(0xFFF1F5F9);
-    final subColor = isDark ? Colors.white60 : Colors.black54;
-    final inkSwatches = const [Color(0xFF0F172A), Color(0xFF1D4ED8), Color(0xFF1E3A8A), Color(0xFF047857), Color(0xFFB91C1C)];
+    const inkSwatches = [
+      Color(0xFF0F172A),
+      Color(0xFF1D4ED8),
+      Color(0xFF1E3A8A),
+      Color(0xFF047857),
+      Color(0xFFB91C1C),
+    ];
     final raw = _sigTextController.text.trim();
     final previewText = raw.isEmpty ? 'Signature' : raw;
-    final isRtl = RegExp(r'[\u0600-\u06FF]').hasMatch(previewText) || _sigFontFamily == 'NotoNastaliqUrdu' || _sigFontFamily == 'Gulzar';
+    final isRtl = RegExp(r'[\u0600-\u06FF]').hasMatch(previewText) ||
+        _sigFontFamily == 'NotoNastaliqUrdu' ||
+        _sigFontFamily == 'Gulzar';
+    const paperPreviewBg = Color(0xFFF8FAFC);
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Row(children: [
-          const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Signature Studio', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            Text('18 calligraphy & script fonts + freehand drawing pad', style: TextStyle(fontSize: 12)),
-          ])),
-          SegmentedButton<int>(
+        const Text('Signature Studio', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 2),
+        Text('18 calligraphy & script fonts + responsive freehand draw pad', style: TextStyle(fontSize: 12, color: _subColor)),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<int>(
             segments: const [
-              ButtonSegment(value: 0, label: Text('Fonts'), icon: Icon(Icons.title, size: 15)),
-              ButtonSegment(value: 1, label: Text('Draw'), icon: Icon(Icons.draw, size: 15)),
+              ButtonSegment(value: 0, label: Text('18 Fonts'), icon: Icon(Icons.title_rounded, size: 16)),
+              ButtonSegment(value: 1, label: Text('Draw Pad'), icon: Icon(Icons.draw_rounded, size: 16)),
             ],
             selected: {_sigMode},
             onSelectionChanged: (s) => setState(() => _sigMode = s.first),
           ),
-        ]),
+        ),
         const SizedBox(height: 12),
         if (_sigMode == 0)
-          Card(color: cardBg, child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            TextField(
-              controller: _sigTextController,
-              textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
-              onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(labelText: 'Enter Signature Name (English / Urdu)', border: const OutlineInputBorder(), filled: true, fillColor: boxBg),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity, height: 145, padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: _sigTransparentBg ? boxBg : Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: isDark ? Colors.white12 : Colors.black12)),
-              alignment: Alignment.center,
-              child: FittedBox(fit: BoxFit.scaleDown, child: Text(previewText, textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr, style: TextStyle(fontFamily: _sigFontFamily, fontSize: _sigFontSize, fontWeight: _sigBold ? FontWeight.bold : FontWeight.normal, fontStyle: (_sigSlanted && !isRtl) ? FontStyle.italic : FontStyle.normal, letterSpacing: _sigLetterSpacing, height: isRtl ? 2.0 : 1.3, color: _sigInkColor))),
-            ),
-            const SizedBox(height: 10),
-            Row(children: [
-              Text('Ink:', style: TextStyle(fontSize: 12, color: subColor)), const SizedBox(width: 8),
-              ...inkSwatches.map((c) => Padding(padding: const EdgeInsets.only(right: 8), child: GestureDetector(onTap: () => setState(() => _sigInkColor = c), child: Container(width: 26, height: 26, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: _sigInkColor == c ? const Color(0xFFF59E0B) : Colors.grey, width: _sigInkColor == c ? 3 : 1)))))),
-            ]),
-            _sliderRow('Size', _sigFontSize, 42, 130, (v) => setState(() => _sigFontSize = v)),
-            _sliderRow('Spacing', _sigLetterSpacing, -4, 12, (v) => setState(() => _sigLetterSpacing = v)),
-            Wrap(spacing: 8, children: [
-              FilterChip(label: const Text('Slant'), selected: _sigSlanted, selectedColor: const Color(0xFFF59E0B), onSelected: (v) => setState(() => _sigSlanted = v)),
-              FilterChip(label: const Text('Bold Ink'), selected: _sigBold, selectedColor: const Color(0xFFF59E0B), onSelected: (v) => setState(() => _sigBold = v)),
-              FilterChip(label: Text(_sigTransparentBg ? 'BG: Transparent' : 'BG: White'), selected: _sigTransparentBg, selectedColor: const Color(0xFFF59E0B), onSelected: (v) => setState(() => _sigTransparentBg = v)),
-            ]),
-          ])))
-        else
-          Card(color: cardBg, child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              ...inkSwatches.map((c) => Padding(padding: const EdgeInsets.only(right: 8), child: GestureDetector(onTap: () => setState(() => _sigInkColor = c), child: Container(width: 26, height: 26, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: _sigInkColor == c ? const Color(0xFFF59E0B) : Colors.grey, width: _sigInkColor == c ? 3 : 1)))))),
-              const Spacer(),
-              IconButton(tooltip: 'Undo', onPressed: _sigStrokes.isEmpty ? null : () => setState(() => _sigStrokes.removeLast()), icon: const Icon(Icons.undo)),
-              IconButton(tooltip: 'Clear', onPressed: _sigStrokes.isEmpty ? null : () => setState(() => _sigStrokes.clear()), icon: const Icon(Icons.delete_outline, color: Colors.redAccent)),
-            ]),
-            _sliderRow('Pen Size', _sigPenWidth, 2, 12, (v) => setState(() => _sigPenWidth = v)),
-            Container(
-              width: 340, height: 180,
-              decoration: BoxDecoration(color: _sigTransparentBg ? boxBg : Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.5))),
-              child: GestureDetector(
-                onPanStart: (d) => setState(() { _sigCurrentStroke = [d.localPosition]; _sigStrokes.add((_sigCurrentStroke!, _sigInkColor, _sigPenWidth)); }),
-                onPanUpdate: (d) { if (_sigCurrentStroke == null) return; setState(() => _sigCurrentStroke!.add(d.localPosition)); },
-                onPanEnd: (_) => _sigCurrentStroke = null,
-                child: CustomPaint(painter: _SignaturePadPainter(_sigStrokes), size: const Size(340, 180)),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: _sigTextController,
+                    textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Enter Signature Name (English / Urdu)',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    height: 140,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: _sigTransparentBg ? paperPreviewBg : Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                    ),
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              previewText,
+                              textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+                              style: TextStyle(
+                                fontFamily: _sigFontFamily,
+                                fontSize: _sigFontSize,
+                                fontWeight: _sigBold ? FontWeight.bold : FontWeight.normal,
+                                fontStyle: (_sigSlanted && !isRtl) ? FontStyle.italic : FontStyle.normal,
+                                letterSpacing: _sigLetterSpacing,
+                                height: isRtl ? 2.0 : 1.3,
+                                color: _sigInkColor,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              _sigTransparentBg ? 'Transparent PNG' : 'White Paper',
+                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Text('Ink Color:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                      const SizedBox(width: 10),
+                      ...inkSwatches.map(
+                        (c) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: GestureDetector(
+                            onTap: () => setState(() => _sigInkColor = c),
+                            child: Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: c,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: _sigInkColor == c ? _amber : _borderColor,
+                                  width: _sigInkColor == c ? 3 : 1.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  _sliderRow('Size', _sigFontSize, 42, 130, (v) => setState(() => _sigFontSize = v)),
+                  _sliderRow('Spacing', _sigLetterSpacing, -4, 12, (v) => setState(() => _sigLetterSpacing = v)),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      _choicePill(
+                        label: 'Slant',
+                        selected: _sigSlanted,
+                        onTap: () => setState(() => _sigSlanted = !_sigSlanted),
+                      ),
+                      _choicePill(
+                        label: 'Bold Ink',
+                        selected: _sigBold,
+                        onTap: () => setState(() => _sigBold = !_sigBold),
+                      ),
+                      _choicePill(
+                        label: _sigTransparentBg ? 'BG: Transparent' : 'BG: White Paper',
+                        selected: _sigTransparentBg,
+                        onTap: () => setState(() => _sigTransparentBg = !_sigTransparentBg),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 8),
-            FilterChip(label: Text(_sigTransparentBg ? 'BG: Transparent PNG' : 'BG: White Paper'), selected: _sigTransparentBg, selectedColor: const Color(0xFFF59E0B), onSelected: (v) => setState(() => _sigTransparentBg = v)),
-          ]))),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(child: FilledButton.icon(style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 13)), onPressed: _addSignatureToProjectCanvas, icon: const Icon(Icons.add_to_photos_outlined, size: 18), label: const Text('Add to Studio'))),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14)), onPressed: () => _exportSignaturePng(shareOnly: false), icon: const Icon(Icons.save_alt_rounded, size: 18), label: const Text('Save PNG')),
-          const SizedBox(width: 8),
-          OutlinedButton(style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12)), onPressed: () => _exportSignaturePng(shareOnly: true), child: const Icon(Icons.share_outlined, size: 18)),
-        ]),
+          )
+        else
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      ...inkSwatches.map(
+                        (c) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: GestureDetector(
+                            onTap: () => setState(() => _sigInkColor = c),
+                            child: Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: c,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: _sigInkColor == c ? _amber : _borderColor,
+                                  width: _sigInkColor == c ? 3 : 1.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Undo',
+                        onPressed: _sigStrokes.isEmpty ? null : () => setState(() => _sigStrokes.removeLast()),
+                        icon: const Icon(Icons.undo_rounded),
+                      ),
+                      IconButton(
+                        tooltip: 'Clear',
+                        onPressed: _sigStrokes.isEmpty ? null : () => setState(() => _sigStrokes.clear()),
+                        icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                      ),
+                    ],
+                  ),
+                  _sliderRow('Pen Size', _sigPenWidth, 2, 12, (v) => setState(() => _sigPenWidth = v)),
+                  LayoutBuilder(
+                    builder: (context, padConstraints) {
+                      final padW = padConstraints.maxWidth;
+                      const padH = 195.0;
+                      _sigDrawPadSize = Size(padW, padH);
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          width: padW,
+                          height: padH,
+                          decoration: BoxDecoration(
+                            color: _sigTransparentBg ? paperPreviewBg : Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: _amber.withOpacity(0.7), width: 1.4),
+                          ),
+                          child: Stack(
+                            children: [
+                              if (_sigStrokes.isEmpty)
+                                const Center(
+                                  child: Text(
+                                    'Sign here with your finger',
+                                    style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                                  ),
+                                ),
+                              GestureDetector(
+                                onPanStart: (d) => setState(() {
+                                  _sigCurrentStroke = [d.localPosition];
+                                  _sigStrokes.add((_sigCurrentStroke!, _sigInkColor, _sigPenWidth));
+                                }),
+                                onPanUpdate: (d) {
+                                  if (_sigCurrentStroke == null) return;
+                                  setState(() => _sigCurrentStroke!.add(d.localPosition));
+                                },
+                                onPanEnd: (_) => _sigCurrentStroke = null,
+                                child: CustomPaint(
+                                  painter: _SignaturePadPainter(_sigStrokes),
+                                  size: Size(padW, padH),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  _choicePill(
+                    label: _sigTransparentBg ? 'BG: Transparent PNG' : 'BG: White Paper',
+                    selected: _sigTransparentBg,
+                    onTap: () => setState(() => _sigTransparentBg = !_sigTransparentBg),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: _amber,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: _addSignatureToProjectCanvas,
+            icon: const Icon(Icons.add_to_photos_outlined, size: 18),
+            label: const Text('Add to Studio Canvas', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  side: BorderSide(color: _borderColor),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => _exportSignaturePng(shareOnly: false),
+                icon: const Icon(Icons.save_alt_rounded, size: 18),
+                label: const Text('Save PNG'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  side: BorderSide(color: _borderColor),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => _exportSignaturePng(shareOnly: true),
+                icon: const Icon(Icons.share_outlined, size: 18),
+                label: const Text('Share'),
+              ),
+            ),
+          ],
+        ),
         if (_sigMode == 0) ...[
-          const SizedBox(height: 14),
-          const Text('Signature Fonts (18 Styles)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          const Text('Signature Fonts (18 Styles)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           GridView.builder(
-            shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 8, crossAxisSpacing: 8, childAspectRatio: 1.75),
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 1.5,
+            ),
             itemCount: _signatureFonts.length,
             itemBuilder: (ctx, i) {
               final f = _signatureFonts[i];
@@ -1952,11 +2897,48 @@ class _StudioScreenState extends State<StudioScreen> {
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
                   padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: sel ? const Color(0xFFF59E0B).withOpacity(0.14) : cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: sel ? const Color(0xFFF59E0B) : (isDark ? Colors.white12 : Colors.black12), width: sel ? 1.8 : 1)),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(f.$2, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                    Expanded(child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text(previewText, textDirection: f.$4 ? TextDirection.rtl : TextDirection.ltr, style: TextStyle(fontFamily: f.$1, fontSize: f.$4 ? 22 : 28, color: sel ? const Color(0xFFF59E0B) : null))))),
-                  ]),
+                  decoration: BoxDecoration(
+                    color: sel ? _amber.withOpacity(0.14) : _cardBg,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: sel ? _amber : _borderColor, width: sel ? 1.8 : 1),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        f.$2,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: sel ? _accentText : _textColor,
+                        ),
+                      ),
+                      Text(
+                        f.$3,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 10, color: _mutedColor),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              previewText,
+                              textDirection: f.$4 ? TextDirection.rtl : TextDirection.ltr,
+                              style: TextStyle(
+                                fontFamily: f.$1,
+                                fontSize: f.$4 ? 22 : 28,
+                                color: sel ? _accentText : _textColor,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               );
             },
@@ -1965,9 +2947,7 @@ class _StudioScreenState extends State<StudioScreen> {
       ],
     );
   }
-
 }
-
 
 class _ExactNumberBox extends StatefulWidget {
   final double value;
@@ -2047,7 +3027,6 @@ class _ExactNumberBoxState extends State<_ExactNumberBox> {
         labelText: widget.labelText,
         isDense: true,
         contentPadding: widget.contentPadding,
-        border: const OutlineInputBorder(),
       ),
       onChanged: (raw) {
         final parsed = double.tryParse(raw.trim());
