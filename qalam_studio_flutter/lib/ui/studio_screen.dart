@@ -3020,22 +3020,19 @@ class _StudioScreenState extends State<StudioScreen> {
             children: [
               _businessStarterCard(
                 icon: Icons.receipt_long_rounded,
-                title: 'Cash Memo / Bill
-رسید و انوائس',
+                title: 'Cash Memo / Bill\nرسید و انوائس',
                 subtitle: 'Bilingual A4 shop bill · Quick Fill ready',
                 onTap: () => _loadBusinessTemplate('cash_memo'),
               ),
               _businessStarterCard(
                 icon: Icons.description_rounded,
-                title: 'Official Letterhead
-دفتری لیٹر ہیڈ',
+                title: 'Official Letterhead\nدفتری لیٹر ہیڈ',
                 subtitle: 'Urdu + English header, Ref & footer',
                 onTap: () => _loadBusinessTemplate('letterhead'),
               ),
               _businessStarterCard(
                 icon: Icons.workspace_premium_rounded,
-                title: 'Urdu Sanad
-سندِ اعزاز',
+                title: 'Urdu Sanad\nسندِ اعزاز',
                 subtitle: 'Gold frame certificate with Nastaliq title',
                 onTap: () => _loadBusinessTemplate('sanad'),
               ),
