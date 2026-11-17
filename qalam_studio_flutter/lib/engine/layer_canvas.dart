@@ -90,6 +90,25 @@ class _LayerCanvasState extends State<LayerCanvas> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        final availW = math.max(1.0, constraints.maxWidth - 32.0);
+        final availH = math.max(1.0, constraints.maxHeight - 32.0);
+        final fitScale = math.min(
+          availW / math.max(1.0, page.width),
+          availH / math.max(1.0, page.height),
+        );
+        final displayScale = (fitScale * _currentZoom).clamp(0.08, 4.0);
+        final invScale = (1.0 / displayScale).clamp(0.35, 14.0);
+
+        DesignLayer? selectedLayer;
+        if (widget.showSelectionHandles && widget.selectedLayerId != null) {
+          for (final l in page.layers) {
+            if (l.visible && !l.isCanvasBackground && l.id == widget.selectedLayerId) {
+              selectedLayer = l;
+              break;
+            }
+          }
+        }
+
         return Stack(
           children: [
             Listener(
@@ -212,7 +231,17 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                 child: _buildLayerContent(layer),
                                               ),
                                             ),
-                                            if (selected) _buildTouchHandles(layer),
+                                            if (selected)
+                                              IgnorePointer(
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    border: Border.all(
+                                                      color: const Color(0xFFF59E0B),
+                                                      width: (2.5 * invScale).clamp(2.0, 20.0),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
                                           ],
                                         ),
                                       );
@@ -249,6 +278,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                               ),
                                       );
                                     }),
+                                    if (selectedLayer != null && !selectedLayer.locked)
+                                      _buildSelectionHandlesOverlay(selectedLayer, invScale),
                                   ],
                                 ),
                               ),
@@ -428,174 +459,198 @@ class _LayerCanvasState extends State<LayerCanvas> {
     );
   }
 
-  Widget _buildTouchHandles(DesignLayer layer) {
-    final hitSize = (layer.width < 110 || layer.height < 100) ? 38.0 : 52.0;
+  Widget _buildSelectionHandlesOverlay(DesignLayer layer, double invScale) {
+    final hitSize = 58.0 * invScale;
+    final badgeSize = 40.0 * invScale;
+    final iconSize = 22.0 * invScale;
+    final ringWidth = 2.8 * invScale;
+    final pad = hitSize * 0.52;
 
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFFF59E0B), width: 2.5),
-      ),
-      child: layer.locked
-          ? const SizedBox.shrink()
-          : Stack(
-              children: [
-                // 1. TOP-RIGHT: Rotate Handle (Text, Image & Shape)
-                Align(
-                  alignment: Alignment.topRight,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onPanStart: (d) {
-                      if (_blockLayerInteraction) return;
-                      _rotateCenterGlobal = _layerCenterGlobal(layer);
-                      _rotateStartAngle = math.atan2(
-                        d.globalPosition.dy - _rotateCenterGlobal.dy,
-                        d.globalPosition.dx - _rotateCenterGlobal.dx,
-                      );
-                      _rotateStartDeg = layer.rotation;
-                    },
-                    onPanUpdate: (d) {
-                      if (_blockLayerInteraction) return;
-                      final curAngle = math.atan2(
-                        d.globalPosition.dy - _rotateCenterGlobal.dy,
-                        d.globalPosition.dx - _rotateCenterGlobal.dx,
-                      );
-                      var deg = _rotateStartDeg + (curAngle - _rotateStartAngle) * 180.0 / math.pi;
-                      // Normalize to -180..180
-                      while (deg > 180.0) {
-                        deg -= 360.0;
-                      }
-                      while (deg < -180.0) {
-                        deg += 360.0;
-                      }
-                      // Gentle snap on 0, ±90, ±180
-                      final nearest90 = (deg / 90.0).round() * 90.0;
-                      if ((deg - nearest90).abs() <= 3.0) {
-                        deg = nearest90;
-                      }
-                      layer.rotation = deg;
-                      widget.onUpdateLayer(layer);
-                    },
-                    child: SizedBox(
-                      width: hitSize,
-                      height: hitSize,
-                      child: Center(
-                        child: Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0EA5E9),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                            boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)],
+    return Positioned(
+      left: layer.x - pad,
+      top: layer.y - pad,
+      width: layer.width + pad * 2,
+      height: layer.height + pad * 2,
+      child: Transform.rotate(
+        angle: layer.rotation * math.pi / 180.0,
+        alignment: Alignment.center,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // 1. TOP-RIGHT: Big Rotate Handle (Text, Image & Shape)
+            Align(
+              alignment: Alignment.topRight,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanStart: (d) {
+                  if (_blockLayerInteraction) return;
+                  _rotateCenterGlobal = _layerCenterGlobal(layer);
+                  _rotateStartAngle = math.atan2(
+                    d.globalPosition.dy - _rotateCenterGlobal.dy,
+                    d.globalPosition.dx - _rotateCenterGlobal.dx,
+                  );
+                  _rotateStartDeg = layer.rotation;
+                },
+                onPanUpdate: (d) {
+                  if (_blockLayerInteraction) return;
+                  final curAngle = math.atan2(
+                    d.globalPosition.dy - _rotateCenterGlobal.dy,
+                    d.globalPosition.dx - _rotateCenterGlobal.dx,
+                  );
+                  var deg = _rotateStartDeg + (curAngle - _rotateStartAngle) * 180.0 / math.pi;
+                  while (deg > 180.0) {
+                    deg -= 360.0;
+                  }
+                  while (deg < -180.0) {
+                    deg += 360.0;
+                  }
+                  final nearest90 = (deg / 90.0).round() * 90.0;
+                  if ((deg - nearest90).abs() <= 3.0) {
+                    deg = nearest90;
+                  }
+                  layer.rotation = deg;
+                  widget.onUpdateLayer(layer);
+                },
+                child: SizedBox(
+                  width: hitSize,
+                  height: hitSize,
+                  child: Center(
+                    child: Container(
+                      width: badgeSize,
+                      height: badgeSize,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0EA5E9),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: ringWidth),
+                        boxShadow: [
+                          BoxShadow(
+                            blurRadius: 6.0 * invScale,
+                            offset: Offset(0, 2.0 * invScale),
+                            color: Colors.black38,
                           ),
-                          child: const Icon(Icons.rotate_right_rounded, size: 15, color: Colors.white),
-                        ),
+                        ],
                       ),
+                      child: Icon(Icons.rotate_right_rounded, size: iconSize, color: Colors.white),
                     ),
                   ),
                 ),
-
-                // 2. BOTTOM-LEFT: Box Resize Handle for Text (adjust W & H without scaling font size)
-                if (layer.type == LayerType.text)
-                  Align(
-                    alignment: Alignment.bottomLeft,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onPanUpdate: (d) {
-                        if (_blockLayerInteraction) return;
-                        final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
-                        final rawDx = d.delta.dx / scale;
-                        final rawDy = d.delta.dy / scale;
-                        final rad = layer.rotation * math.pi / 180.0;
-                        final localDx = rawDx * math.cos(-rad) - rawDy * math.sin(-rad);
-                        final localDy = rawDx * math.sin(-rad) + rawDy * math.cos(-rad);
-
-                        final prevW = layer.width;
-                        final nextW = (prevW - localDx).clamp(60.0, 10000.0);
-                        final shiftLeft = prevW - nextW;
-                        layer.x += shiftLeft * math.cos(rad);
-                        layer.y += shiftLeft * math.sin(rad);
-                        layer.width = nextW;
-                        layer.height = (layer.height + localDy).clamp(40.0, 10000.0);
-                        widget.onUpdateLayer(layer);
-                      },
-                      child: SizedBox(
-                        width: hitSize,
-                        height: hitSize,
-                        child: Center(
-                          child: Container(
-                            width: 28,
-                            height: 28,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF10B981),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 2),
-                              boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)],
-                            ),
-                            child: const Icon(Icons.aspect_ratio_rounded, size: 14, color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                // 3. BOTTOM-RIGHT: Scale Size +/- Handle (Text Font+Box Scale, Image & Shape Scale)
-                Align(
-                  alignment: Alignment.bottomRight,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onPanUpdate: (d) {
-                      if (_blockLayerInteraction) return;
-                      final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
-                      final rawDx = d.delta.dx / scale;
-                      final rawDy = d.delta.dy / scale;
-                      final rad = -layer.rotation * math.pi / 180.0;
-                      final dx = rawDx * math.cos(rad) - rawDy * math.sin(rad);
-                      final dy = rawDx * math.sin(rad) + rawDy * math.cos(rad);
-
-                      if (layer.type == LayerType.image && layer.aspectLocked) {
-                        final ratio = layer.width / math.max(1.0, layer.height);
-                        final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
-                        final nextW = (layer.width + delta).clamp(20.0, 10000.0);
-                        final nextH = (nextW / ratio).clamp(20.0, 10000.0);
-                        layer.width = nextW;
-                        layer.height = nextH;
-                      } else if (layer.type == LayerType.text) {
-                        final ratio = layer.width / math.max(1.0, layer.height);
-                        final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
-                        final prevW = math.max(1.0, layer.width);
-                        final nextW = (layer.width + delta).clamp(40.0, 10000.0);
-                        final nextH = (nextW / ratio).clamp(24.0, 10000.0);
-                        layer.fontSize = (layer.fontSize * (nextW / prevW)).clamp(8.0, 600.0);
-                        layer.width = nextW;
-                        layer.height = nextH;
-                      } else {
-                        layer.width = (layer.width + dx).clamp(20.0, 10000.0);
-                        layer.height = (layer.height + dy).clamp(20.0, 10000.0);
-                      }
-                      widget.onUpdateLayer(layer);
-                    },
-                    child: SizedBox(
-                      width: hitSize,
-                      height: hitSize,
-                      child: Center(
-                        child: Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF59E0B),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                            boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)],
-                          ),
-                          child: const Icon(Icons.open_in_full_rounded, size: 14, color: Colors.black),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
+
+            // 2. BOTTOM-LEFT: Big Text Box Resize Handle (adjust W & H without scaling font size)
+            if (layer.type == LayerType.text)
+              Align(
+                alignment: Alignment.bottomLeft,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanUpdate: (d) {
+                    if (_blockLayerInteraction) return;
+                    final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
+                    final rawDx = d.delta.dx / scale;
+                    final rawDy = d.delta.dy / scale;
+                    final rad = layer.rotation * math.pi / 180.0;
+                    final localDx = rawDx * math.cos(-rad) - rawDy * math.sin(-rad);
+                    final localDy = rawDx * math.sin(-rad) + rawDy * math.cos(-rad);
+
+                    final prevW = layer.width;
+                    final nextW = (prevW - localDx).clamp(60.0, 10000.0);
+                    final shiftLeft = prevW - nextW;
+                    layer.x += shiftLeft * math.cos(rad);
+                    layer.y += shiftLeft * math.sin(rad);
+                    layer.width = nextW;
+                    layer.height = (layer.height + localDy).clamp(40.0, 10000.0);
+                    widget.onUpdateLayer(layer);
+                  },
+                  child: SizedBox(
+                    width: hitSize,
+                    height: hitSize,
+                    child: Center(
+                      child: Container(
+                        width: badgeSize,
+                        height: badgeSize,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: ringWidth),
+                          boxShadow: [
+                            BoxShadow(
+                              blurRadius: 6.0 * invScale,
+                              offset: Offset(0, 2.0 * invScale),
+                              color: Colors.black38,
+                            ),
+                          ],
+                        ),
+                        child: Icon(Icons.aspect_ratio_rounded, size: iconSize * 0.92, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+            // 3. BOTTOM-RIGHT: Big Proportional Scale Size (+/-) Handle
+            Align(
+              alignment: Alignment.bottomRight,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanUpdate: (d) {
+                  if (_blockLayerInteraction) return;
+                  final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
+                  final rawDx = d.delta.dx / scale;
+                  final rawDy = d.delta.dy / scale;
+                  final rad = -layer.rotation * math.pi / 180.0;
+                  final dx = rawDx * math.cos(rad) - rawDy * math.sin(rad);
+                  final dy = rawDx * math.sin(rad) + rawDy * math.cos(rad);
+
+                  if (layer.type == LayerType.image && layer.aspectLocked) {
+                    final ratio = layer.width / math.max(1.0, layer.height);
+                    final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
+                    final nextW = (layer.width + delta).clamp(20.0, 10000.0);
+                    final nextH = (nextW / ratio).clamp(20.0, 10000.0);
+                    layer.width = nextW;
+                    layer.height = nextH;
+                  } else if (layer.type == LayerType.text) {
+                    final ratio = layer.width / math.max(1.0, layer.height);
+                    final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
+                    final prevW = math.max(1.0, layer.width);
+                    final nextW = (layer.width + delta).clamp(40.0, 10000.0);
+                    final nextH = (nextW / ratio).clamp(24.0, 10000.0);
+                    layer.fontSize = (layer.fontSize * (nextW / prevW)).clamp(8.0, 600.0);
+                    layer.width = nextW;
+                    layer.height = nextH;
+                  } else {
+                    layer.width = (layer.width + dx).clamp(20.0, 10000.0);
+                    layer.height = (layer.height + dy).clamp(20.0, 10000.0);
+                  }
+                  widget.onUpdateLayer(layer);
+                },
+                child: SizedBox(
+                  width: hitSize,
+                  height: hitSize,
+                  child: Center(
+                    child: Container(
+                      width: badgeSize,
+                      height: badgeSize,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF59E0B),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: ringWidth),
+                        boxShadow: [
+                          BoxShadow(
+                            blurRadius: 6.0 * invScale,
+                            offset: Offset(0, 2.0 * invScale),
+                            color: Colors.black38,
+                          ),
+                        ],
+                      ),
+                      child: Icon(Icons.open_in_full_rounded, size: iconSize * 0.92, color: Colors.black),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
