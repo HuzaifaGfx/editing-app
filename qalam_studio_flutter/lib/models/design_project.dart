@@ -77,12 +77,16 @@ class DesignLayer {
   int fontWeight;
   double lineHeight;
   Color textColor;
+  TextAlign? textAlign;
+  Color textBgColor;
 
   // Image overlay properties
   String? localImagePath;
   bool aspectLocked;
   BoxFit objectFit;
   double borderRadius;
+  bool flipX;
+  bool flipY;
   FilterSettings filters;
 
   // Runtime cache for white-removed PNG bytes
@@ -109,10 +113,14 @@ class DesignLayer {
     this.fontWeight = 400,
     this.lineHeight = 1.4,
     this.textColor = const Color(0xFFFFFFFF),
+    this.textAlign,
+    this.textBgColor = const Color(0x00000000),
     this.localImagePath,
     this.aspectLocked = true,
     this.objectFit = BoxFit.cover,
     this.borderRadius = 0,
+    this.flipX = false,
+    this.flipY = false,
     FilterSettings? filters,
     this.processedWhiteRemovedBytes,
   }) : filters = filters ?? FilterSettings();
@@ -138,10 +146,14 @@ class DesignLayer {
         fontWeight: fontWeight,
         lineHeight: lineHeight,
         textColor: textColor,
+        textAlign: textAlign,
+        textBgColor: textBgColor,
         localImagePath: localImagePath,
         aspectLocked: aspectLocked,
         objectFit: objectFit,
         borderRadius: borderRadius,
+        flipX: flipX,
+        flipY: flipY,
         filters: filters.copy(),
         processedWhiteRemovedBytes: processedWhiteRemovedBytes,
       );
@@ -167,10 +179,14 @@ class DesignLayer {
         'fontWeight': fontWeight,
         'lineHeight': lineHeight,
         'textColor': textColor.value,
+        'textAlign': textAlign?.name,
+        'textBgColor': textBgColor.value,
         'localImagePath': localImagePath,
         'aspectLocked': aspectLocked,
         'objectFit': objectFit.index,
         'borderRadius': borderRadius,
+        'flipX': flipX,
+        'flipY': flipY,
         'filters': filters.toJson(),
       };
 
@@ -195,10 +211,19 @@ class DesignLayer {
         fontWeight: (json['fontWeight'] ?? 400).toInt(),
         lineHeight: (json['lineHeight'] ?? 1.4).toDouble(),
         textColor: Color(json['textColor'] ?? 0xFFFFFFFF),
+        textAlign: json['textAlign'] != null
+            ? TextAlign.values.firstWhere(
+                (t) => t.name == json['textAlign'],
+                orElse: () => (json['isRtl'] ?? false) ? TextAlign.right : TextAlign.left,
+              )
+            : null,
+        textBgColor: Color(json['textBgColor'] ?? 0x00000000),
         localImagePath: json['localImagePath'],
         aspectLocked: json['aspectLocked'] ?? true,
         objectFit: BoxFit.values[json['objectFit'] ?? BoxFit.cover.index],
         borderRadius: (json['borderRadius'] ?? 0).toDouble(),
+        flipX: json['flipX'] ?? false,
+        flipY: json['flipY'] ?? false,
         filters: FilterSettings.fromJson(json['filters'] ?? {}),
       );
 }

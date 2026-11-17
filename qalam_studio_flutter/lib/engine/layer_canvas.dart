@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import '../models/design_project.dart';
 import 'filter_matrix.dart';
 
@@ -12,6 +13,7 @@ class LayerCanvas extends StatefulWidget {
   final bool forceTransparentBackground;
   final ValueChanged<String?> onSelectLayer;
   final ValueChanged<DesignLayer> onUpdateLayer;
+  final VoidCallback? onInteractionStart;
 
   const LayerCanvas({
     super.key,
@@ -22,6 +24,7 @@ class LayerCanvas extends StatefulWidget {
     this.forceTransparentBackground = false,
     required this.onSelectLayer,
     required this.onUpdateLayer,
+    this.onInteractionStart,
   });
 
   @override
@@ -40,6 +43,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
   double _rotateStartAngle = 0.0;
   double _rotateStartDeg = 0.0;
   Offset _rotateCenterGlobal = Offset.zero;
+  bool _snapX = false;
+  bool _snapY = false;
 
   bool get _blockLayerInteraction =>
       _pointerCount > 1 ||
@@ -226,9 +231,12 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                           clipBehavior: Clip.none,
                                           children: [
                                             Positioned.fill(
-                                              child: Opacity(
-                                                opacity: layer.opacity.clamp(0.0, 1.0),
-                                                child: _buildLayerContent(layer),
+                                              child: _LayerBlendWrapper(
+                                                blendMode: layer.blendMode,
+                                                child: Opacity(
+                                                  opacity: layer.opacity.clamp(0.0, 1.0),
+                                                  child: _buildLayerContent(layer),
+                                                ),
                                               ),
                                             ),
                                             if (selected)
@@ -262,6 +270,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                 onPanStart: (_) {
                                                   if (_blockLayerInteraction) return;
                                                   widget.onSelectLayer(layer.id);
+                                                  if (!layer.locked) widget.onInteractionStart?.call();
                                                 },
                                                 onPanUpdate: layer.locked
                                                     ? null
@@ -270,14 +279,57 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                         final scale = _transformController.value
                                                             .getMaxScaleOnAxis()
                                                             .clamp(0.5, 4.0);
-                                                        layer.x += d.delta.dx / scale;
-                                                        layer.y += d.delta.dy / scale;
+                                                        var nextX = layer.x + d.delta.dx / scale;
+                                                        var nextY = layer.y + d.delta.dy / scale;
+                                                        final cx = nextX + layer.width / 2;
+                                                        final cy = nextY + layer.height / 2;
+                                                        const snapTol = 8.0;
+                                                        final hitX = (cx - page.width / 2).abs() <= snapTol;
+                                                        final hitY = (cy - page.height / 2).abs() <= snapTol;
+                                                        if (hitX) nextX = page.width / 2 - layer.width / 2;
+                                                        if (hitY) nextY = page.height / 2 - layer.height / 2;
+                                                        layer.x = nextX;
+                                                        layer.y = nextY;
+                                                        if (_snapX != hitX || _snapY != hitY) {
+                                                          setState(() {
+                                                            _snapX = hitX;
+                                                            _snapY = hitY;
+                                                          });
+                                                        }
                                                         widget.onUpdateLayer(layer);
                                                       },
+                                                onPanEnd: (_) {
+                                                  if (_snapX || _snapY) {
+                                                    setState(() {
+                                                      _snapX = false;
+                                                      _snapY = false;
+                                                    });
+                                                  }
+                                                },
                                                 child: layerChild,
                                               ),
                                       );
                                     }),
+                                    if (_snapX)
+                                      Positioned(
+                                        left: page.width / 2 - (1.0 * invScale),
+                                        top: 0,
+                                        bottom: 0,
+                                        width: 2.0 * invScale,
+                                        child: IgnorePointer(
+                                          child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
+                                        ),
+                                      ),
+                                    if (_snapY)
+                                      Positioned(
+                                        top: page.height / 2 - (1.0 * invScale),
+                                        left: 0,
+                                        right: 0,
+                                        height: 2.0 * invScale,
+                                        child: IgnorePointer(
+                                          child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
+                                        ),
+                                      ),
                                     if (selectedLayer != null && !selectedLayer.locked)
                                       _buildSelectionHandlesOverlay(selectedLayer, invScale),
                                   ],
@@ -421,30 +473,49 @@ class _LayerCanvasState extends State<LayerCanvas> {
 
       return ClipRRect(
         borderRadius: BorderRadius.circular(layer.borderRadius),
-        child: ColorFiltered(
-          colorFilter: buildLayerColorFilter(layer.filters),
-          child: imgWidget,
+        child: Transform.flip(
+          flipX: layer.flipX,
+          flipY: layer.flipY,
+          child: ColorFiltered(
+            colorFilter: buildLayerColorFilter(layer.filters),
+            child: imgWidget,
+          ),
         ),
       );
     }
 
     if (layer.type == LayerType.text) {
       final weightIndex = ((layer.fontWeight / 100).round() - 1).clamp(0, 8);
+      final effectiveAlign =
+          layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left);
+      final alignBox = effectiveAlign == TextAlign.center
+          ? Alignment.topCenter
+          : (effectiveAlign == TextAlign.right ? Alignment.topRight : Alignment.topLeft);
+      final hasBg = layer.textBgColor.alpha > 0;
       return Directionality(
         textDirection: layer.isRtl ? TextDirection.rtl : TextDirection.ltr,
-        child: Align(
-          alignment: layer.isRtl ? Alignment.topRight : Alignment.topLeft,
-          child: Text(
-            layer.text,
-            textAlign: layer.isRtl ? TextAlign.right : TextAlign.left,
-            style: TextStyle(
-              fontFamily: layer.fontFamily,
-              fontSize: layer.fontSize,
-              fontWeight: FontWeight.values[weightIndex],
-              fontVariations: [FontVariation('wght', layer.fontWeight.toDouble())],
-              height: layer.lineHeight,
-              color: layer.textColor,
-              shadows: const [],
+        child: Container(
+          padding: hasBg ? const EdgeInsets.symmetric(horizontal: 14, vertical: 8) : EdgeInsets.zero,
+          decoration: hasBg
+              ? BoxDecoration(
+                  color: layer.textBgColor,
+                  borderRadius: BorderRadius.circular(layer.borderRadius > 0 ? layer.borderRadius : 12),
+                )
+              : null,
+          child: Align(
+            alignment: alignBox,
+            child: Text(
+              layer.text,
+              textAlign: effectiveAlign,
+              style: TextStyle(
+                fontFamily: layer.fontFamily,
+                fontSize: layer.fontSize,
+                fontWeight: FontWeight.values[weightIndex],
+                fontVariations: [FontVariation('wght', layer.fontWeight.toDouble())],
+                height: layer.lineHeight,
+                color: layer.textColor,
+                shadows: const [],
+              ),
             ),
           ),
         ),
@@ -484,6 +555,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 behavior: HitTestBehavior.opaque,
                 onPanStart: (d) {
                   if (_blockLayerInteraction) return;
+                  widget.onInteractionStart?.call();
                   _rotateCenterGlobal = _layerCenterGlobal(layer);
                   _rotateStartAngle = math.atan2(
                     d.globalPosition.dy - _rotateCenterGlobal.dy,
@@ -543,6 +615,9 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 alignment: Alignment.bottomLeft,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
+                  onPanStart: (_) {
+                    if (!_blockLayerInteraction) widget.onInteractionStart?.call();
+                  },
                   onPanUpdate: (d) {
                     if (_blockLayerInteraction) return;
                     final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
@@ -652,5 +727,41 @@ class _LayerCanvasState extends State<LayerCanvas> {
         ),
       ),
     );
+  }
+}
+
+class _LayerBlendWrapper extends SingleChildRenderObjectWidget {
+  final BlendMode blendMode;
+  const _LayerBlendWrapper({required this.blendMode, super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderLayerBlend(blendMode);
+
+  @override
+  void updateRenderObject(BuildContext context, covariant _RenderLayerBlend renderObject) {
+    renderObject.blendMode = blendMode;
+  }
+}
+
+class _RenderLayerBlend extends RenderProxyBox {
+  BlendMode _blendMode;
+  _RenderLayerBlend(this._blendMode);
+
+  set blendMode(BlendMode value) {
+    if (_blendMode == value) return;
+    _blendMode = value;
+    markNeedsPaint();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child == null) return;
+    if (_blendMode == BlendMode.srcOver) {
+      context.paintChild(child!, offset);
+      return;
+    }
+    context.canvas.saveLayer(offset & size, Paint()..blendMode = _blendMode);
+    context.paintChild(child!, offset);
+    context.canvas.restore();
   }
 }

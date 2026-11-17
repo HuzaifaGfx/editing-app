@@ -44,6 +44,9 @@ class _StudioScreenState extends State<StudioScreen> {
   int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Filters, 3=Layers
   bool _sheetExpanded = true;
   bool _exportTransparentCanvas = false;
+  int _whiteRemovalSeq = 0;
+  final List<(int, String)> _undoStack = [];
+  final List<(int, String)> _redoStack = [];
 
   // Signature Studio state
   int _sigMode = 0;
@@ -212,6 +215,90 @@ class _StudioScreenState extends State<StudioScreen> {
     });
   }
 
+  void _pushUndoSnapshot() {
+    _undoStack.add((_pageIndex, _project.encode()));
+    if (_undoStack.length > 25) _undoStack.removeAt(0);
+    _redoStack.clear();
+  }
+
+  void _restoreEncodedSnapshot((int, String) snap) {
+    final cache = <String, Uint8List>{};
+    for (final pg in _project.pages) {
+      for (final l in pg.layers) {
+        if (l.processedWhiteRemovedBytes != null) {
+          cache['${l.id}_${l.filters.removeWhite.round()}'] = l.processedWhiteRemovedBytes!;
+        }
+      }
+    }
+    final restored = DesignProject.decode(snap.$2);
+    for (final pg in restored.pages) {
+      for (final l in pg.layers) {
+        final key = '${l.id}_${l.filters.removeWhite.round()}';
+        if (cache.containsKey(key)) {
+          l.processedWhiteRemovedBytes = cache[key];
+        }
+      }
+    }
+    setState(() {
+      _project = restored;
+      _pageIndex = snap.$1.clamp(0, restored.pages.length - 1);
+      final stillExists = _page.layers.any((l) => l.id == _selectedLayerId);
+      if (!stillExists) _selectedLayerId = null;
+      final cur = _activeLayer;
+      if (cur != null && cur.type == LayerType.text) {
+        _textController.text = cur.text;
+      }
+    });
+    _saveCurrentProject(showToast: false);
+    _rehydrateProjectFilters(restored);
+  }
+
+  void _undoCanvas() {
+    if (_undoStack.isEmpty) return;
+    _redoStack.add((_pageIndex, _project.encode()));
+    final prev = _undoStack.removeLast();
+    _restoreEncodedSnapshot(prev);
+  }
+
+  void _redoCanvas() {
+    if (_redoStack.isEmpty) return;
+    _undoStack.add((_pageIndex, _project.encode()));
+    final next = _redoStack.removeLast();
+    _restoreEncodedSnapshot(next);
+  }
+
+  Future<void> _renameProjectDialog(DesignProject proj) async {
+    final ctrl = TextEditingController(text: proj.name);
+    final nextName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Rename Project', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Project Title'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (nextName != null && nextName.isNotEmpty) {
+      setState(() => proj.name = nextName);
+      await LocalProjectStore.instance.saveProject(proj);
+      final list = await LocalProjectStore.instance.loadAllProjects();
+      if (mounted) setState(() => _projects = list);
+    }
+  }
+
   Future<void> _saveCurrentProject({bool showToast = true}) async {
     _project.updatedAt = DateTime.now().millisecondsSinceEpoch;
     await LocalProjectStore.instance.saveProject(_project);
@@ -361,26 +448,47 @@ class _StudioScreenState extends State<StudioScreen> {
     required bool asPdf,
   }) async {
     try {
-      final bytes = await _captureCanvasBytes(
-        pixelRatio: scale,
-        format: asPdf ? 'png' : format,
-        transparent: !asPdf && transparent,
-      );
-      if (bytes == null) return;
-
       if (asPdf) {
+        final origPageIdx = _pageIndex;
         final doc = pw.Document();
-        final pdfImg = pw.MemoryImage(bytes);
-        doc.addPage(
-          pw.Page(
-            pageFormat: PdfPageFormat(_page.width, _page.height),
-            margin: pw.EdgeInsets.zero,
-            build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
-          ),
-        );
+        try {
+          for (int i = 0; i < _project.pages.length; i++) {
+            if (_pageIndex != i) {
+              setState(() => _pageIndex = i);
+              await Future.delayed(const Duration(milliseconds: 70));
+            }
+            final pgBytes = await _captureCanvasBytes(
+              pixelRatio: scale,
+              format: 'png',
+              transparent: false,
+            );
+            if (pgBytes != null) {
+              final pg = _project.pages[i];
+              final pdfImg = pw.MemoryImage(pgBytes);
+              doc.addPage(
+                pw.Page(
+                  pageFormat: PdfPageFormat(pg.width, pg.height),
+                  margin: pw.EdgeInsets.zero,
+                  build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
+                ),
+              );
+            }
+          }
+        } finally {
+          if (mounted && _pageIndex != origPageIdx) {
+            setState(() => _pageIndex = origPageIdx);
+          }
+        }
         await Printing.layoutPdf(onLayout: (_) async => doc.save());
         return;
       }
+
+      final bytes = await _captureCanvasBytes(
+        pixelRatio: scale,
+        format: format,
+        transparent: transparent,
+      );
+      if (bytes == null) return;
 
       final ext = format == 'jpg' ? 'jpg' : 'png';
       final fileName = 'qalam_export_${DateTime.now().millisecondsSinceEpoch}.$ext';
@@ -597,7 +705,7 @@ class _StudioScreenState extends State<StudioScreen> {
                               );
                             },
                             icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-                            label: const Text('Print / PDF'),
+                            label: Text(_project.pages.length > 1 ? 'PDF (${_project.pages.length} Pages)' : 'Print / PDF'),
                           ),
                         ),
                       ],
@@ -683,6 +791,7 @@ class _StudioScreenState extends State<StudioScreen> {
       objectFit: BoxFit.cover,
     );
 
+    _pushUndoSnapshot();
     setState(() {
       _page.width = natW;
       _page.height = natH;
@@ -726,6 +835,7 @@ class _StudioScreenState extends State<StudioScreen> {
       objectFit: BoxFit.cover,
     );
 
+    _pushUndoSnapshot();
     setState(() {
       _page.layers.add(layer);
       _selectedLayerId = layer.id;
@@ -750,6 +860,7 @@ class _StudioScreenState extends State<StudioScreen> {
       lineHeight: 2.3,
       textColor: const Color(0xFFFFFFFF),
     );
+    _pushUndoSnapshot();
     setState(() {
       _page.layers.add(layer);
       _selectedLayerId = layer.id;
@@ -772,6 +883,7 @@ class _StudioScreenState extends State<StudioScreen> {
       borderRadius: 20,
       textColor: const Color(0xFF111317),
     );
+    _pushUndoSnapshot();
     setState(() {
       _page.layers.add(layer);
       _selectedLayerId = layer.id;
@@ -783,6 +895,7 @@ class _StudioScreenState extends State<StudioScreen> {
   void _duplicateSelectedLayer() {
     final l = _activeLayer;
     if (l == null) return;
+    _pushUndoSnapshot();
     final copy = l.cloneWithNewId('dup_${DateTime.now().microsecondsSinceEpoch}');
     setState(() {
       _page.layers.add(copy);
@@ -794,6 +907,7 @@ class _StudioScreenState extends State<StudioScreen> {
   void _deleteSelectedLayer() {
     final l = _activeLayer;
     if (l == null || l.isCanvasBackground) return;
+    _pushUndoSnapshot();
     setState(() {
       _page.layers.removeWhere((x) => x.id == l.id);
       _selectedLayerId = null;
@@ -807,6 +921,7 @@ class _StudioScreenState extends State<StudioScreen> {
     final minIdx = _page.layers.isNotEmpty && _page.layers.first.isCanvasBackground ? 1 : 0;
     final target = (idx + delta).clamp(minIdx, _page.layers.length - 1);
     if (target == idx) return;
+    _pushUndoSnapshot();
     setState(() {
       final item = _page.layers.removeAt(idx);
       _page.layers.insert(target, item);
@@ -815,6 +930,7 @@ class _StudioScreenState extends State<StudioScreen> {
 
   Future<void> _applyWhiteRemoval(DesignLayer layer, double tolerance) async {
     if (layer.localImagePath == null) return;
+    final seq = ++_whiteRemovalSeq;
     if (tolerance <= 0) {
       setState(() {
         layer.filters.removeWhite = 0;
@@ -824,7 +940,7 @@ class _StudioScreenState extends State<StudioScreen> {
     }
     setState(() => layer.filters.removeWhite = tolerance);
     final pngBytes = await removeWhiteBackgroundOffline(layer.localImagePath!, tolerance);
-    if (!mounted) return;
+    if (!mounted || seq != _whiteRemovalSeq) return;
     setState(() => layer.processedWhiteRemovedBytes = pngBytes);
     await _saveCurrentProject(showToast: false);
   }
@@ -862,23 +978,36 @@ class _StudioScreenState extends State<StudioScreen> {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _project.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                  ),
-                  Text(
-                    '${_page.title} · ${_page.width.round()}×${_page.height.round()}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: _subColor),
-                  ),
-                ],
+              child: InkWell(
+                onTap: () => _renameProjectDialog(_project),
+                borderRadius: BorderRadius.circular(8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            _project.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.edit_outlined, size: 13, color: _mutedColor),
+                      ],
+                    ),
+                    Text(
+                      '${_page.title} · ${_page.width.round()}×${_page.height.round()}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: _subColor),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -970,6 +1099,7 @@ class _StudioScreenState extends State<StudioScreen> {
               forceTransparentBackground: _exportTransparentCanvas,
               onSelectLayer: _selectLayer,
               onUpdateLayer: (_) => setState(() {}),
+              onInteractionStart: _pushUndoSnapshot,
             ),
           ),
         ),
@@ -984,6 +1114,8 @@ class _StudioScreenState extends State<StudioScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             children: [
               _quickBtn(Icons.photo_size_select_large, 'Canvas Pic', _importCanvasImage, highlight: true),
+              if (_undoStack.isNotEmpty) _quickBtn(Icons.undo_rounded, 'Undo', _undoCanvas),
+              if (_redoStack.isNotEmpty) _quickBtn(Icons.redo_rounded, 'Redo', _redoCanvas),
               _quickBtn(Icons.title_rounded, 'Add Text', _addTextLayer),
               _quickBtn(Icons.add_photo_alternate_outlined, 'Overlay', _addOverlayImage),
               _quickBtn(Icons.crop_square_rounded, 'Shape', _addShapeLayer),
@@ -1331,8 +1463,14 @@ class _StudioScreenState extends State<StudioScreen> {
           ),
           const SizedBox(height: 6),
           if (isWhiteRemoved)
-            _sliderRow('White Tol.', targetImg.filters.removeWhite, 5, 95,
-                (v) => _applyWhiteRemoval(targetImg, v)),
+            _sliderRow(
+              'White Tol.',
+              targetImg.filters.removeWhite,
+              5,
+              95,
+              (v) => setState(() => targetImg.filters.removeWhite = v),
+              onChangeEnd: (v) => _applyWhiteRemoval(targetImg, v),
+            ),
           _sliderRow('Brightness', targetImg.filters.brightness, 0.4, 1.8,
               (v) => setState(() => targetImg.filters.brightness = v)),
           _sliderRow('Contrast', targetImg.filters.contrast, 0.5, 2.0,
@@ -1444,6 +1582,60 @@ class _StudioScreenState extends State<StudioScreen> {
             onPressed: _importCanvasImage,
             icon: const Icon(Icons.upload_rounded, size: 18),
             label: const Text('Import Canvas Image (Match Photo Size)', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(height: 12),
+          const SizedBox(height: 12),
+          Text('Canvas Size Presets', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              ('Poster 900×1200', 900.0, 1200.0),
+              ('Square 1080×1080', 1080.0, 1080.0),
+              ('Story 1080×1920', 1080.0, 1920.0),
+              ('Thumb 1280×720', 1280.0, 720.0),
+              ('A4 Doc 992×1403', 992.0, 1403.0),
+            ].map((pItem) {
+              final sel = (_page.width - pItem.$2).abs() < 2 && (_page.height - pItem.$3).abs() < 2;
+              return _choicePill(
+                label: pItem.$1,
+                selected: sel,
+                onTap: () {
+                  _pushUndoSnapshot();
+                  setState(() {
+                    _page.width = pItem.$2;
+                    _page.height = pItem.$3;
+                  });
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _ExactNumberBox(
+                  key: ValueKey('pgw_${_page.id}'),
+                  value: _page.width,
+                  min: 200,
+                  max: 4096,
+                  labelText: 'Canvas W',
+                  onChanged: (v) => setState(() => _page.width = v),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ExactNumberBox(
+                  key: ValueKey('pgh_${_page.id}'),
+                  value: _page.height,
+                  min: 200,
+                  max: 4096,
+                  labelText: 'Canvas H',
+                  onChanged: (v) => setState(() => _page.height = v),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Text('Canvas Background', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
@@ -1565,7 +1757,38 @@ class _StudioScreenState extends State<StudioScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          Text('Alignment & Direction', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _choicePill(
+                label: 'Left',
+                selected: (layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left)) == TextAlign.left,
+                onTap: () => setState(() => layer.textAlign = TextAlign.left),
+              ),
+              _choicePill(
+                label: 'Center',
+                selected: layer.textAlign == TextAlign.center,
+                onTap: () => setState(() => layer.textAlign = TextAlign.center),
+              ),
+              _choicePill(
+                label: 'Right',
+                selected: (layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left)) == TextAlign.right,
+                onTap: () => setState(() => layer.textAlign = TextAlign.right),
+              ),
+              _choicePill(
+                label: layer.isRtl ? 'RTL (Urdu)' : 'LTR (Eng)',
+                selected: true,
+                onTap: () => setState(() => layer.isRtl = !layer.isRtl),
+              ),
+            ],
+          ),
           const SizedBox(height: 10),
+          Text('Text Color', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 10,
             children: [
@@ -1590,6 +1813,37 @@ class _StudioScreenState extends State<StudioScreen> {
                       width: sel ? 3 : 1.2,
                     ),
                   ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 10),
+          Text('Text Highlight Box', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 10,
+            children: [
+              Colors.transparent,
+              const Color(0xCC000000),
+              const Color(0xE6FFFFFF),
+              _amber,
+              const Color(0xFF047857),
+              const Color(0xFFB91C1C),
+            ].map((c) {
+              final sel = layer.textBgColor.value == c.value;
+              return GestureDetector(
+                onTap: () => setState(() => layer.textBgColor = c),
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: c == Colors.transparent ? _chipBg : c,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: sel ? _amber : _borderColor, width: sel ? 3 : 1.2),
+                  ),
+                  child: c == Colors.transparent
+                      ? Icon(Icons.block_rounded, size: 15, color: _subColor)
+                      : null,
                 ),
               );
             }).toList(),
@@ -1653,6 +1907,28 @@ class _StudioScreenState extends State<StudioScreen> {
           ),
           _sliderRow('Corner Radius', layer.borderRadius, 0, 160,
               (v) => setState(() => layer.borderRadius = v)),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(side: BorderSide(color: layer.flipX ? _amber : _borderColor)),
+                  onPressed: () => setState(() => layer.flipX = !layer.flipX),
+                  icon: const Icon(Icons.flip_rounded, size: 16),
+                  label: const Text('Flip H'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(side: BorderSide(color: layer.flipY ? _amber : _borderColor)),
+                  onPressed: () => setState(() => layer.flipY = !layer.flipY),
+                  icon: const Icon(Icons.flip_camera_android_rounded, size: 16),
+                  label: const Text('Flip V'),
+                ),
+              ),
+            ],
+          ),
         ],
       );
     }
@@ -2205,13 +2481,36 @@ class _StudioScreenState extends State<StudioScreen> {
                         ],
                       ),
                     ),
+                    IconButton(
+                      tooltip: 'Duplicate Page',
+                      icon: Icon(Icons.copy_rounded, size: 19, color: _subColor),
+                      onPressed: () {
+                        _pushUndoSnapshot();
+                        final clone = DocumentPage.fromJson(pg.toJson());
+                        clone.id = 'pg_${DateTime.now().microsecondsSinceEpoch}';
+                        clone.title = '${pg.title} Copy';
+                        for (int k = 0; k < clone.layers.length; k++) {
+                          clone.layers[k].id = 'dup_${DateTime.now().microsecondsSinceEpoch}_$k';
+                        }
+                        setState(() {
+                          _project.pages.insert(i + 1, clone);
+                          _pageIndex = i + 1;
+                          _selectedLayerId = null;
+                        });
+                        _rehydrateProjectFilters(_project);
+                      },
+                    ),
                     if (_project.pages.length > 1)
                       IconButton(
                         icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                        onPressed: () => setState(() {
-                          _project.pages.removeAt(i);
-                          _pageIndex = 0;
-                        }),
+                        onPressed: () {
+                          _pushUndoSnapshot();
+                          setState(() {
+                            _project.pages.removeAt(i);
+                            _pageIndex = 0;
+                            _selectedLayerId = null;
+                          });
+                        },
                       ),
                   ],
                 ),
@@ -2540,6 +2839,15 @@ class _StudioScreenState extends State<StudioScreen> {
               lRaw['textColor'] ?? lRaw['color'] ?? lRaw['fillColor'],
               const Color(0xFFFFFFFF),
             ),
+            textAlign: lRaw['textAlign'] is String
+                ? TextAlign.values.firstWhere(
+                    (t) => t.name == lRaw['textAlign'],
+                    orElse: () => (lRaw['isRtl'] ?? lRaw['direction'] == 'rtl') ? TextAlign.right : TextAlign.left,
+                  )
+                : null,
+            textBgColor: _parseColorAny(lRaw['textBgColor'] ?? lRaw['backgroundColor'], Colors.transparent),
+            flipX: lRaw['flipX'] ?? false,
+            flipY: lRaw['flipY'] ?? false,
             localImagePath: imgPath,
             aspectLocked: lRaw['aspectLocked'] ?? true,
             objectFit: lRaw['objectFit'] is int
@@ -2574,6 +2882,8 @@ class _StudioScreenState extends State<StudioScreen> {
         _project = imported;
         _pageIndex = 0;
         _selectedLayerId = null;
+        _undoStack.clear();
+        _redoStack.clear();
         _navIndex = 0;
       });
       await _rehydrateProjectFilters(imported);
@@ -2619,6 +2929,8 @@ class _StudioScreenState extends State<StudioScreen> {
                         _project = fresh;
                         _pageIndex = 0;
                         _selectedLayerId = null;
+                        _undoStack.clear();
+                        _redoStack.clear();
                         _navIndex = 0;
                       });
                     },
@@ -2655,6 +2967,8 @@ class _StudioScreenState extends State<StudioScreen> {
                   _project = proj;
                   _pageIndex = 0;
                   _selectedLayerId = null;
+                  _undoStack.clear();
+                  _redoStack.clear();
                   _navIndex = 0;
                 });
                 await _rehydrateProjectFilters(proj);
@@ -2667,61 +2981,92 @@ class _StudioScreenState extends State<StudioScreen> {
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: isCurrent ? _amber : _borderColor, width: isCurrent ? 1.5 : 1),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: isCurrent ? _amber : _chipBg,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(Icons.folder_open_rounded, color: isCurrent ? Colors.black : _subColor, size: 20),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                    Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: isCurrent ? _amber : _chipBg,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(Icons.folder_open_rounded, color: isCurrent ? Colors.black : _subColor, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Flexible(
-                                child: Text(
-                                  proj.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                                ),
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      proj.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                                    ),
+                                  ),
+                                  if (isCurrent) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                      decoration: BoxDecoration(color: _amber, borderRadius: BorderRadius.circular(6)),
+                                      child: const Text('OPEN', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Colors.black)),
+                                    ),
+                                  ],
+                                ],
                               ),
-                              if (isCurrent) ...[
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(color: _amber, borderRadius: BorderRadius.circular(6)),
-                                  child: const Text('OPEN', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Colors.black)),
-                                ),
-                              ],
+                              const SizedBox(height: 2),
+                              Text('${proj.pages.length} page(s) · Stored offline', style: TextStyle(fontSize: 12, color: _subColor)),
                             ],
                           ),
-                          const SizedBox(height: 2),
-                          Text('${proj.pages.length} page(s) · Stored offline', style: TextStyle(fontSize: 12, color: _subColor)),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      tooltip: 'Share Project (.qalam.json)',
-                      icon: Icon(Icons.share_outlined, size: 20, color: _accentText),
-                      onPressed: () => _shareProjectFile(proj),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        _compactLayerIcon(Icons.edit_outlined, 'Rename Project', () => _renameProjectDialog(proj)),
+                        _compactLayerIcon(Icons.copy_rounded, 'Duplicate Project', () async {
+                          final dup = DesignProject.decode(proj.encode());
+                          dup.id = 'proj_dup_${DateTime.now().millisecondsSinceEpoch}';
+                          dup.name = '${proj.name} (Copy)';
+                          dup.updatedAt = DateTime.now().millisecondsSinceEpoch;
+                          await LocalProjectStore.instance.saveProject(dup);
+                          final list = await LocalProjectStore.instance.loadAllProjects();
+                          if (mounted) setState(() => _projects = list);
+                        }),
+                        _compactLayerIcon(
+                          Icons.share_outlined,
+                          'Share Project (.qalam.json)',
+                          () => _shareProjectFile(proj),
+                          color: _accentText,
+                        ),
+                        if (_projects.length > 1)
+                          _compactLayerIcon(
+                            Icons.delete_outline,
+                            'Delete Project',
+                            () async {
+                              final deletingCurrent = proj.id == _project.id;
+                              await LocalProjectStore.instance.deleteProject(proj.id);
+                              await _loadSavedProjects();
+                              if (deletingCurrent && mounted) {
+                                setState(() {
+                                  _selectedLayerId = null;
+                                  _undoStack.clear();
+                                  _redoStack.clear();
+                                });
+                              }
+                            },
+                            color: Colors.redAccent,
+                          ),
+                      ],
                     ),
-                    if (_projects.length > 1)
-                      IconButton(
-                        tooltip: 'Delete Project',
-                        icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
-                        onPressed: () async {
-                          await LocalProjectStore.instance.deleteProject(proj.id);
-                          await _loadSavedProjects();
-                        },
-                      ),
                   ],
                 ),
               ),
