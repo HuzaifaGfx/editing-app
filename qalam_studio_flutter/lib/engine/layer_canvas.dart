@@ -95,8 +95,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final availW = math.max(1.0, constraints.maxWidth - 32.0);
-        final availH = math.max(1.0, constraints.maxHeight - 32.0);
+        final availW = math.max(1.0, constraints.maxWidth - 12.0);
+        final availH = math.max(1.0, constraints.maxHeight - 12.0);
         final fitScale = math.min(
           availW / math.max(1.0, page.width),
           availH / math.max(1.0, page.height),
@@ -116,6 +116,13 @@ class _LayerCanvasState extends State<LayerCanvas> {
 
         return Stack(
           children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _StudioStageDotGridPainter(isDark: isDark),
+                ),
+              ),
+            ),
             Listener(
               behavior: HitTestBehavior.translucent,
               onPointerDown: (_) {
@@ -178,7 +185,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 },
                 child: Center(
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(6),
                     child: AspectRatio(
                       aspectRatio: page.width / math.max(1, page.height),
                       child: FittedBox(
@@ -187,6 +194,12 @@ class _LayerCanvasState extends State<LayerCanvas> {
                           decoration: widget.forceTransparentBackground
                               ? null
                               : BoxDecoration(
+                                  border: Border.all(
+                                    color: isDark
+                                        ? const Color(0xFF2B313D)
+                                        : const Color(0xFFCBD5E1),
+                                    width: 1,
+                                  ),
                                   boxShadow: [
                                     BoxShadow(
                                       blurRadius: 32,
@@ -344,6 +357,42 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 ),
               ),
             ),
+            if (selectedLayer != null && !selectedLayer.locked)
+              Positioned(
+                top: 8,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: (isDark ? const Color(0xFF1A1E26) : Colors.white).withOpacity(0.92),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF2D3340) : const Color(0xFFE2E8F0),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFFF59E0B), shape: BoxShape.circle)),
+                          const SizedBox(width: 4),
+                          Text('Scale', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87)),
+                          const SizedBox(width: 10),
+                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF0EA5E9), shape: BoxShape.circle)),
+                          const SizedBox(width: 4),
+                          Text('Rotate', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87)),
+                          const SizedBox(width: 10),
+                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
+                          const SizedBox(width: 4),
+                          Text('Box Width', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             Positioned(
               right: 12,
               bottom: 12,
@@ -764,4 +813,28 @@ class _RenderLayerBlend extends RenderProxyBox {
     context.paintChild(child!, offset);
     context.canvas.restore();
   }
+}
+
+
+class _StudioStageDotGridPainter extends CustomPainter {
+  final bool isDark;
+  const _StudioStageDotGridPainter({required this.isDark});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = isDark
+          ? const Color(0xFF94A3B8).withOpacity(0.12)
+          : const Color(0xFF64748B).withOpacity(0.20);
+    const step = 20.0;
+    for (double y = step / 2; y < size.height; y += step) {
+      for (double x = step / 2; x < size.width; x += step) {
+        canvas.drawCircle(Offset(x, y), 1.0, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _StudioStageDotGridPainter oldDelegate) =>
+      oldDelegate.isDark != isDark;
 }

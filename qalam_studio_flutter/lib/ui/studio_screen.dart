@@ -63,6 +63,15 @@ class _StudioScreenState extends State<StudioScreen> {
   final List<(List<Offset>, Color, double)> _sigRedoStrokes = [];
   List<Offset>? _sigCurrentStroke;
 
+  // Rubber Stamp / مہر Maker state
+  String _stampShape = 'round'; // 'round', 'oval', 'box'
+  final TextEditingController _stampOrgCtrl = TextEditingController(text: 'QALAM TRADERS');
+  final TextEditingController _stampStatusCtrl = TextEditingController(text: 'PAID · ادا شدہ');
+  final TextEditingController _stampSubCtrl = TextEditingController(text: 'LAHORE · PAKISTAN');
+  Color _stampInkColor = const Color(0xFF1E3A8A);
+  bool _stampShowDate = true;
+  bool _stampTransparentBg = true;
+
   // Batch state
   List<String> _batchInputs = [];
   List<String> _batchOutputs = [];
@@ -88,13 +97,173 @@ class _StudioScreenState extends State<StudioScreen> {
     super.initState();
     _project = _buildDefaultProject();
     _loadSavedProjects();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkQuickTourOnFirstLaunch());
   }
 
   @override
   void dispose() {
     _textController.dispose();
     _sigTextController.dispose();
+    _stampOrgCtrl.dispose();
+    _stampStatusCtrl.dispose();
+    _stampSubCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkQuickTourOnFirstLaunch() async {
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final flag = File(p.join(docsDir.path, 'qalam_tour_seen_v1.flag'));
+      if (!flag.existsSync() && mounted) {
+        await flag.writeAsString('1');
+        if (mounted) _showQuickTourSheet();
+      }
+    } catch (_) {}
+  }
+
+  void _showQuickTourSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _panelBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: _mutedColor.withOpacity(0.4),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: _amber.withOpacity(0.16),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.explore_outlined, color: _accentText, size: 20),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Qalam Studio — Quick Guide', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _textColor)),
+                          Text('Urdu Nastaliq & Business Design Suite (Offline)', style: TextStyle(fontSize: 11.5, color: _subColor)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                _tourTile(
+                  Icons.receipt_long_rounded,
+                  'Cash Memo, Letterhead & Sanad',
+                  'Docs tab mein ready-to-edit Urdu Cash Memo, Letterhead aur Certificate templates maujood hain.',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _navIndex = 3);
+                  },
+                ),
+                _tourTile(
+                  Icons.verified_rounded,
+                  'Official Stamps (مہر) & Signatures',
+                  'Sign/Seal tab mein Round, Oval ya Box rubber stamp banayen (PAID, منظور شدہ) aur 1 tap mein canvas par lagayen.',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() {
+                      _navIndex = 2;
+                      _sigMode = 2;
+                    });
+                  },
+                ),
+                _tourTile(
+                  Icons.touch_app_rounded,
+                  'Canvas Handle Colors',
+                  'Amber Corner = Size Scale · Blue Top = Rotate · Green Side = Urdu/English Text Box Width.',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _navIndex = 0);
+                  },
+                ),
+                _tourTile(
+                  Icons.edit_note_rounded,
+                  'Quick Fill & Portable Share',
+                  'Fill tab se Customer Name ya Photo seconds mein badlen — coordinates aur filters wahin rehte hain.',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _navIndex = 1);
+                  },
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _amber,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Start Designing', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _tourTile(IconData icon, String title, String subtitle, {required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(11),
+        decoration: BoxDecoration(
+          color: _inputBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _borderColor),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: _amber, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _textColor)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: TextStyle(fontSize: 11.5, color: _subColor, height: 1.35)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   DesignProject _buildDefaultProject() => DesignProject(
@@ -1014,6 +1183,11 @@ class _StudioScreenState extends State<StudioScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Quick Guide & Help',
+            icon: const Icon(Icons.help_outline_rounded, size: 21),
+            onPressed: _showQuickTourSheet,
+          ),
+          IconButton(
             tooltip: _isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
             icon: Icon(
               _isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
@@ -1072,7 +1246,7 @@ class _StudioScreenState extends State<StudioScreen> {
           destinations: const [
             NavigationDestination(icon: Icon(Icons.brush_outlined), selectedIcon: Icon(Icons.brush_rounded), label: 'Studio'),
             NavigationDestination(icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
-            NavigationDestination(icon: Icon(Icons.draw_outlined), selectedIcon: Icon(Icons.draw_rounded), label: 'Sign'),
+            NavigationDestination(icon: Icon(Icons.draw_outlined), selectedIcon: Icon(Icons.draw_rounded), label: 'Sign/Seal'),
             NavigationDestination(icon: Icon(Icons.description_outlined), selectedIcon: Icon(Icons.description_rounded), label: 'Docs'),
             NavigationDestination(icon: Icon(Icons.auto_awesome_motion_outlined), selectedIcon: Icon(Icons.auto_awesome_motion_rounded), label: 'Batch'),
             NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder_rounded), label: 'Projects'),
@@ -1085,7 +1259,7 @@ class _StudioScreenState extends State<StudioScreen> {
   Widget _buildStudioView(Color stageBg) {
     final layer = _activeLayer;
     final screenH = MediaQuery.of(context).size.height;
-    final expandedH = math.min(285.0, math.max(210.0, screenH * 0.35));
+    final expandedH = math.min(248.0, math.max(190.0, screenH * 0.29));
 
     return Column(
       children: [
@@ -2378,10 +2552,497 @@ class _StudioScreenState extends State<StudioScreen> {
     );
   }
 
+  Future<void> _loadBusinessTemplate(String kind) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    late DesignProject tpl;
+    if (kind == 'cash_memo') {
+      tpl = DesignProject(
+        id: 'tpl_bill_$now',
+        name: 'Cash Memo / Bill (رسید)',
+        updatedAt: now,
+        pages: [
+          DocumentPage(
+            id: 'pg_bill_$now',
+            title: 'Cash Memo A4',
+            width: 992,
+            height: 1403,
+            backgroundColor: Colors.white,
+            layers: [
+              DesignLayer(
+                id: 'bill_hdr_$now',
+                name: 'Header Banner',
+                type: LayerType.shape,
+                x: 48,
+                y: 48,
+                width: 896,
+                height: 170,
+                fillColor: const Color(0xFF0F172A),
+                strokeColor: _amber,
+                strokeWidth: 3,
+                borderRadius: 16,
+              ),
+              DesignLayer(
+                id: 'bill_shop_en_$now',
+                name: 'Shop Name (English)',
+                type: LayerType.text,
+                x: 78,
+                y: 78,
+                width: 430,
+                height: 110,
+                text: 'AL-NOOR TRADERS\nWHOLESALE & PRINT HOUSE',
+                fontFamily: 'PlusJakartaSans',
+                fontSize: 30,
+                fontWeight: FontWeight.w700,
+                textAlign: TextAlign.left,
+                isRtl: false,
+                color: Colors.white,
+                lineHeight: 1.3,
+              ),
+              DesignLayer(
+                id: 'bill_shop_ur_$now',
+                name: 'Shop Name (Urdu)',
+                type: LayerType.text,
+                x: 515,
+                y: 70,
+                width: 400,
+                height: 125,
+                text: 'النور ٹریڈرز اینڈ پرنٹرز\nکیش میمو / بل رسید',
+                fontFamily: 'NotoNastaliqUrdu',
+                fontSize: 28,
+                fontWeight: FontWeight.w700,
+                textAlign: TextAlign.right,
+                isRtl: true,
+                color: const Color(0xFFFBBF24),
+                lineHeight: 1.95,
+              ),
+              DesignLayer(
+                id: 'bill_meta_$now',
+                name: 'Bill No & Date',
+                type: LayerType.text,
+                x: 56,
+                y: 248,
+                width: 880,
+                height: 76,
+                text: 'Bill No: #INV-1042      Date: 17 Nov 2025      Ph: 0300-1234567',
+                fontFamily: 'PlusJakartaSans',
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                textAlign: TextAlign.left,
+                isRtl: false,
+                color: const Color(0xFF334155),
+                backgroundColor: const Color(0xFFF8FAFC),
+                backgroundPadding: 14,
+                backgroundRadius: 10,
+              ),
+              DesignLayer(
+                id: 'bill_cust_$now',
+                name: 'Customer Name (نام خریدار)',
+                type: LayerType.text,
+                x: 56,
+                y: 344,
+                width: 880,
+                height: 92,
+                text: 'نام خریدار: محمد بلال صاحب  |  Lahore Cantt',
+                fontFamily: 'NotoNaskhArabic',
+                fontSize: 27,
+                fontWeight: FontWeight.w700,
+                textAlign: TextAlign.right,
+                isRtl: true,
+                color: const Color(0xFF0F172A),
+                backgroundColor: const Color(0xFFFFFBEB),
+                backgroundPadding: 16,
+                backgroundRadius: 10,
+                lineHeight: 1.65,
+              ),
+              DesignLayer(
+                id: 'bill_items_$now',
+                name: 'Items List (تفصیل اشیاء)',
+                type: LayerType.text,
+                x: 56,
+                y: 468,
+                width: 880,
+                height: 460,
+                text: '1. Letterhead Printing (500 Sheets) — Rs. 4,500\n2. Business Rubber Stamp (گول مہر) — Rs. 1,200\n3. Custom Bill Books (10 Books) — Rs. 6,800\n4. Lamination & Binding — Rs. 1,500',
+                fontFamily: 'PlusJakartaSans',
+                fontSize: 25,
+                fontWeight: FontWeight.w500,
+                textAlign: TextAlign.left,
+                isRtl: false,
+                color: const Color(0xFF1E293B),
+                backgroundColor: const Color(0xFFF8FAFC),
+                backgroundPadding: 24,
+                backgroundRadius: 14,
+                lineHeight: 2.0,
+              ),
+              DesignLayer(
+                id: 'bill_total_$now',
+                name: 'Total Amount (کل رقم)',
+                type: LayerType.text,
+                x: 56,
+                y: 965,
+                width: 880,
+                height: 110,
+                text: 'TOTAL PAYABLE / کل رقم:   Rs. 14,000 /-',
+                fontFamily: 'PlusJakartaSans',
+                fontSize: 33,
+                fontWeight: FontWeight.w700,
+                textAlign: TextAlign.center,
+                isRtl: false,
+                color: Colors.white,
+                backgroundColor: const Color(0xFF0F172A),
+                backgroundPadding: 22,
+                backgroundRadius: 12,
+              ),
+            ],
+          ),
+        ],
+      );
+    } else if (kind == 'letterhead') {
+      tpl = DesignProject(
+        id: 'tpl_lh_$now',
+        name: 'Official Letterhead (دفتری لیٹر ہیڈ)',
+        updatedAt: now,
+        pages: [
+          DocumentPage(
+            id: 'pg_lh_$now',
+            title: 'Letterhead A4',
+            width: 992,
+            height: 1403,
+            backgroundColor: const Color(0xFFFAF9F6),
+            layers: [
+              DesignLayer(
+                id: 'lh_bar_$now',
+                name: 'Top Accent Stripe',
+                type: LayerType.shape,
+                x: 0,
+                y: 0,
+                width: 992,
+                height: 22,
+                fillColor: const Color(0xFFB45309),
+              ),
+              DesignLayer(
+                id: 'lh_en_$now',
+                name: 'Company Name (English)',
+                type: LayerType.text,
+                x: 64,
+                y: 66,
+                width: 460,
+                height: 110,
+                text: 'QALAM ENTERPRISES\nLegal & Design Consultancy',
+                fontFamily: 'PlayfairDisplay',
+                fontSize: 34,
+                fontWeight: FontWeight.w700,
+                textAlign: TextAlign.left,
+                isRtl: false,
+                color: const Color(0xFF0F172A),
+                lineHeight: 1.25,
+              ),
+              DesignLayer(
+                id: 'lh_ur_$now',
+                name: 'Company Name (Urdu)',
+                type: LayerType.text,
+                x: 520,
+                y: 58,
+                width: 408,
+                height: 125,
+                text: 'قلم انٹرپرائزز\nدفتری و تجارتی مراسلہ',
+                fontFamily: 'NotoNastaliqUrdu',
+                fontSize: 29,
+                fontWeight: FontWeight.w700,
+                textAlign: TextAlign.right,
+                isRtl: true,
+                color: const Color(0xFF92400E),
+                lineHeight: 2.0,
+              ),
+              DesignLayer(
+                id: 'lh_ref_$now',
+                name: 'Ref & Date',
+                type: LayerType.text,
+                x: 64,
+                y: 225,
+                width: 864,
+                height: 55,
+                text: 'Ref No: QE/2025/084                    Date: 17 / 11 / 2025',
+                fontFamily: 'PlusJakartaSans',
+                fontSize: 21,
+                fontWeight: FontWeight.w600,
+                textAlign: TextAlign.left,
+                isRtl: false,
+                color: const Color(0xFF475569),
+              ),
+              DesignLayer(
+                id: 'lh_body_$now',
+                name: 'Letter Body (متن تحریر)',
+                type: LayerType.text,
+                x: 64,
+                y: 325,
+                width: 864,
+                height: 580,
+                text: 'بخدمت جناب مینیجر صاحب،\n\nگزارش ہے کہ ہمارے ادارے کی جانب سے تمام دستاویزات کی تصدیق مکمل ہو چکی ہے۔ آپ Fill tab سے نام اور تاریخ بدل کر پرنٹ کر سکتے ہیں اور Sign/Seal tab سے مہر شامل کر سکتے ہیں۔\n\nوالسلام',
+                fontFamily: 'NotoNastaliqUrdu',
+                fontSize: 28,
+                textAlign: TextAlign.right,
+                isRtl: true,
+                color: const Color(0xFF0F172A),
+                lineHeight: 2.3,
+              ),
+              DesignLayer(
+                id: 'lh_ftr_$now',
+                name: 'Footer Contact Bar',
+                type: LayerType.text,
+                x: 64,
+                y: 1285,
+                width: 864,
+                height: 70,
+                text: 'Office 14, Shahrah-e-Quaid-e-Azam, Lahore · 042-3555-0192',
+                fontFamily: 'PlusJakartaSans',
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                textAlign: TextAlign.center,
+                isRtl: false,
+                color: const Color(0xFF475569),
+                backgroundColor: const Color(0xFFF1F5F9),
+                backgroundPadding: 14,
+                backgroundRadius: 10,
+              ),
+            ],
+          ),
+        ],
+      );
+    } else {
+      tpl = DesignProject(
+        id: 'tpl_sanad_$now',
+        name: 'Urdu Sanad / Certificate (سند)',
+        updatedAt: now,
+        pages: [
+          DocumentPage(
+            id: 'pg_sanad_$now',
+            title: 'Certificate 4:3',
+            width: 1200,
+            height: 900,
+            backgroundColor: const Color(0xFFFFFDF7),
+            layers: [
+              DesignLayer(
+                id: 'snd_out_$now',
+                name: 'Outer Gold Frame',
+                type: LayerType.shape,
+                x: 36,
+                y: 36,
+                width: 1128,
+                height: 828,
+                fillColor: Colors.transparent,
+                strokeColor: const Color(0xFFB45309),
+                strokeWidth: 8,
+                borderRadius: 20,
+              ),
+              DesignLayer(
+                id: 'snd_in_$now',
+                name: 'Inner Dark Border',
+                type: LayerType.shape,
+                x: 56,
+                y: 56,
+                width: 1088,
+                height: 788,
+                fillColor: Colors.transparent,
+                strokeColor: const Color(0xFF1E293B),
+                strokeWidth: 2,
+                borderRadius: 14,
+              ),
+              DesignLayer(
+                id: 'snd_ttl_$now',
+                name: 'Certificate Title',
+                type: LayerType.text,
+                x: 140,
+                y: 130,
+                width: 920,
+                height: 170,
+                text: 'سندِ اعزاز و امتیازی کارکردگی\nCERTIFICATE OF EXCELLENCE',
+                fontFamily: 'NotoNastaliqUrdu',
+                fontSize: 38,
+                fontWeight: FontWeight.w700,
+                textAlign: TextAlign.center,
+                isRtl: true,
+                color: const Color(0xFF0F172A),
+                lineHeight: 1.9,
+              ),
+              DesignLayer(
+                id: 'snd_rec_$now',
+                name: 'Recipient Name (نام)',
+                type: LayerType.text,
+                x: 180,
+                y: 350,
+                width: 840,
+                height: 120,
+                text: 'محمد حمزہ طارق',
+                fontFamily: 'NotoNastaliqUrdu',
+                fontSize: 48,
+                fontWeight: FontWeight.w700,
+                textAlign: TextAlign.center,
+                isRtl: true,
+                color: const Color(0xFFB45309),
+                backgroundColor: const Color(0xFFFEF3C7),
+                backgroundPadding: 14,
+                backgroundRadius: 12,
+                lineHeight: 1.95,
+              ),
+              DesignLayer(
+                id: 'snd_cit_$now',
+                name: 'Citation Text (تفصیل)',
+                type: LayerType.text,
+                x: 130,
+                y: 515,
+                width: 940,
+                height: 165,
+                text: 'کو سالانہ امتحانات و نصابی سرگرمیوں میں شاندار کارکردگی کا مظاہرہ کرنے پر یہ سندِ اعزاز پیش کی جاتی ہے۔',
+                fontFamily: 'NotoNastaliqUrdu',
+                fontSize: 28,
+                textAlign: TextAlign.center,
+                isRtl: true,
+                color: const Color(0xFF334155),
+                lineHeight: 2.2,
+              ),
+              DesignLayer(
+                id: 'snd_ftr_$now',
+                name: 'Date & Principal Sign',
+                type: LayerType.text,
+                x: 120,
+                y: 740,
+                width: 960,
+                height: 70,
+                text: 'Date: 17 Nov 2025                      Principal Sign & Official Seal',
+                fontFamily: 'PlayfairDisplay',
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                textAlign: TextAlign.center,
+                isRtl: false,
+                color: const Color(0xFF1E293B),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    await LocalProjectStore.saveProject(tpl);
+    final all = await LocalProjectStore.loadProjects();
+    if (!mounted) return;
+    setState(() {
+      _projects = all;
+      _project = tpl;
+      _pageIndex = 0;
+      _selectedLayerId = null;
+      _undoStack.clear();
+      _redoStack.clear();
+      _navIndex = 0;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Loaded: ${tpl.name}')));
+  }
+
+  Widget _businessStarterCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      width: 220,
+      margin: const EdgeInsets.only(right: 10),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: _amber.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(icon, color: _accentText, size: 18),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: _textColor),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: _subColor),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 36,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: _amber,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+              ),
+              onPressed: onTap,
+              child: const Text('Use Template', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPagesView() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        const Text('Urdu Business & Office Starters', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 2),
+        Text('Quick-Fill ready invoices, letterheads & Urdu certificates', style: TextStyle(fontSize: 12, color: _subColor)),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 158,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              _businessStarterCard(
+                icon: Icons.receipt_long_rounded,
+                title: 'Cash Memo / Bill
+رسید و انوائس',
+                subtitle: 'Bilingual A4 shop bill · Quick Fill ready',
+                onTap: () => _loadBusinessTemplate('cash_memo'),
+              ),
+              _businessStarterCard(
+                icon: Icons.description_rounded,
+                title: 'Official Letterhead
+دفتری لیٹر ہیڈ',
+                subtitle: 'Urdu + English header, Ref & footer',
+                onTap: () => _loadBusinessTemplate('letterhead'),
+              ),
+              _businessStarterCard(
+                icon: Icons.workspace_premium_rounded,
+                title: 'Urdu Sanad
+سندِ اعزاز',
+                subtitle: 'Gold frame certificate with Nastaliq title',
+                onTap: () => _loadBusinessTemplate('sanad'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -3488,6 +4149,77 @@ class _StudioScreenState extends State<StudioScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Signature saved: $saved')));
   }
 
+  Future<Uint8List?> _renderStampPngBytes({bool? forceTransparent}) async {
+    final useTransparent = forceTransparent ?? _stampTransparentBg;
+    const size = 640.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, size, size));
+    if (!useTransparent) {
+      canvas.drawRect(const Rect.fromLTWH(0, 0, size, size), Paint()..color = Colors.white);
+    }
+    _StampPainter(
+      shape: _stampShape,
+      org: _stampOrgCtrl.text,
+      status: _stampStatusCtrl.text,
+      sub: _stampSubCtrl.text,
+      inkColor: _stampInkColor,
+      showDate: _stampShowDate,
+      transparentBg: useTransparent,
+    ).paint(canvas, const Size(size, size));
+    final uiImg = await recorder.endRecording().toImage(size.toInt(), size.toInt());
+    final byteData = await uiImg.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
+  Future<void> _addStampToProjectCanvas() async {
+    final bytes = await _renderStampPngBytes(forceTransparent: true);
+    if (bytes == null) return;
+    final docsDir = await getApplicationDocumentsDirectory();
+    final assetsDir = Directory(p.join(docsDir.path, 'qalam_assets'));
+    if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
+    final filePath = p.join(assetsDir.path, 'stamp_${DateTime.now().microsecondsSinceEpoch}.png');
+    await File(filePath).writeAsBytes(bytes);
+
+    final targetDim = math.min(_page.width, _page.height) * 0.32;
+    final layer = DesignLayer(
+      id: 'stamp_${DateTime.now().microsecondsSinceEpoch}',
+      name: 'Stamp: ${_stampStatusCtrl.text.trim().isEmpty ? 'Seal' : _stampStatusCtrl.text.trim()}',
+      type: LayerType.image,
+      x: (_page.width - targetDim) * 0.85,
+      y: (_page.height - targetDim) * 0.82,
+      width: targetDim,
+      height: targetDim,
+      localImagePath: filePath,
+      aspectLocked: true,
+      objectFit: BoxFit.contain,
+    );
+    _pushUndoSnapshot();
+    setState(() {
+      _page.layers.add(layer);
+      _selectedLayerId = layer.id;
+      _navIndex = 0;
+    });
+    await _saveCurrentProject(showToast: false);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Official Stamp (مہر) added to Canvas!')));
+  }
+
+  Future<void> _exportStampPng({required bool shareOnly}) async {
+    final bytes = await _renderStampPngBytes();
+    if (bytes == null) return;
+    final fileName = 'qalam_stamp_${DateTime.now().millisecondsSinceEpoch}.png';
+    final tmpDir = await getTemporaryDirectory();
+    final tmpPath = p.join(tmpDir.path, fileName);
+    await File(tmpPath).writeAsBytes(bytes);
+    if (shareOnly) {
+      await Share.shareXFiles([XFile(tmpPath)], text: 'Official Stamp');
+      return;
+    }
+    final saved = await _saveBytesToDeviceGallery(bytes, fileName);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Stamp saved: $saved')));
+  }
+
   Widget _buildSignatureView() {
     const inkSwatches = [
       Color(0xFF0F172A),
@@ -3506,16 +4238,17 @@ class _StudioScreenState extends State<StudioScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text('Signature Studio', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        const Text('Sign & Official Seal Studio', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         const SizedBox(height: 2),
-        Text('18 calligraphy & script fonts + full-screen drawing pad', style: TextStyle(fontSize: 12, color: _subColor)),
+        Text('18 signature fonts · Draw pad · Rubber Stamp / مہر Maker', style: TextStyle(fontSize: 12, color: _subColor)),
         const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
           child: SegmentedButton<int>(
             segments: const [
-              ButtonSegment(value: 0, label: Text('18 Fonts'), icon: Icon(Icons.title_rounded, size: 16)),
-              ButtonSegment(value: 1, label: Text('Draw Pad'), icon: Icon(Icons.draw_rounded, size: 16)),
+              ButtonSegment(value: 0, label: Text('18 Fonts'), icon: Icon(Icons.title_rounded, size: 15)),
+              ButtonSegment(value: 1, label: Text('Draw'), icon: Icon(Icons.draw_rounded, size: 15)),
+              ButtonSegment(value: 2, label: Text('Stamp / مہر'), icon: Icon(Icons.verified_outlined, size: 15)),
             ],
             selected: {_sigMode},
             onSelectionChanged: (s) => setState(() => _sigMode = s.first),
@@ -3640,7 +4373,7 @@ class _StudioScreenState extends State<StudioScreen> {
               ),
             ),
           )
-        else
+        else if (_sigMode == 1)
           Card(
             child: Padding(
               padding: const EdgeInsets.all(14),
@@ -3785,48 +4518,193 @@ class _StudioScreenState extends State<StudioScreen> {
                 ],
               ),
             ),
+          )
+        else
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 210,
+                      height: 210,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: _stampTransparentBg ? paperPreviewBg : Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                      ),
+                      child: CustomPaint(
+                        painter: _StampPainter(
+                          shape: _stampShape,
+                          org: _stampOrgCtrl.text,
+                          status: _stampStatusCtrl.text,
+                          sub: _stampSubCtrl.text,
+                          inkColor: _stampInkColor,
+                          showDate: _stampShowDate,
+                          transparentBg: _stampTransparentBg,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _choicePill(
+                          label: 'Round Seal',
+                          selected: _stampShape == 'round',
+                          onTap: () => setState(() => _stampShape = 'round'),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: _choicePill(
+                          label: 'Oval Stamp',
+                          selected: _stampShape == 'oval',
+                          onTap: () => setState(() => _stampShape = 'oval'),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: _choicePill(
+                          label: 'Box Stamp',
+                          selected: _stampShape == 'box',
+                          onTap: () => setState(() => _stampShape = 'box'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _stampOrgCtrl,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(labelText: 'Shop / Organization Name (Top)'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _stampStatusCtrl,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(labelText: 'Center Badge (PAID / منظور شدہ)'),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: ['PAID · ادا شدہ', 'منظور شدہ', 'VERIFIED', 'ORIGINAL', 'وصول پایا']
+                        .map(
+                          (preset) => _choicePill(
+                            label: preset,
+                            selected: _stampStatusCtrl.text == preset,
+                            onTap: () => setState(() => _stampStatusCtrl.text = preset),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _stampSubCtrl,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(labelText: 'City / Reg No. (Bottom)'),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Text('Ink:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                      const SizedBox(width: 8),
+                      ...[
+                        const Color(0xFF1E3A8A),
+                        const Color(0xFFB91C1C),
+                        const Color(0xFF047857),
+                        const Color(0xFF0F172A),
+                      ].map(
+                        (c) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: GestureDetector(
+                            onTap: () => setState(() => _stampInkColor = c),
+                            child: Container(
+                              width: 26,
+                              height: 26,
+                              decoration: BoxDecoration(
+                                color: c,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: _stampInkColor == c ? _amber : _borderColor,
+                                  width: _stampInkColor == c ? 3 : 1.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      _choicePill(
+                        label: _stampShowDate ? 'Date: On' : 'Date: Off',
+                        selected: _stampShowDate,
+                        onTap: () => setState(() => _stampShowDate = !_stampShowDate),
+                      ),
+                      const SizedBox(width: 6),
+                      _choicePill(
+                        label: _stampTransparentBg ? 'Clear PNG' : 'White',
+                        selected: _stampTransparentBg,
+                        onTap: () => setState(() => _stampTransparentBg = !_stampTransparentBg),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
         const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
+          height: 46,
           child: FilledButton.icon(
             style: FilledButton.styleFrom(
               backgroundColor: _amber,
               foregroundColor: Colors.black,
-              padding: const EdgeInsets.symmetric(vertical: 13),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            onPressed: _addSignatureToProjectCanvas,
+            onPressed: _sigMode == 2 ? _addStampToProjectCanvas : _addSignatureToProjectCanvas,
             icon: const Icon(Icons.add_to_photos_outlined, size: 18),
-            label: const Text('Add to Studio Canvas', style: TextStyle(fontWeight: FontWeight.w700)),
+            label: Text(
+              _sigMode == 2 ? 'Add Stamp (مہر) to Studio Canvas' : 'Add Signature to Studio Canvas',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
         ),
         const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  side: BorderSide(color: _borderColor),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: SizedBox(
+                height: 44,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: _borderColor),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => _sigMode == 2 ? _exportStampPng(shareOnly: false) : _exportSignaturePng(shareOnly: false),
+                  icon: const Icon(Icons.save_alt_rounded, size: 18),
+                  label: const Text('Save PNG'),
                 ),
-                onPressed: () => _exportSignaturePng(shareOnly: false),
-                icon: const Icon(Icons.save_alt_rounded, size: 18),
-                label: const Text('Save PNG'),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  side: BorderSide(color: _borderColor),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: SizedBox(
+                height: 44,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: _borderColor),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => _sigMode == 2 ? _exportStampPng(shareOnly: true) : _exportSignaturePng(shareOnly: true),
+                  icon: const Icon(Icons.share_outlined, size: 18),
+                  label: const Text('Share'),
                 ),
-                onPressed: () => _exportSignaturePng(shareOnly: true),
-                icon: const Icon(Icons.share_outlined, size: 18),
-                label: const Text('Share'),
               ),
             ),
           ],
@@ -4047,4 +4925,183 @@ class _SignaturePadPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _SignaturePadPainter oldDelegate) => true;
+}
+
+
+class _StampPainter extends CustomPainter {
+  final String shape;
+  final String org;
+  final String status;
+  final String sub;
+  final Color inkColor;
+  final bool showDate;
+  final bool transparentBg;
+
+  const _StampPainter({
+    required this.shape,
+    required this.org,
+    required this.status,
+    required this.sub,
+    required this.inkColor,
+    required this.showDate,
+    required this.transparentBg,
+  });
+
+  bool _isRtl(String text) => RegExp(r'[\u0600-\u06FF]').hasMatch(text);
+
+  String _todayBadge() {
+    final now = DateTime.now();
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    final d = now.day.toString().padLeft(2, '0');
+    return '$d ${months[now.month - 1]} ${now.year}';
+  }
+
+  void _paintCenteredText(
+    Canvas canvas,
+    String text,
+    Offset center,
+    double maxW,
+    double fontSize, {
+    FontWeight weight = FontWeight.w700,
+    Color? color,
+    String? fontFamily,
+  }) {
+    final rtl = _isRtl(text);
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: color ?? inkColor,
+          fontSize: fontSize,
+          fontWeight: weight,
+          fontFamily: fontFamily ?? (rtl ? 'NotoNaskhArabic' : 'PlusJakartaSans'),
+        ),
+      ),
+      textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      ellipsis: '…',
+    )..layout(maxWidth: maxW);
+    tp.paint(canvas, Offset(center.dx - tp.width / 2, center.dy - tp.height / 2));
+  }
+
+  void _paintArcLatin(Canvas canvas, String text, Offset center, double radius, bool isTop, double fontSize) {
+    final chars = text.trim().toUpperCase().split('');
+    if (chars.isEmpty) return;
+    final painters = <TextPainter>[];
+    double totalW = 0;
+    for (final ch in chars) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: ch,
+          style: TextStyle(color: inkColor, fontSize: fontSize, fontWeight: FontWeight.w800, fontFamily: 'PlusJakartaSans'),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      painters.add(tp);
+      totalW += tp.width + 2.0;
+    }
+    final totalAngle = math.min(math.pi * 1.15, totalW / math.max(1.0, radius));
+    final stepScale = totalAngle / math.max(1.0, totalW);
+    double cursor = isTop ? -math.pi / 2 - totalAngle / 2 : math.pi / 2 + totalAngle / 2;
+
+    for (final tp in painters) {
+      final half = ((tp.width + 2.0) * stepScale) / 2;
+      cursor += isTop ? half : -half;
+      canvas.save();
+      canvas.translate(center.dx + math.cos(cursor) * radius, center.dy + math.sin(cursor) * radius);
+      canvas.rotate(isTop ? cursor + math.pi / 2 : cursor - math.pi / 2);
+      tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+      canvas.restore();
+      cursor += isTop ? half : -half;
+    }
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final center = Offset(w / 2, h / 2);
+    final orgText = org.trim().isEmpty ? 'QALAM STUDIO' : org.trim();
+    final statusText = status.trim().isEmpty ? 'APPROVED' : status.trim();
+    final subText = sub.trim().isEmpty ? 'OFFICIAL SEAL' : sub.trim();
+    final today = _todayBadge();
+
+    final outerStroke = Paint()
+      ..color = inkColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.014;
+    final thinStroke = Paint()
+      ..color = inkColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.005;
+
+    if (shape == 'round') {
+      final rOuter = math.min(w, h) * 0.43;
+      final rInner = rOuter * 0.67;
+      canvas.drawCircle(center, rOuter, outerStroke);
+      canvas.drawCircle(center, rOuter - w * 0.02, thinStroke);
+      canvas.drawCircle(center, rInner, thinStroke..strokeWidth = w * 0.006);
+
+      final textR = (rOuter - w * 0.02 + rInner) / 2;
+      if (_isRtl(orgText)) {
+        _paintCenteredText(canvas, orgText, Offset(center.dx, center.dy - textR + 2), rInner * 1.4, w * 0.045);
+      } else {
+        _paintArcLatin(canvas, orgText, center, textR, true, w * 0.042);
+      }
+      if (_isRtl(subText)) {
+        _paintCenteredText(canvas, subText, Offset(center.dx, center.dy + textR - 2), rInner * 1.4, w * 0.04);
+      } else {
+        _paintArcLatin(canvas, subText, center, textR, false, w * 0.036);
+      }
+
+      final bw = rInner * 2.25;
+      final bh = w * 0.14;
+      final rect = Rect.fromCenter(center: center, width: bw, height: bh);
+      canvas.drawRect(rect, Paint()..color = transparentBg ? Colors.white.withOpacity(0.92) : Colors.white);
+      canvas.drawRect(rect, Paint()..color = inkColor..style = PaintingStyle.stroke..strokeWidth = w * 0.007);
+      _paintCenteredText(
+        canvas,
+        statusText,
+        Offset(center.dx, showDate ? center.dy - w * 0.02 : center.dy),
+        bw - 16,
+        w * 0.052,
+        weight: FontWeight.w800,
+      );
+      if (showDate) {
+        _paintCenteredText(canvas, today, Offset(center.dx, center.dy + w * 0.034), bw - 16, w * 0.028);
+      }
+    } else if (shape == 'oval') {
+      final rx = w * 0.44;
+      final ry = h * 0.34;
+      canvas.drawOval(Rect.fromCenter(center: center, width: rx * 2, height: ry * 2), outerStroke);
+      canvas.drawOval(Rect.fromCenter(center: center, width: (rx - w * 0.022) * 2, height: (ry - w * 0.022) * 2), thinStroke);
+
+      canvas.drawLine(Offset(center.dx - rx * 0.7, center.dy - ry * 0.28), Offset(center.dx + rx * 0.7, center.dy - ry * 0.28), thinStroke);
+      canvas.drawLine(Offset(center.dx - rx * 0.7, center.dy + ry * 0.28), Offset(center.dx + rx * 0.7, center.dy + ry * 0.28), thinStroke);
+
+      _paintCenteredText(canvas, _isRtl(orgText) ? orgText : orgText.toUpperCase(), Offset(center.dx, center.dy - ry * 0.54), rx * 1.35, w * 0.042);
+      _paintCenteredText(canvas, _isRtl(subText) ? subText : subText.toUpperCase(), Offset(center.dx, center.dy + ry * 0.54), rx * 1.35, w * 0.036);
+      _paintCenteredText(canvas, statusText, Offset(center.dx, showDate ? center.dy - w * 0.02 : center.dy), rx * 1.5, w * 0.056, weight: FontWeight.w800);
+      if (showDate) {
+        _paintCenteredText(canvas, today, Offset(center.dx, center.dy + w * 0.036), rx * 1.25, w * 0.028);
+      }
+    } else {
+      final bw = w * 0.84;
+      final bh = h * 0.52;
+      final rect = Rect.fromCenter(center: center, width: bw, height: bh);
+      canvas.drawRect(rect, outerStroke);
+      canvas.drawRect(rect.deflate(w * 0.02), thinStroke);
+
+      _paintCenteredText(canvas, _isRtl(orgText) ? orgText : orgText.toUpperCase(), Offset(center.dx, rect.top + bh * 0.2), bw - 28, w * 0.04);
+      _paintCenteredText(canvas, statusText, Offset(center.dx, showDate ? center.dy - w * 0.01 : center.dy + w * 0.01), bw - 28, w * 0.068, weight: FontWeight.w800);
+      canvas.drawLine(Offset(rect.left + w * 0.04, rect.bottom - bh * 0.25), Offset(rect.right - w * 0.04, rect.bottom - bh * 0.25), thinStroke);
+
+      final botText = showDate ? '$subText · $today' : subText;
+      _paintCenteredText(canvas, _isRtl(botText) ? botText : botText.toUpperCase(), Offset(center.dx, rect.bottom - bh * 0.14), bw - 32, w * 0.032);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _StampPainter oldDelegate) => true;
 }
