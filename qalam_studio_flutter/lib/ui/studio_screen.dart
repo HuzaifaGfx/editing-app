@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -42,7 +43,7 @@ class _StudioScreenState extends State<StudioScreen> {
   int _pageIndex = 0;
   String? _selectedLayerId;
   int _navIndex = 0; // 0=Studio, 1=Fill, 2=Sign, 3=Docs, 4=Batch, 5=Projects
-  int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Filters, 3=Layers
+  int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=BG Clean, 3=Layers
   bool _sheetExpanded = true;
   bool _exportTransparentCanvas = false;
   bool _showGuides = true;
@@ -52,6 +53,13 @@ class _StudioScreenState extends State<StudioScreen> {
   int _whiteRemovalSeq = 0;
   final List<(int, String)> _undoStack = [];
   final List<(int, String)> _redoStack = [];
+
+  // Global Saving HUD overlay state
+  OverlayEntry? _saveHudEntry;
+  Timer? _saveHudTimer;
+  String _saveHudPhase = 'saving'; // 'saving' | 'saved' | 'error'
+  String _saveHudTitle = 'Saving...';
+  String _saveHudSubtitle = '';
 
   // Signature Studio state
   int _sigMode = 0;
@@ -81,10 +89,7 @@ class _StudioScreenState extends State<StudioScreen> {
   List<String> _batchInputs = [];
   List<String> _batchOutputs = [];
   bool _batchProcessing = false;
-  bool _batchBw = false;
   double _batchRemoveWhite = 0.0;
-  double _batchBrightness = 1.0;
-  double _batchContrast = 1.0;
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _cardBg => _isDark ? const Color(0xFF16191E) : Colors.white;
@@ -107,12 +112,182 @@ class _StudioScreenState extends State<StudioScreen> {
 
   @override
   void dispose() {
+    _saveHudTimer?.cancel();
+    _saveHudEntry?.remove();
+    _saveHudEntry = null;
     _textController.dispose();
     _sigTextController.dispose();
     _stampOrgCtrl.dispose();
     _stampStatusCtrl.dispose();
     _stampSubCtrl.dispose();
     super.dispose();
+  }
+
+  void _showSaveHud({
+    required String phase,
+    required String title,
+    String subtitle = '',
+  }) {
+    if (!mounted) return;
+    _saveHudPhase = phase;
+    _saveHudTitle = title;
+    _saveHudSubtitle = subtitle;
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+    if (_saveHudEntry == null) {
+      _saveHudEntry = OverlayEntry(
+        builder: (ctx) {
+          final isDark = Theme.of(ctx).brightness == Brightness.dark;
+          final isSaving = _saveHudPhase == 'saving';
+          final isError = _saveHudPhase == 'error';
+          final borderCol = isError
+              ? const Color(0xFFEF4444)
+              : (isSaving ? _amber : const Color(0xFF10B981));
+          return Positioned(
+            top: MediaQuery.of(ctx).padding.top + 12,
+            left: 16,
+            right: 16,
+            child: IgnorePointer(
+              child: Center(
+                child: Material(
+                  color: Colors.transparent,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    constraints: const BoxConstraints(maxWidth: 340),
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF16191E) : Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: borderCol.withOpacity(0.75), width: 1.4),
+                      boxShadow: [
+                        BoxShadow(
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
+                          color: Colors.black.withOpacity(isDark ? 0.45 : 0.16),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 200),
+                              child: isSaving
+                                  ? const SizedBox(
+                                      key: ValueKey('hud_spin'),
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.6,
+                                        color: _amber,
+                                      ),
+                                    )
+                                  : Icon(
+                                      isError ? Icons.error_outline_rounded : Icons.check_circle_rounded,
+                                      key: ValueKey(_saveHudPhase),
+                                      color: isError ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                                      size: 24,
+                                    ),
+                            ),
+                            const SizedBox(width: 10),
+                            Flexible(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _saveHudTitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  if (_saveHudSubtitle.isNotEmpty)
+                                    Text(
+                                      _saveHudSubtitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (isSaving) ...[
+                          const SizedBox(height: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              minHeight: 3,
+                              color: _amber,
+                              backgroundColor: _amber.withOpacity(0.18),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+      overlay.insert(_saveHudEntry!);
+    } else {
+      _saveHudEntry!.markNeedsBuild();
+    }
+  }
+
+  void _scheduleHideSaveHud([int ms = 1450]) {
+    _saveHudTimer?.cancel();
+    _saveHudTimer = Timer(Duration(milliseconds: ms), () {
+      _saveHudEntry?.remove();
+      _saveHudEntry = null;
+    });
+  }
+
+  Future<T?> _runWithSavingHud<T>({
+    required String savingTitle,
+    String savingSubtitle = '',
+    required String savedTitle,
+    String savedSubtitle = '',
+    required Future<T> Function() action,
+  }) async {
+    _saveHudTimer?.cancel();
+    _showSaveHud(phase: 'saving', title: savingTitle, subtitle: savingSubtitle);
+    try {
+      final results = await Future.wait<dynamic>([
+        action(),
+        Future.delayed(const Duration(milliseconds: 380)),
+      ]);
+      final res = results[0] as T;
+      if (mounted) {
+        _showSaveHud(phase: 'saved', title: savedTitle, subtitle: savedSubtitle);
+        _scheduleHideSaveHud(1450);
+      }
+      return res;
+    } catch (e) {
+      if (mounted) {
+        _showSaveHud(
+          phase: 'error',
+          title: 'Save Failed',
+          subtitle: e.toString(),
+        );
+        _scheduleHideSaveHud(2200);
+      }
+      return null;
+    }
   }
 
   Future<void> _checkQuickTourOnFirstLaunch() async {
@@ -210,7 +385,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 _tourTile(
                   Icons.edit_note_rounded,
                   'Quick Fill & Portable Share',
-                  'Fill tab se Customer Name ya Photo seconds mein badlen — coordinates aur filters wahin rehte hain.',
+                  'Fill tab se Customer Name ya Photo seconds mein badlen — exact coordinates wahin rehte hain.',
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() => _navIndex = 1);
@@ -474,15 +649,24 @@ class _StudioScreenState extends State<StudioScreen> {
   }
 
   Future<void> _saveCurrentProject({bool showToast = true}) async {
-    _project.updatedAt = DateTime.now().millisecondsSinceEpoch;
-    await LocalProjectStore.instance.saveProject(_project);
-    final list = await LocalProjectStore.instance.loadAllProjects();
-    if (!mounted) return;
-    setState(() => _projects = list);
+    Future<void> persist() async {
+      _project.updatedAt = DateTime.now().millisecondsSinceEpoch;
+      await LocalProjectStore.instance.saveProject(_project);
+      final list = await LocalProjectStore.instance.loadAllProjects();
+      if (!mounted) return;
+      setState(() => _projects = list);
+    }
+
     if (showToast) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Project saved locally offline')),
+      await _runWithSavingHud(
+        savingTitle: 'Saving Project...',
+        savingSubtitle: _project.name,
+        savedTitle: 'Project Saved',
+        savedSubtitle: 'Stored offline on device',
+        action: persist,
       );
+    } else {
+      await persist();
     }
   }
 
@@ -514,7 +698,12 @@ class _StudioScreenState extends State<StudioScreen> {
     ctrl.dispose();
     if (nextName != null && nextName.isNotEmpty) {
       setState(() => layer.name = nextName);
-      await _saveCurrentProject(showToast: false);
+      await _runWithSavingHud(
+        savingTitle: 'Saving Layer...',
+        savedTitle: 'Layer Saved',
+        savedSubtitle: nextName,
+        action: () => _saveCurrentProject(showToast: false),
+      );
     }
   }
 
@@ -534,28 +723,34 @@ class _StudioScreenState extends State<StudioScreen> {
         }
       }
     });
-    await _saveCurrentProject(showToast: false);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Applied font "$fontFamily" to all $count text layer(s)')),
+    await _runWithSavingHud(
+      savingTitle: 'Applying Font...',
+      savedTitle: 'Font Saved',
+      savedSubtitle: 'Updated $count text layer(s)',
+      action: () => _saveCurrentProject(showToast: false),
     );
   }
 
   Future<void> _replaceLayerImageKeepingConfig(DesignLayer layer) async {
     final picked = await _picker.pickImage(source: ImageSource.gallery);
     if (picked == null) return;
-    final permanentPath = await _persistPickedImageOffline(picked.path);
-    setState(() {
-      layer.localImagePath = permanentPath;
-      layer.processedWhiteRemovedBytes = null;
-    });
-    if (layer.filters.removeWhite > 0) {
-      await _applyWhiteRemoval(layer, layer.filters.removeWhite);
-    }
-    await _saveCurrentProject(showToast: false);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Replaced "${layer.name}" keeping exact coordinates & filters')),
+    await _runWithSavingHud(
+      savingTitle: 'Updating Image...',
+      savingSubtitle: layer.name,
+      savedTitle: 'Layer Saved',
+      savedSubtitle: 'Replaced "${layer.name}"',
+      action: () async {
+        final permanentPath = await _persistPickedImageOffline(picked.path);
+        if (!mounted) return;
+        setState(() {
+          layer.localImagePath = permanentPath;
+          layer.processedWhiteRemovedBytes = null;
+        });
+        if (layer.filters.removeWhite > 0) {
+          await _applyWhiteRemoval(layer, layer.filters.removeWhite);
+        }
+        await _saveCurrentProject(showToast: false);
+      },
     );
   }
 
@@ -623,76 +818,88 @@ class _StudioScreenState extends State<StudioScreen> {
     required bool shareOnly,
     required bool asPdf,
   }) async {
-    try {
-      if (asPdf) {
-        final origPageIdx = _pageIndex;
-        final doc = pw.Document();
-        try {
-          for (int i = 0; i < _project.pages.length; i++) {
-            if (_pageIndex != i) {
-              setState(() => _pageIndex = i);
-              await Future.delayed(const Duration(milliseconds: 70));
-            }
-            final pgBytes = await _captureCanvasBytes(
-              pixelRatio: scale,
-              format: 'png',
-              transparent: false,
-            );
-            if (pgBytes != null) {
-              final pg = _project.pages[i];
-              final pdfImg = pw.MemoryImage(pgBytes);
-              doc.addPage(
-                pw.Page(
-                  pageFormat: PdfPageFormat(pg.width, pg.height),
-                  margin: pw.EdgeInsets.zero,
-                  build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
-                ),
+    if (asPdf) {
+      await _runWithSavingHud(
+        savingTitle: 'Generating PDF...',
+        savingSubtitle: '${_project.pages.length} page(s)',
+        savedTitle: 'PDF Ready',
+        savedSubtitle: 'Opening print & save view',
+        action: () async {
+          final origPageIdx = _pageIndex;
+          final doc = pw.Document();
+          try {
+            for (int i = 0; i < _project.pages.length; i++) {
+              if (_pageIndex != i) {
+                setState(() => _pageIndex = i);
+                await Future.delayed(const Duration(milliseconds: 70));
+              }
+              final pgBytes = await _captureCanvasBytes(
+                pixelRatio: scale,
+                format: 'png',
+                transparent: false,
               );
+              if (pgBytes != null) {
+                final pg = _project.pages[i];
+                final pdfImg = pw.MemoryImage(pgBytes);
+                doc.addPage(
+                  pw.Page(
+                    pageFormat: PdfPageFormat(pg.width, pg.height),
+                    margin: pw.EdgeInsets.zero,
+                    build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
+                  ),
+                );
+              }
+            }
+          } finally {
+            if (mounted && _pageIndex != origPageIdx) {
+              setState(() => _pageIndex = origPageIdx);
             }
           }
-        } finally {
-          if (mounted && _pageIndex != origPageIdx) {
-            setState(() => _pageIndex = origPageIdx);
-          }
-        }
-        await Printing.layoutPdf(onLayout: (_) async => doc.save());
-        return;
-      }
-
-      final bytes = await _captureCanvasBytes(
-        pixelRatio: scale,
-        format: format,
-        transparent: transparent,
+          await Printing.layoutPdf(onLayout: (_) async => doc.save());
+        },
       );
-      if (bytes == null) return;
+      return;
+    }
 
-      final ext = format == 'jpg' ? 'jpg' : 'png';
-      final fileName = 'qalam_export_${DateTime.now().millisecondsSinceEpoch}.$ext';
-      final tmpDir = await getTemporaryDirectory();
-      final tmpPath = p.join(tmpDir.path, fileName);
-      await File(tmpPath).writeAsBytes(bytes);
-
-      if (shareOnly) {
-        await Share.shareXFiles([XFile(tmpPath)], text: _project.name);
-        return;
-      }
-
-      final savedLocation = await _saveBytesToDeviceGallery(bytes, fileName);
-      if (!mounted) return;
+    String? tmpPathForShare;
+    String? savedLocation;
+    await _runWithSavingHud(
+      savingTitle: shareOnly ? 'Preparing Share...' : 'Saving ${format.toUpperCase()}...',
+      savingSubtitle: _project.name,
+      savedTitle: shareOnly ? 'Ready to Share' : 'Saved to Gallery',
+      savedSubtitle: '${format.toUpperCase()} · ${scale.toStringAsFixed(0)}x',
+      action: () async {
+        final bytes = await _captureCanvasBytes(
+          pixelRatio: scale,
+          format: format,
+          transparent: transparent,
+        );
+        if (bytes == null) throw Exception('Canvas capture failed');
+        final ext = format == 'jpg' ? 'jpg' : 'png';
+        final fileName = 'qalam_export_${DateTime.now().millisecondsSinceEpoch}.$ext';
+        final tmpDir = await getTemporaryDirectory();
+        final tmpPath = p.join(tmpDir.path, fileName);
+        await File(tmpPath).writeAsBytes(bytes);
+        tmpPathForShare = tmpPath;
+        if (shareOnly) {
+          await Share.shareXFiles([XFile(tmpPath)], text: _project.name);
+        } else {
+          savedLocation = await _saveBytesToDeviceGallery(bytes, fileName);
+        }
+      },
+    );
+    if (!shareOnly && savedLocation != null && tmpPathForShare != null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Saved to Gallery: $savedLocation'),
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 3),
           action: SnackBarAction(
             label: 'Share',
             textColor: _amber,
-            onPressed: () => Share.shareXFiles([XFile(tmpPath)], text: _project.name),
+            onPressed: () => Share.shareXFiles([XFile(tmpPathForShare!)], text: _project.name),
           ),
         ),
       );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export error: $e')));
     }
   }
 
@@ -1072,10 +1279,15 @@ class _StudioScreenState extends State<StudioScreen> {
 
   void _clampLayerInPage(DesignLayer layer) {
     if (layer.isCanvasBackground) return;
-    layer.width = layer.width.clamp(16.0, math.max(16.0, _page.width));
-    layer.height = layer.height.clamp(16.0, math.max(16.0, _page.height));
-    layer.x = layer.x.clamp(0.0, math.max(0.0, _page.width - layer.width));
-    layer.y = layer.y.clamp(0.0, math.max(0.0, _page.height - layer.height));
+    layer.width = layer.width.clamp(16.0, math.max(16.0, _page.width * 3.0)).toDouble();
+    layer.height = layer.height.clamp(16.0, math.max(16.0, _page.height * 3.0)).toDouble();
+    const minOverlap = 24.0;
+    final minX = -(layer.width - minOverlap);
+    final maxX = _page.width - minOverlap;
+    final minY = -(layer.height - minOverlap);
+    final maxY = _page.height - minOverlap;
+    layer.x = layer.x.clamp(minX, maxX).toDouble();
+    layer.y = layer.y.clamp(minY, maxY).toDouble();
   }
 
   void _duplicateSelectedLayer() {
@@ -1201,7 +1413,7 @@ class _StudioScreenState extends State<StudioScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Scan Document (ML Kit / Upload)',
+            tooltip: 'Document Scanner',
             icon: Icon(Icons.document_scanner_outlined, size: 21, color: _accentText),
             onPressed: _openDocumentScannerSheet,
           ),
@@ -1324,7 +1536,7 @@ class _StudioScreenState extends State<StudioScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             children: [
               _quickBtn(Icons.photo_size_select_large, 'Canvas Pic', _importCanvasImage, highlight: true),
-              _quickBtn(Icons.document_scanner_outlined, 'Scan Doc', _openDocumentScannerSheet),
+              _quickBtn(Icons.document_scanner_outlined, 'Scanner', _openDocumentScannerSheet),
               if (_undoStack.isNotEmpty) _quickBtn(Icons.undo_rounded, 'Undo', _undoCanvas),
               if (_redoStack.isNotEmpty) _quickBtn(Icons.redo_rounded, 'Redo', _redoCanvas),
               _quickBtn(Icons.title_rounded, 'Add Text', _addTextLayer),
@@ -1361,7 +1573,7 @@ class _StudioScreenState extends State<StudioScreen> {
                           children: [
                             _tabChip(0, 'Design', Icons.tune_rounded),
                             _tabChip(1, 'Overlay', Icons.layers_outlined),
-                            _tabChip(2, 'Filters', Icons.auto_fix_high_rounded),
+                            _tabChip(2, 'BG Clean', Icons.cleaning_services_outlined),
                             _tabChip(3, 'Layers (${_page.layers.length})', Icons.format_list_bulleted_rounded),
                           ],
                         ),
@@ -1611,7 +1823,7 @@ class _StudioScreenState extends State<StudioScreen> {
       );
     }
 
-    // TAB 2: FILTERS
+    // TAB 2: BG CLEAN
     if (_inspectorTab == 2) {
       DesignLayer? bgPhoto;
       for (final l in _page.layers) {
@@ -1625,12 +1837,11 @@ class _StudioScreenState extends State<StudioScreen> {
         return Padding(
           padding: const EdgeInsets.all(14),
           child: Text(
-            'Import a Canvas Pic or select an Overlay Image to apply Black & White, Remove White BG, or color filters.',
+            'Import a Canvas Pic or select an Overlay Image to use Remove White BG.',
             style: TextStyle(color: _subColor, fontSize: 13),
           ),
         );
       }
-      final isBw = targetImg.filters.blackAndWhite || targetImg.filters.grayscale >= 0.99;
       final isWhiteRemoved = targetImg.filters.removeWhite > 0;
 
       return Column(
@@ -1638,7 +1849,7 @@ class _StudioScreenState extends State<StudioScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.auto_fix_high_rounded, size: 15, color: _accentText),
+              Icon(Icons.cleaning_services_outlined, size: 15, color: _accentText),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -1656,54 +1867,41 @@ class _StudioScreenState extends State<StudioScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                 ),
                 onPressed: () async {
-                  setState(() {
-                    targetImg.filters = FilterSettings();
-                    targetImg.processedWhiteRemovedBytes = null;
-                  });
-                  await _saveCurrentProject(showToast: false);
+                  await _runWithSavingHud(
+                    savingTitle: 'Resetting BG Clean...',
+                    savedTitle: 'Reset Saved',
+                    action: () async {
+                      setState(() {
+                        targetImg.filters = FilterSettings();
+                        targetImg.processedWhiteRemovedBytes = null;
+                      });
+                      await _saveCurrentProject(showToast: false);
+                    },
+                  );
                 },
                 child: const Text('Reset', style: TextStyle(fontSize: 12)),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: isBw ? _amber : _chipBg,
-                    foregroundColor: isBw ? Colors.black : _textColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: () async {
-                    setState(() {
-                      targetImg.filters.blackAndWhite = !isBw;
-                      targetImg.filters.grayscale = !isBw ? 1.0 : 0.0;
-                      targetImg.filters.contrast = !isBw ? 1.28 : 1.0;
-                    });
-                    await _saveCurrentProject(showToast: false);
-                  },
-                  icon: const Icon(Icons.contrast, size: 17),
-                  label: const Text('Black & White', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: isWhiteRemoved ? const Color(0xFF10B981) : _chipBg,
+                foregroundColor: isWhiteRemoved ? Colors.black : _textColor,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: isWhiteRemoved ? const Color(0xFF10B981) : _chipBg,
-                    foregroundColor: isWhiteRemoved ? Colors.black : _textColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: () => _applyWhiteRemoval(targetImg, isWhiteRemoved ? 0.0 : 35.0),
-                  icon: const Icon(Icons.auto_fix_high, size: 17),
-                  label: const Text('Remove White BG', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                ),
+              onPressed: () => _applyWhiteRemoval(targetImg, isWhiteRemoved ? 0.0 : 35.0),
+              icon: const Icon(Icons.cleaning_services_outlined, size: 17),
+              label: Text(
+                isWhiteRemoved ? 'White BG Removed ✓' : 'Remove White BG',
+                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
               ),
-            ],
+            ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           if (isWhiteRemoved)
             _sliderRow(
               'White Tol.',
@@ -1713,12 +1911,6 @@ class _StudioScreenState extends State<StudioScreen> {
               (v) => setState(() => targetImg.filters.removeWhite = v),
               onChangeEnd: (v) => _applyWhiteRemoval(targetImg, v),
             ),
-          _sliderRow('Brightness', targetImg.filters.brightness, 0.4, 1.8,
-              (v) => setState(() => targetImg.filters.brightness = v)),
-          _sliderRow('Contrast', targetImg.filters.contrast, 0.5, 2.0,
-              (v) => setState(() => targetImg.filters.contrast = v)),
-          _sliderRow('Saturation', targetImg.filters.saturate, 0.0, 2.0,
-              (v) => setState(() => targetImg.filters.saturate = v)),
         ],
       );
     }
@@ -2392,7 +2584,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 children: [
                   const Text('Quick Fill Form', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   Text(
-                    'Update text & photos by Layer Name — exact coordinates & filters kept',
+                    'Update text & photos by Layer Name — exact coordinates & layout kept',
                     style: TextStyle(fontSize: 12, color: _subColor),
                   ),
                 ],
@@ -2545,10 +2737,7 @@ class _StudioScreenState extends State<StudioScreen> {
             }
 
             final filterTags = <String>[
-              if (l.filters.blackAndWhite || l.filters.grayscale >= 0.99) 'B&W',
               if (l.filters.removeWhite > 0) 'White BG Removed (${l.filters.removeWhite.round()}%)',
-              if ((l.filters.brightness - 1.0).abs() > 0.02) 'Bright ${l.filters.brightness.toStringAsFixed(1)}',
-              if ((l.filters.contrast - 1.0).abs() > 0.02) 'Contrast ${l.filters.contrast.toStringAsFixed(1)}',
             ];
             Widget? thumb;
             if (l.processedWhiteRemovedBytes != null) {
@@ -2608,8 +2797,8 @@ class _StudioScreenState extends State<StudioScreen> {
                               children: [
                                 Text(
                                   filterTags.isEmpty
-                                      ? 'Same position, size & original filter kept'
-                                      : 'Filters kept: ${filterTags.join(" · ")}',
+                                      ? 'Same position & size kept'
+                                      : filterTags.join(' · '),
                                   style: TextStyle(
                                     fontSize: 11.5,
                                     color: filterTags.isEmpty
@@ -2981,19 +3170,26 @@ class _StudioScreenState extends State<StudioScreen> {
       );
     }
 
-    await LocalProjectStore.instance.saveProject(tpl);
-    final all = await LocalProjectStore.instance.loadAllProjects();
-    if (!mounted) return;
-    setState(() {
-      _projects = all;
-      _project = tpl;
-      _pageIndex = 0;
-      _selectedLayerId = null;
-      _undoStack.clear();
-      _redoStack.clear();
-      _navIndex = 0;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Loaded: ${tpl.name}')));
+    await _runWithSavingHud(
+      savingTitle: 'Creating Template...',
+      savingSubtitle: tpl.name,
+      savedTitle: 'Template Saved',
+      savedSubtitle: tpl.name,
+      action: () async {
+        await LocalProjectStore.instance.saveProject(tpl);
+        final all = await LocalProjectStore.instance.loadAllProjects();
+        if (!mounted) return;
+        setState(() {
+          _projects = all;
+          _project = tpl;
+          _pageIndex = 0;
+          _selectedLayerId = null;
+          _undoStack.clear();
+          _redoStack.clear();
+          _navIndex = 0;
+        });
+      },
+    );
   }
 
   Widget _businessStarterCard({
@@ -3091,9 +3287,9 @@ class _StudioScreenState extends State<StudioScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('ML Kit Document Scanner', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+                    const Text('Document Scanner', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
                     Text(
-                      'Camera scan or upload pages · Live Preview · Save PDF / JPEG',
+                      'Scan or upload pages · Live Preview · Save PDF / JPEG',
                       style: TextStyle(fontSize: 11.5, color: _subColor),
                     ),
                   ],
@@ -3151,7 +3347,7 @@ class _StudioScreenState extends State<StudioScreen> {
             ),
             FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
-              onPressed: () {
+              onPressed: () async {
                 setState(() {
                   _project.pages.add(DocumentPage(
                     id: 'pg_${DateTime.now().microsecondsSinceEpoch}',
@@ -3164,6 +3360,12 @@ class _StudioScreenState extends State<StudioScreen> {
                   _pageIndex = _project.pages.length - 1;
                   _navIndex = 0;
                 });
+                await _runWithSavingHud(
+                  savingTitle: 'Saving Page...',
+                  savedTitle: 'Page Added',
+                  savedSubtitle: 'Page ${_project.pages.length} saved',
+                  action: () => _saveCurrentProject(showToast: false),
+                );
               },
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Add A4 Page'),
@@ -3241,7 +3443,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     IconButton(
                       tooltip: 'Duplicate Page',
                       icon: Icon(Icons.copy_rounded, size: 19, color: _subColor),
-                      onPressed: () {
+                      onPressed: () async {
                         _pushUndoSnapshot();
                         final clone = DocumentPage.fromJson(pg.toJson());
                         clone.id = 'pg_${DateTime.now().microsecondsSinceEpoch}';
@@ -3254,7 +3456,15 @@ class _StudioScreenState extends State<StudioScreen> {
                           _pageIndex = i + 1;
                           _selectedLayerId = null;
                         });
-                        _rehydrateProjectFilters(_project);
+                        await _runWithSavingHud(
+                          savingTitle: 'Duplicating Page...',
+                          savedTitle: 'Page Duplicated',
+                          savedSubtitle: clone.title,
+                          action: () async {
+                            await _rehydrateProjectFilters(_project);
+                            await _saveCurrentProject(showToast: false);
+                          },
+                        );
                       },
                     ),
                     if (_project.pages.length > 1)
@@ -3313,21 +3523,13 @@ class _StudioScreenState extends State<StudioScreen> {
                 const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Black & White Scan Filter', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                  activeColor: _amber,
-                  value: _batchBw,
-                  onChanged: (v) => setState(() => _batchBw = v),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
                   title: const Text('Remove White Background (PNG)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                   activeColor: _amber,
                   value: _batchRemoveWhite > 0,
                   onChanged: (v) => setState(() => _batchRemoveWhite = v ? 35.0 : 0.0),
                 ),
-                const Divider(),
-                _sliderRow('Brightness', _batchBrightness, 0.5, 1.8, (v) => setState(() => _batchBrightness = v)),
-                _sliderRow('Contrast', _batchContrast, 0.5, 2.0, (v) => setState(() => _batchContrast = v)),
+                if (_batchRemoveWhite > 0)
+                  _sliderRow('White Tol.', _batchRemoveWhite, 5, 95, (v) => setState(() => _batchRemoveWhite = v)),
               ],
             ),
           ),
@@ -3346,28 +3548,32 @@ class _StudioScreenState extends State<StudioScreen> {
                 ? null
                 : () async {
                     setState(() => _batchProcessing = true);
-                    final dir = await getTemporaryDirectory();
-                    final out = await runBatchOffline(BatchJobRequest(
-                      inputPaths: _batchInputs,
-                      outputDir: dir.path,
-                      brightness: _batchBrightness,
-                      contrast: _batchContrast,
-                      blackAndWhite: _batchBw,
-                      removeWhiteTolerance: _batchRemoveWhite,
-                    ));
-                    if (!mounted) return;
-                    setState(() {
-                      _batchOutputs = out;
-                      _batchProcessing = false;
-                    });
-                    if (out.isNotEmpty) {
-                      for (final fp in out) {
-                        await _saveBytesToDeviceGallery(await File(fp).readAsBytes(), p.basename(fp));
-                      }
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Saved ${out.length} batch images to Gallery')),
+                    try {
+                      await _runWithSavingHud(
+                        savingTitle: 'Processing & Saving...',
+                        savingSubtitle: '${_batchInputs.length} image(s)',
+                        savedTitle: 'Batch Saved',
+                        savedSubtitle: '${_batchInputs.length} image(s) saved to Gallery',
+                        action: () async {
+                          final dir = await getTemporaryDirectory();
+                          final out = await runBatchOffline(BatchJobRequest(
+                            inputPaths: _batchInputs,
+                            outputDir: dir.path,
+                            brightness: 1.0,
+                            contrast: 1.0,
+                            blackAndWhite: false,
+                            removeWhiteTolerance: _batchRemoveWhite,
+                          ));
+                          for (final fp in out) {
+                            await _saveBytesToDeviceGallery(await File(fp).readAsBytes(), p.basename(fp));
+                          }
+                          if (mounted) {
+                            setState(() => _batchOutputs = out);
+                          }
+                        },
                       );
+                    } finally {
+                      if (mounted) setState(() => _batchProcessing = false);
                     }
                   },
             icon: Icon(_batchProcessing ? Icons.hourglass_top_rounded : Icons.auto_awesome_motion_rounded, size: 18),
@@ -3407,41 +3613,44 @@ class _StudioScreenState extends State<StudioScreen> {
   }
 
   Future<void> _shareProjectFile(DesignProject proj) async {
-    try {
-      final embedded = <String, String>{};
-      for (final pg in proj.pages) {
-        for (final l in pg.layers) {
-          if (l.type == LayerType.image && l.localImagePath != null && l.localImagePath!.isNotEmpty) {
-            final f = File(l.localImagePath!);
-            if (f.existsSync() && !embedded.containsKey(l.localImagePath!)) {
-              embedded[l.localImagePath!] = base64Encode(await f.readAsBytes());
+    await _runWithSavingHud(
+      savingTitle: 'Preparing Project File...',
+      savingSubtitle: proj.name,
+      savedTitle: 'Project Ready to Share',
+      savedSubtitle: '${proj.pages.length} page(s)',
+      action: () async {
+        final embedded = <String, String>{};
+        for (final pg in proj.pages) {
+          for (final l in pg.layers) {
+            if (l.type == LayerType.image && l.localImagePath != null && l.localImagePath!.isNotEmpty) {
+              final f = File(l.localImagePath!);
+              if (f.existsSync() && !embedded.containsKey(l.localImagePath!)) {
+                embedded[l.localImagePath!] = base64Encode(await f.readAsBytes());
+              }
             }
           }
         }
-      }
-      final bundle = <String, dynamic>{
-        'format': 'qalam_project_v1',
-        'exportedAt': DateTime.now().millisecondsSinceEpoch,
-        'project': jsonDecode(proj.encode()),
-        'embeddedImages': embedded,
-      };
-      final safeName = proj.name
-          .toLowerCase()
-          .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
-          .replaceAll(RegExp(r'^-|-$'), '');
-      final fileName = '${safeName.isEmpty ? "qalam-project" : safeName}.qalam.json';
-      final tmpDir = await getTemporaryDirectory();
-      final outPath = p.join(tmpDir.path, fileName);
-      await File(outPath).writeAsString(jsonEncode(bundle));
-      await Share.shareXFiles(
-        [XFile(outPath)],
-        subject: 'Qalam Studio Project: ${proj.name}',
-        text: 'Qalam Studio Project (${proj.pages.length} page(s))',
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Share project error: $e')));
-    }
+        final bundle = <String, dynamic>{
+          'format': 'qalam_project_v1',
+          'exportedAt': DateTime.now().millisecondsSinceEpoch,
+          'project': jsonDecode(proj.encode()),
+          'embeddedImages': embedded,
+        };
+        final safeName = proj.name
+            .toLowerCase()
+            .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+            .replaceAll(RegExp(r'^-|-$'), '');
+        final fileName = '${safeName.isEmpty ? "qalam-project" : safeName}.qalam.json';
+        final tmpDir = await getTemporaryDirectory();
+        final outPath = p.join(tmpDir.path, fileName);
+        await File(outPath).writeAsString(jsonEncode(bundle));
+        await Share.shareXFiles(
+          [XFile(outPath)],
+          subject: 'Qalam Studio Project: ${proj.name}',
+          text: 'Qalam Studio Project (${proj.pages.length} page(s))',
+        );
+      },
+    );
   }
 
   Future<String?> _writeBase64ToLocalImage(String b64OrDataUri, String prefix) async {
@@ -3631,22 +3840,26 @@ class _StudioScreenState extends State<StudioScreen> {
         pages: pages,
       );
 
-      await LocalProjectStore.instance.saveProject(imported);
-      final list = await LocalProjectStore.instance.loadAllProjects();
-      if (!mounted) return;
-      setState(() {
-        _projects = list;
-        _project = imported;
-        _pageIndex = 0;
-        _selectedLayerId = null;
-        _undoStack.clear();
-        _redoStack.clear();
-        _navIndex = 0;
-      });
-      await _rehydrateProjectFilters(imported);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Imported "${imported.name}" successfully!')),
+      await _runWithSavingHud(
+        savingTitle: 'Importing Project...',
+        savingSubtitle: imported.name,
+        savedTitle: 'Project Imported',
+        savedSubtitle: imported.name,
+        action: () async {
+          await LocalProjectStore.instance.saveProject(imported);
+          final list = await LocalProjectStore.instance.loadAllProjects();
+          if (!mounted) return;
+          setState(() {
+            _projects = list;
+            _project = imported;
+            _pageIndex = 0;
+            _selectedLayerId = null;
+            _undoStack.clear();
+            _redoStack.clear();
+            _navIndex = 0;
+          });
+          await _rehydrateProjectFilters(imported);
+        },
       );
     } catch (e) {
       if (!mounted) return;
@@ -3678,18 +3891,26 @@ class _StudioScreenState extends State<StudioScreen> {
                     ),
                     onPressed: () async {
                       final fresh = _buildDefaultProject();
-                      await LocalProjectStore.instance.saveProject(fresh);
-                      final list = await LocalProjectStore.instance.loadAllProjects();
-                      if (!mounted) return;
-                      setState(() {
-                        _projects = list;
-                        _project = fresh;
-                        _pageIndex = 0;
-                        _selectedLayerId = null;
-                        _undoStack.clear();
-                        _redoStack.clear();
-                        _navIndex = 0;
-                      });
+                      await _runWithSavingHud(
+                        savingTitle: 'Creating Project...',
+                        savingSubtitle: fresh.name,
+                        savedTitle: 'Project Saved',
+                        savedSubtitle: fresh.name,
+                        action: () async {
+                          await LocalProjectStore.instance.saveProject(fresh);
+                          final list = await LocalProjectStore.instance.loadAllProjects();
+                          if (!mounted) return;
+                          setState(() {
+                            _projects = list;
+                            _project = fresh;
+                            _pageIndex = 0;
+                            _selectedLayerId = null;
+                            _undoStack.clear();
+                            _redoStack.clear();
+                            _navIndex = 0;
+                          });
+                        },
+                      );
                     },
                     icon: const Icon(Icons.add_rounded, size: 18),
                     label: const Text('New Project', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -3794,9 +4015,17 @@ class _StudioScreenState extends State<StudioScreen> {
                           dup.id = 'proj_dup_${DateTime.now().millisecondsSinceEpoch}';
                           dup.name = '${proj.name} (Copy)';
                           dup.updatedAt = DateTime.now().millisecondsSinceEpoch;
-                          await LocalProjectStore.instance.saveProject(dup);
-                          final list = await LocalProjectStore.instance.loadAllProjects();
-                          if (mounted) setState(() => _projects = list);
+                          await _runWithSavingHud(
+                            savingTitle: 'Duplicating Project...',
+                            savingSubtitle: dup.name,
+                            savedTitle: 'Project Duplicated',
+                            savedSubtitle: dup.name,
+                            action: () async {
+                              await LocalProjectStore.instance.saveProject(dup);
+                              final list = await LocalProjectStore.instance.loadAllProjects();
+                              if (mounted) setState(() => _projects = list);
+                            },
+                          );
                         }),
                         _compactLayerIcon(
                           Icons.share_outlined,
@@ -4197,52 +4426,64 @@ class _StudioScreenState extends State<StudioScreen> {
 
   Future<void> _addSignatureToProjectCanvas() async {
     if (_sigMode == 1 && _sigStrokes.isEmpty) return;
-    final bytes = await _renderSignaturePngBytes(forceTransparent: true);
-    if (bytes == null) return;
-    final docsDir = await getApplicationDocumentsDirectory();
-    final assetsDir = Directory(p.join(docsDir.path, 'qalam_assets'));
-    if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
-    final filePath = p.join(assetsDir.path, 'sig_${DateTime.now().microsecondsSinceEpoch}.png');
-    await File(filePath).writeAsBytes(bytes);
-    final targetW = _page.width * 0.55;
-    final targetH = targetW * (420.0 / 1100.0);
-    final layer = DesignLayer(
-      id: 'sig_${DateTime.now().microsecondsSinceEpoch}',
-      name: _sigMode == 0 ? 'Sign: ${_sigTextController.text.trim()}' : 'Drawn Signature',
-      type: LayerType.image,
-      x: (_page.width - targetW) / 2,
-      y: _page.height * 0.65,
-      width: targetW,
-      height: targetH,
-      localImagePath: filePath,
-      aspectLocked: true,
-      objectFit: BoxFit.contain,
+    await _runWithSavingHud(
+      savingTitle: 'Saving Signature...',
+      savedTitle: 'Signature Added',
+      savedSubtitle: 'Placed on Studio Canvas',
+      action: () async {
+        final bytes = await _renderSignaturePngBytes(forceTransparent: true);
+        if (bytes == null) throw Exception('Signature render failed');
+        final docsDir = await getApplicationDocumentsDirectory();
+        final assetsDir = Directory(p.join(docsDir.path, 'qalam_assets'));
+        if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
+        final filePath = p.join(assetsDir.path, 'sig_${DateTime.now().microsecondsSinceEpoch}.png');
+        await File(filePath).writeAsBytes(bytes);
+        final targetW = _page.width * 0.55;
+        final targetH = targetW * (420.0 / 1100.0);
+        final layer = DesignLayer(
+          id: 'sig_${DateTime.now().microsecondsSinceEpoch}',
+          name: _sigMode == 0 ? 'Sign: ${_sigTextController.text.trim()}' : 'Drawn Signature',
+          type: LayerType.image,
+          x: (_page.width - targetW) / 2,
+          y: _page.height * 0.65,
+          width: targetW,
+          height: targetH,
+          localImagePath: filePath,
+          aspectLocked: true,
+          objectFit: BoxFit.contain,
+        );
+        if (mounted) {
+          setState(() {
+            _page.layers.add(layer);
+            _selectedLayerId = layer.id;
+            _navIndex = 0;
+          });
+        }
+        await _saveCurrentProject(showToast: false);
+      },
     );
-    setState(() {
-      _page.layers.add(layer);
-      _selectedLayerId = layer.id;
-      _navIndex = 0;
-    });
-    await _saveCurrentProject(showToast: false);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Signature added to Studio Canvas!')));
   }
 
   Future<void> _exportSignaturePng({required bool shareOnly}) async {
     if (_sigMode == 1 && _sigStrokes.isEmpty) return;
-    final bytes = await _renderSignaturePngBytes();
-    if (bytes == null) return;
-    final fileName = 'qalam_signature_${DateTime.now().millisecondsSinceEpoch}.png';
-    final tmpDir = await getTemporaryDirectory();
-    final tmpPath = p.join(tmpDir.path, fileName);
-    await File(tmpPath).writeAsBytes(bytes);
-    if (shareOnly) {
-      await Share.shareXFiles([XFile(tmpPath)], text: 'Digital Signature');
-      return;
-    }
-    final saved = await _saveBytesToDeviceGallery(bytes, fileName);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Signature saved: $saved')));
+    await _runWithSavingHud(
+      savingTitle: shareOnly ? 'Preparing Signature...' : 'Saving Signature PNG...',
+      savedTitle: shareOnly ? 'Ready to Share' : 'Signature Saved',
+      savedSubtitle: shareOnly ? 'PNG ready' : 'Saved to Gallery',
+      action: () async {
+        final bytes = await _renderSignaturePngBytes();
+        if (bytes == null) throw Exception('Signature render failed');
+        final fileName = 'qalam_signature_${DateTime.now().millisecondsSinceEpoch}.png';
+        final tmpDir = await getTemporaryDirectory();
+        final tmpPath = p.join(tmpDir.path, fileName);
+        await File(tmpPath).writeAsBytes(bytes);
+        if (shareOnly) {
+          await Share.shareXFiles([XFile(tmpPath)], text: 'Digital Signature');
+        } else {
+          await _saveBytesToDeviceGallery(bytes, fileName);
+        }
+      },
+    );
   }
 
   Future<Uint8List?> _renderStampPngBytes({bool? forceTransparent}) async {
@@ -4295,25 +4536,33 @@ class _StudioScreenState extends State<StudioScreen> {
       _selectedLayerId = layer.id;
       _navIndex = 0;
     });
-    await _saveCurrentProject(showToast: false);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Official Stamp (مہر) added to Canvas!')));
+    await _runWithSavingHud(
+      savingTitle: 'Saving Stamp...',
+      savedTitle: 'Official Stamp Saved',
+      savedSubtitle: 'Placed on Studio Canvas',
+      action: () => _saveCurrentProject(showToast: false),
+    );
   }
 
   Future<void> _exportStampPng({required bool shareOnly}) async {
-    final bytes = await _renderStampPngBytes();
-    if (bytes == null) return;
-    final fileName = 'qalam_stamp_${DateTime.now().millisecondsSinceEpoch}.png';
-    final tmpDir = await getTemporaryDirectory();
-    final tmpPath = p.join(tmpDir.path, fileName);
-    await File(tmpPath).writeAsBytes(bytes);
-    if (shareOnly) {
-      await Share.shareXFiles([XFile(tmpPath)], text: 'Official Stamp');
-      return;
-    }
-    final saved = await _saveBytesToDeviceGallery(bytes, fileName);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Stamp saved: $saved')));
+    await _runWithSavingHud(
+      savingTitle: shareOnly ? 'Preparing Stamp...' : 'Saving Stamp PNG...',
+      savedTitle: shareOnly ? 'Ready to Share' : 'Stamp Saved',
+      savedSubtitle: shareOnly ? 'PNG ready' : 'Saved to Gallery',
+      action: () async {
+        final bytes = await _renderStampPngBytes();
+        if (bytes == null) throw Exception('Stamp render failed');
+        final fileName = 'qalam_stamp_${DateTime.now().millisecondsSinceEpoch}.png';
+        final tmpDir = await getTemporaryDirectory();
+        final tmpPath = p.join(tmpDir.path, fileName);
+        await File(tmpPath).writeAsBytes(bytes);
+        if (shareOnly) {
+          await Share.shareXFiles([XFile(tmpPath)], text: 'Official Stamp');
+        } else {
+          await _saveBytesToDeviceGallery(bytes, fileName);
+        }
+      },
+    );
   }
 
   Widget _buildSignatureView() {
@@ -4883,7 +5132,6 @@ class _StudioScreenState extends State<StudioScreen> {
     String rawPath,
     Uint8List rawBytes,
     int rotationDeg,
-    String enhanceMode,
   ) async {
     var decoded = img.decodeImage(rawBytes);
     if (decoded == null) {
@@ -4893,7 +5141,6 @@ class _StudioScreenState extends State<StudioScreen> {
         rawBytes: rawBytes,
         previewBytes: rawBytes,
         rotationDeg: rotationDeg,
-        enhanceMode: enhanceMode,
         width: 1000,
         height: 1400,
       );
@@ -4911,31 +5158,6 @@ class _StudioScreenState extends State<StudioScreen> {
       );
     }
 
-    if (enhanceMode == 'magic') {
-      decoded = img.adjustColor(decoded, contrast: 1.24, brightness: 1.07, saturation: 1.1);
-    } else if (enhanceMode == 'gray') {
-      decoded = img.grayscale(decoded);
-      decoded = img.adjustColor(decoded, contrast: 1.15, brightness: 1.05);
-    } else if (enhanceMode == 'bw') {
-      decoded = img.grayscale(decoded);
-      decoded = img.adjustColor(decoded, contrast: 1.65, brightness: 1.14);
-      for (final pixel in decoded) {
-        final l = pixel.r.toDouble();
-        if (l > 186) {
-          pixel
-            ..r = 255
-            ..g = 255
-            ..b = 255;
-        } else if (l < 78) {
-          final d = (l * 0.8).round().clamp(0, 255);
-          pixel
-            ..r = d
-            ..g = d
-            ..b = d;
-        }
-      }
-    }
-
     final jpg = Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
     return _ScannedDocPage(
       id: id,
@@ -4943,7 +5165,6 @@ class _StudioScreenState extends State<StudioScreen> {
       rawBytes: rawBytes,
       previewBytes: jpg,
       rotationDeg: rotationDeg,
-      enhanceMode: enhanceMode,
       width: decoded.width,
       height: decoded.height,
     );
@@ -4964,7 +5185,6 @@ class _StudioScreenState extends State<StudioScreen> {
           permanent,
           bytes,
           0,
-          'magic',
         );
         added.add(pageObj);
       } catch (_) {}
@@ -4995,7 +5215,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 : _activeScanIdx.clamp(0, _scannedPages.length - 1);
             final activePage = _scannedPages.isEmpty ? null : _scannedPages[safeIdx];
 
-            Future<void> runMlKitCamera() async {
+            Future<void> runDocumentScanner() async {
               setModalState(() => localBusy = true);
               DocumentScanner? scanner;
               try {
@@ -5014,13 +5234,13 @@ class _StudioScreenState extends State<StudioScreen> {
                 final msg = e.message ?? '';
                 if (!msg.toLowerCase().contains('cancel') && mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('ML Kit Scanner: ${msg.isEmpty ? e.code : msg}')),
+                    SnackBar(content: Text('Document Scanner: ${msg.isEmpty ? e.code : msg}')),
                   );
                 }
               } catch (e) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Scanner error: $e')),
+                    SnackBar(content: Text('Document Scanner error: $e')),
                   );
                 }
               } finally {
@@ -5031,31 +5251,7 @@ class _StudioScreenState extends State<StudioScreen> {
               }
             }
 
-            Future<void> runQuickCamera() async {
-              setModalState(() => localBusy = true);
-              try {
-                final shot = await _picker.pickImage(source: ImageSource.camera);
-                if (shot != null) {
-                  await _appendScannedPaths([shot.path], setModalState);
-                }
-              } finally {
-                if (ctx.mounted) setModalState(() => localBusy = false);
-              }
-            }
-
-            Future<void> runGalleryUpload() async {
-              setModalState(() => localBusy = true);
-              try {
-                final picked = await _picker.pickMultiImage();
-                if (picked.isNotEmpty) {
-                  await _appendScannedPaths(picked.map((x) => x.path).toList(), setModalState);
-                }
-              } finally {
-                if (ctx.mounted) setModalState(() => localBusy = false);
-              }
-            }
-
-            Future<void> updateActiveTransform(int nextRot, String nextMode) async {
+            Future<void> rotateActivePage(int nextRot) async {
               if (activePage == null) return;
               setModalState(() => localBusy = true);
               try {
@@ -5064,7 +5260,6 @@ class _StudioScreenState extends State<StudioScreen> {
                   activePage.rawPath,
                   activePage.rawBytes,
                   nextRot,
-                  nextMode,
                 );
                 if (ctx.mounted) {
                   setModalState(() {
@@ -5094,38 +5289,48 @@ class _StudioScreenState extends State<StudioScreen> {
             Future<void> downloadScannerPdf() async {
               if (_scannedPages.isEmpty) return;
               setModalState(() => localBusy = true);
+              String? shareTmpPath;
+              String savedLoc = '';
               try {
-                final pdfBytes = await buildScannerPdfBytes();
-                final fileName = 'qalam_scan_${DateTime.now().millisecondsSinceEpoch}.pdf';
-                String savedLoc = '';
-                if (Platform.isAndroid) {
-                  try {
-                    savedLoc = await _mediaChannel.invokeMethod<String>('savePdfToDownloads', {
-                          'bytes': pdfBytes,
-                          'name': fileName,
-                        }) ??
-                        '';
-                  } catch (_) {}
-                }
-                final tmpDir = await getTemporaryDirectory();
-                final tmpPath = p.join(tmpDir.path, fileName);
-                await File(tmpPath).writeAsBytes(pdfBytes);
-                if (savedLoc.isEmpty) {
-                  final extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-                  final outDir = Directory(p.join(extDir.path, 'QalamStudio'));
-                  if (!outDir.existsSync()) outDir.createSync(recursive: true);
-                  final outPath = p.join(outDir.path, fileName);
-                  await File(outPath).writeAsBytes(pdfBytes);
-                  savedLoc = outPath;
-                }
-                if (!mounted) return;
+                await _runWithSavingHud(
+                  savingTitle: 'Saving PDF...',
+                  savingSubtitle: '${_scannedPages.length} scanned page(s)',
+                  savedTitle: 'PDF Saved',
+                  savedSubtitle: '${_scannedPages.length} page(s) saved',
+                  action: () async {
+                    final pdfBytes = await buildScannerPdfBytes();
+                    final fileName = 'qalam_scan_${DateTime.now().millisecondsSinceEpoch}.pdf';
+                    if (Platform.isAndroid) {
+                      try {
+                        savedLoc = await _mediaChannel.invokeMethod<String>('savePdfToDownloads', {
+                              'bytes': pdfBytes,
+                              'name': fileName,
+                            }) ??
+                            '';
+                      } catch (_) {}
+                    }
+                    final tmpDir = await getTemporaryDirectory();
+                    final tmpPath = p.join(tmpDir.path, fileName);
+                    await File(tmpPath).writeAsBytes(pdfBytes);
+                    shareTmpPath = tmpPath;
+                    if (savedLoc.isEmpty) {
+                      final extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+                      final outDir = Directory(p.join(extDir.path, 'QalamStudio'));
+                      if (!outDir.existsSync()) outDir.createSync(recursive: true);
+                      final outPath = p.join(outDir.path, fileName);
+                      await File(outPath).writeAsBytes(pdfBytes);
+                      savedLoc = outPath;
+                    }
+                  },
+                );
+                if (!mounted || shareTmpPath == null) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('PDF Saved: $savedLoc'),
-                    duration: const Duration(seconds: 4),
+                    duration: const Duration(seconds: 3),
                     action: SnackBarAction(
                       label: 'Share PDF',
-                      onPressed: () => Share.shareXFiles([XFile(tmpPath)], text: 'Qalam Scanned PDF'),
+                      onPressed: () => Share.shareXFiles([XFile(shareTmpPath!)], text: 'Qalam Scanned PDF'),
                     ),
                   ),
                 );
@@ -5137,22 +5342,30 @@ class _StudioScreenState extends State<StudioScreen> {
             Future<void> saveScannerJpeg() async {
               if (activePage == null) return;
               setModalState(() => localBusy = true);
+              String lastSaved = '';
+              String lastTmp = '';
               try {
-                String lastSaved = '';
-                String lastTmp = '';
-                final tmpDir = await getTemporaryDirectory();
-                for (int i = 0; i < _scannedPages.length; i++) {
-                  final pg = _scannedPages[i];
-                  final fname = 'qalam_scan_${DateTime.now().millisecondsSinceEpoch}_p${i + 1}.jpg';
-                  lastSaved = await _saveBytesToDeviceGallery(pg.previewBytes, fname);
-                  lastTmp = p.join(tmpDir.path, fname);
-                  await File(lastTmp).writeAsBytes(pg.previewBytes);
-                }
-                if (!mounted) return;
+                await _runWithSavingHud(
+                  savingTitle: 'Saving JPEG(s)...',
+                  savingSubtitle: '${_scannedPages.length} page(s)',
+                  savedTitle: 'JPEG Saved',
+                  savedSubtitle: '${_scannedPages.length} image(s) in Gallery',
+                  action: () async {
+                    final tmpDir = await getTemporaryDirectory();
+                    for (int i = 0; i < _scannedPages.length; i++) {
+                      final pg = _scannedPages[i];
+                      final fname = 'qalam_scan_${DateTime.now().millisecondsSinceEpoch}_p${i + 1}.jpg';
+                      lastSaved = await _saveBytesToDeviceGallery(pg.previewBytes, fname);
+                      lastTmp = p.join(tmpDir.path, fname);
+                      await File(lastTmp).writeAsBytes(pg.previewBytes);
+                    }
+                  },
+                );
+                if (!mounted || lastTmp.isEmpty) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('${_scannedPages.length} JPEG(s) Saved: $lastSaved'),
-                    duration: const Duration(seconds: 4),
+                    duration: const Duration(seconds: 3),
                     action: SnackBarAction(
                       label: 'Share',
                       onPressed: () => Share.shareXFiles([XFile(lastTmp)], text: 'Qalam Scanned JPEG'),
@@ -5166,44 +5379,53 @@ class _StudioScreenState extends State<StudioScreen> {
 
             Future<void> sendScannedToStudio() async {
               if (activePage == null) return;
-              final cleanName = 'scan_page_${DateTime.now().millisecondsSinceEpoch}.jpg';
-              final docs = await getApplicationDocumentsDirectory();
-              final outDir = Directory(p.join(docs.path, 'qalam_media'));
-              if (!outDir.existsSync()) outDir.createSync(recursive: true);
-              final outPath = p.join(outDir.path, cleanName);
-              await File(outPath).writeAsBytes(activePage.previewBytes);
+              await _runWithSavingHud(
+                savingTitle: 'Saving to Studio...',
+                savedTitle: 'Added to Canvas',
+                savedSubtitle: 'Scanned Page ${safeIdx + 1}',
+                action: () async {
+                  final cleanName = 'scan_page_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                  final docs = await getApplicationDocumentsDirectory();
+                  final outDir = Directory(p.join(docs.path, 'qalam_media'));
+                  if (!outDir.existsSync()) outDir.createSync(recursive: true);
+                  final outPath = p.join(outDir.path, cleanName);
+                  await File(outPath).writeAsBytes(activePage.previewBytes);
 
-              final canvasLayer = DesignLayer(
-                id: 'canvas_${DateTime.now().microsecondsSinceEpoch}',
-                name: 'Scanned Doc ${safeIdx + 1}',
-                type: LayerType.image,
-                x: 0,
-                y: 0,
-                width: activePage.width.toDouble(),
-                height: activePage.height.toDouble(),
-                locked: true,
-                isCanvasBackground: true,
-                localImagePath: outPath,
-                aspectLocked: true,
-                objectFit: BoxFit.cover,
+                  final canvasLayer = DesignLayer(
+                    id: 'canvas_${DateTime.now().microsecondsSinceEpoch}',
+                    name: 'Scanned Doc ${safeIdx + 1}',
+                    type: LayerType.image,
+                    x: 0,
+                    y: 0,
+                    width: activePage.width.toDouble(),
+                    height: activePage.height.toDouble(),
+                    locked: true,
+                    isCanvasBackground: true,
+                    localImagePath: outPath,
+                    aspectLocked: true,
+                    objectFit: BoxFit.cover,
+                  );
+                  _pushUndoSnapshot();
+                  if (mounted) {
+                    setState(() {
+                      _page.width = activePage.width.toDouble();
+                      _page.height = activePage.height.toDouble();
+                      if (_page.layers.isNotEmpty && _page.layers.first.isCanvasBackground) {
+                        _page.layers[0] = canvasLayer;
+                      } else {
+                        _page.layers.insert(0, canvasLayer);
+                      }
+                      for (final l in _page.layers) {
+                        _clampLayerInPage(l);
+                      }
+                      _selectedLayerId = null;
+                      _inspectorTab = 2;
+                      _navIndex = 0;
+                    });
+                  }
+                  await _saveCurrentProject(showToast: false);
+                },
               );
-              _pushUndoSnapshot();
-              setState(() {
-                _page.width = activePage.width.toDouble();
-                _page.height = activePage.height.toDouble();
-                if (_page.layers.isNotEmpty && _page.layers.first.isCanvasBackground) {
-                  _page.layers[0] = canvasLayer;
-                } else {
-                  _page.layers.insert(0, canvasLayer);
-                }
-                for (final l in _page.layers) {
-                  _clampLayerInPage(l);
-                }
-                _selectedLayerId = null;
-                _inspectorTab = 2;
-                _navIndex = 0;
-              });
-              await _saveCurrentProject(showToast: false);
               if (ctx.mounted) Navigator.pop(ctx);
             }
 
@@ -5245,8 +5467,8 @@ class _StudioScreenState extends State<StudioScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Document Scanner (ML Kit)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-                                Text('Camera Scan · Upload Photos · Preview · PDF / JPEG', style: TextStyle(fontSize: 11, color: _subColor)),
+                                const Text('Document Scanner', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                                Text('Scan or Import Photos · Preview · PDF / JPEG', style: TextStyle(fontSize: 11, color: _subColor)),
                               ],
                             ),
                           ),
@@ -5257,48 +5479,19 @@ class _StudioScreenState extends State<StudioScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FilledButton.icon(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: _amber,
-                                foregroundColor: Colors.black,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                              ),
-                              onPressed: localBusy ? null : runMlKitCamera,
-                              icon: const Icon(Icons.document_scanner_outlined, size: 18),
-                              label: const Text('ML Kit Scan', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
-                            ),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _amber,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                           ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                side: BorderSide(color: _borderColor),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                              ),
-                              onPressed: localBusy ? null : runQuickCamera,
-                              icon: const Icon(Icons.camera_alt_outlined, size: 17),
-                              label: const Text('Camera', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                side: BorderSide(color: _borderColor),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                              ),
-                              onPressed: localBusy ? null : runGalleryUpload,
-                              icon: const Icon(Icons.upload_file_outlined, size: 17),
-                              label: const Text('Upload', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
-                            ),
-                          ),
-                        ],
+                          onPressed: localBusy ? null : runDocumentScanner,
+                          icon: const Icon(Icons.document_scanner_outlined, size: 19),
+                          label: const Text('Scan / Upload Document', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+                        ),
                       ),
                       const SizedBox(height: 14),
                       if (localBusy)
@@ -5324,7 +5517,7 @@ class _StudioScreenState extends State<StudioScreen> {
                               ),
                               const SizedBox(height: 5),
                               Text(
-                                'Tap ML Kit Scan for smart auto-edge document detection, Camera for quick snap, or Upload existing document photos.',
+                                'Tap Scan / Upload Document to scan pages or import photos using Document Scanner tools, preview them cleanly, and save as PDF or JPEG.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(fontSize: 12, color: _subColor, height: 1.4),
                               ),
@@ -5433,52 +5626,22 @@ class _StudioScreenState extends State<StudioScreen> {
                         Row(
                           children: [
                             Expanded(
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Row(
-                                  children: [
-                                    _choicePill(
-                                      label: 'Magic Paper',
-                                      selected: activePage.enhanceMode == 'magic',
-                                      onTap: () => updateActiveTransform(activePage.rotationDeg, 'magic'),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    _choicePill(
-                                      label: 'Clean B&W',
-                                      selected: activePage.enhanceMode == 'bw',
-                                      onTap: () => updateActiveTransform(activePage.rotationDeg, 'bw'),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    _choicePill(
-                                      label: 'Gray',
-                                      selected: activePage.enhanceMode == 'gray',
-                                      onTap: () => updateActiveTransform(activePage.rotationDeg, 'gray'),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    _choicePill(
-                                      label: 'Original',
-                                      selected: activePage.enhanceMode == 'original',
-                                      onTap: () => updateActiveTransform(activePage.rotationDeg, 'original'),
-                                    ),
-                                  ],
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  side: BorderSide(color: _borderColor),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                 ),
+                                onPressed: localBusy
+                                    ? null
+                                    : () => rotateActivePage((activePage.rotationDeg + 90) % 360),
+                                icon: Icon(Icons.rotate_right_rounded, size: 18, color: _accentText),
+                                label: const Text('Rotate 90°', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
                               ),
-                            ),
-                            const SizedBox(width: 6),
-                            OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                side: BorderSide(color: _borderColor),
-                              ),
-                              onPressed: localBusy
-                                  ? null
-                                  : () => updateActiveTransform((activePage.rotationDeg + 90) % 360, activePage.enhanceMode),
-                              icon: Icon(Icons.rotate_right_rounded, size: 17, color: _accentText),
-                              label: const Text('90°', style: TextStyle(fontSize: 12)),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 12),
                         Row(
                           children: [
                             Expanded(
@@ -5529,8 +5692,14 @@ class _StudioScreenState extends State<StudioScreen> {
                                 onPressed: localBusy
                                     ? null
                                     : () async {
-                                        final bytes = await buildScannerPdfBytes();
-                                        await Printing.layoutPdf(onLayout: (_) async => bytes);
+                                        await _runWithSavingHud(
+                                          savingTitle: 'Preparing PDF...',
+                                          savedTitle: 'PDF Ready',
+                                          action: () async {
+                                            final bytes = await buildScannerPdfBytes();
+                                            await Printing.layoutPdf(onLayout: (_) async => bytes);
+                                          },
+                                        );
                                       },
                                 icon: const Icon(Icons.print_outlined, size: 17),
                                 label: const Text('Print / Preview PDF', style: TextStyle(fontSize: 12.5)),
@@ -5572,7 +5741,6 @@ class _ScannedDocPage {
   final Uint8List rawBytes;
   final Uint8List previewBytes;
   final int rotationDeg;
-  final String enhanceMode;
   final int width;
   final int height;
 
@@ -5582,7 +5750,6 @@ class _ScannedDocPage {
     required this.rawBytes,
     required this.previewBytes,
     required this.rotationDeg,
-    required this.enhanceMode,
     required this.width,
     required this.height,
   });

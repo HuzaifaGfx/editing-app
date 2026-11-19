@@ -39,10 +39,22 @@ class _LayerCanvasState extends State<LayerCanvas> {
   final TransformationController _transformController = TransformationController();
   final GlobalKey _canvasStackKey = GlobalKey();
 
-  int _pointerCount = 0;
+  final Map<int, Offset> _activePointers = {};
   bool _isPinching = false;
   double _currentZoom = 1.0;
   DateTime _lastMultiTouchAt = DateTime.fromMillisecondsSinceEpoch(0);
+  double _pinchStartDistance = 1.0;
+  Offset _pinchStartFocal = Offset.zero;
+  Matrix4 _pinchStartMatrix = Matrix4.identity();
+
+  DesignLayer? _preDragLayer;
+  double _preDragX = 0.0;
+  double _preDragY = 0.0;
+  double _preDragW = 0.0;
+  double _preDragH = 0.0;
+  double _preDragFontSize = 0.0;
+  double _preDragRot = 0.0;
+  DateTime _preDragAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   double _rotateStartAngle = 0.0;
   double _rotateStartDeg = 0.0;
@@ -51,9 +63,34 @@ class _LayerCanvasState extends State<LayerCanvas> {
   bool _snapY = false;
 
   bool get _blockLayerInteraction =>
-      _pointerCount > 1 ||
+      _activePointers.length > 1 ||
       _isPinching ||
-      DateTime.now().difference(_lastMultiTouchAt).inMilliseconds < 320;
+      DateTime.now().difference(_lastMultiTouchAt).inMilliseconds < 300;
+
+  void _capturePreDrag(DesignLayer layer) {
+    _preDragLayer = layer;
+    _preDragX = layer.x;
+    _preDragY = layer.y;
+    _preDragW = layer.width;
+    _preDragH = layer.height;
+    _preDragFontSize = layer.fontSize;
+    _preDragRot = layer.rotation;
+    _preDragAt = DateTime.now();
+  }
+
+  void _restorePreDragIfRecent() {
+    final l = _preDragLayer;
+    if (l != null && DateTime.now().difference(_preDragAt).inMilliseconds < 420) {
+      l.x = _preDragX;
+      l.y = _preDragY;
+      l.width = _preDragW;
+      l.height = _preDragH;
+      l.fontSize = _preDragFontSize;
+      l.rotation = _preDragRot;
+      widget.onUpdateLayer(l);
+    }
+    _preDragLayer = null;
+  }
 
   @override
   void dispose() {
@@ -62,7 +99,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
   }
 
   void _setZoomAroundCenter(double nextZoom, double vw, double vh) {
-    final clamped = nextZoom.clamp(0.5, 3.5).toDouble();
+    final clamped = nextZoom.clamp(0.4, 4.0).toDouble();
     final cur = _transformController.value.clone();
     final curScale = cur.getMaxScaleOnAxis();
     final ratio = clamped / (curScale <= 0 ? 1.0 : curScale);
@@ -129,27 +166,55 @@ class _LayerCanvasState extends State<LayerCanvas> {
             ),
             Listener(
               behavior: HitTestBehavior.translucent,
-              onPointerDown: (_) {
-                _pointerCount++;
-                if (_pointerCount > 1) {
+              onPointerDown: (e) {
+                _activePointers[e.pointer] = e.localPosition;
+                if (_activePointers.length >= 2) {
+                  _restorePreDragIfRecent();
+                  final pts = _activePointers.values.take(2).toList();
+                  _pinchStartDistance = math.max(12.0, (pts[1] - pts[0]).distance);
+                  _pinchStartFocal = (pts[0] + pts[1]) / 2.0;
+                  _pinchStartMatrix = _transformController.value.clone();
                   setState(() {
                     _isPinching = true;
                     _lastMultiTouchAt = DateTime.now();
                   });
                 }
               },
-              onPointerUp: (_) {
-                _pointerCount = math.max(0, _pointerCount - 1);
-                if (_pointerCount <= 1 && _isPinching) {
+              onPointerMove: (e) {
+                if (!_activePointers.containsKey(e.pointer)) return;
+                _activePointers[e.pointer] = e.localPosition;
+                if (_activePointers.length >= 2 && _isPinching) {
+                  final pts = _activePointers.values.take(2).toList();
+                  final dist = math.max(12.0, (pts[1] - pts[0]).distance);
+                  final focal = (pts[0] + pts[1]) / 2.0;
+                  final startScale = _pinchStartMatrix.getMaxScaleOnAxis();
+                  final safeStartScale = startScale <= 0 ? 1.0 : startScale;
+                  final targetScale = (safeStartScale * (dist / _pinchStartDistance)).clamp(0.4, 4.0).toDouble();
+                  final appliedRatio = targetScale / safeStartScale;
+                  final nextMatrix = Matrix4.identity()
+                    ..translate(focal.dx, focal.dy)
+                    ..scale(appliedRatio)
+                    ..translate(-_pinchStartFocal.dx, -_pinchStartFocal.dy)
+                    ..multiply(_pinchStartMatrix);
+                  _transformController.value = nextMatrix;
+                  _lastMultiTouchAt = DateTime.now();
+                  if ((targetScale - _currentZoom).abs() > 0.01) {
+                    setState(() => _currentZoom = targetScale);
+                  }
+                }
+              },
+              onPointerUp: (e) {
+                _activePointers.remove(e.pointer);
+                if (_activePointers.length <= 1 && _isPinching) {
                   setState(() {
                     _lastMultiTouchAt = DateTime.now();
                     _isPinching = false;
                   });
                 }
               },
-              onPointerCancel: (_) {
-                _pointerCount = math.max(0, _pointerCount - 1);
-                if (_pointerCount <= 1 && _isPinching) {
+              onPointerCancel: (e) {
+                _activePointers.remove(e.pointer);
+                if (_activePointers.length <= 1 && _isPinching) {
                   setState(() {
                     _lastMultiTouchAt = DateTime.now();
                     _isPinching = false;
@@ -158,20 +223,13 @@ class _LayerCanvasState extends State<LayerCanvas> {
               },
               child: InteractiveViewer(
                 transformationController: _transformController,
-                panEnabled: _pointerCount > 1 || _currentZoom > 1.02,
-                scaleEnabled: true,
-                minScale: 0.5,
-                maxScale: 3.5,
-                boundaryMargin: const EdgeInsets.all(140),
-                onInteractionStart: (details) {
-                  if (details.pointerCount > 1) {
-                    setState(() {
-                      _isPinching = true;
-                      _lastMultiTouchAt = DateTime.now();
-                    });
-                  }
-                },
+                panEnabled: _activePointers.length <= 1 && !_isPinching && _currentZoom > 1.02,
+                scaleEnabled: false,
+                minScale: 0.4,
+                maxScale: 4.0,
+                boundaryMargin: const EdgeInsets.all(220),
                 onInteractionUpdate: (_) {
+                  if (_isPinching) return;
                   final nextZoom = _transformController.value.getMaxScaleOnAxis();
                   if ((nextZoom - _currentZoom).abs() > 0.02) {
                     setState(() => _currentZoom = nextZoom);
@@ -181,7 +239,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                   final nextZoom = _transformController.value.getMaxScaleOnAxis();
                   setState(() {
                     _currentZoom = nextZoom;
-                    if (_isPinching) {
+                    if (_isPinching && _activePointers.length <= 1) {
                       _lastMultiTouchAt = DateTime.now();
                       _isPinching = false;
                     }
@@ -294,6 +352,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                         },
                                                         onPanStart: (_) {
                                                           if (_blockLayerInteraction) return;
+                                                          _capturePreDrag(layer);
                                                           widget.onSelectLayer(layer.id);
                                                           if (!layer.locked) widget.onInteractionStart?.call();
                                                         },
@@ -303,18 +362,21 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                                 if (_blockLayerInteraction) return;
                                                                 final scale = _transformController.value
                                                                     .getMaxScaleOnAxis()
-                                                                    .clamp(0.5, 4.0);
-                                                                final maxX = math.max(0.0, page.width - layer.width);
-                                                                final maxY = math.max(0.0, page.height - layer.height);
-                                                                var nextX = (layer.x + d.delta.dx / scale).clamp(0.0, maxX).toDouble();
-                                                                var nextY = (layer.y + d.delta.dy / scale).clamp(0.0, maxY).toDouble();
+                                                                    .clamp(0.4, 4.0);
+                                                                const minOverlap = 24.0;
+                                                                final minX = -(layer.width - minOverlap);
+                                                                final maxX = page.width - minOverlap;
+                                                                final minY = -(layer.height - minOverlap);
+                                                                final maxY = page.height - minOverlap;
+                                                                var nextX = (layer.x + d.delta.dx / scale).clamp(minX, maxX).toDouble();
+                                                                var nextY = (layer.y + d.delta.dy / scale).clamp(minY, maxY).toDouble();
                                                                 final cx = nextX + layer.width / 2;
                                                                 final cy = nextY + layer.height / 2;
                                                                 const snapTol = 8.0;
                                                                 final hitX = (cx - page.width / 2).abs() <= snapTol;
                                                                 final hitY = (cy - page.height / 2).abs() <= snapTol;
-                                                                if (hitX) nextX = (page.width / 2 - layer.width / 2).clamp(0.0, maxX).toDouble();
-                                                                if (hitY) nextY = (page.height / 2 - layer.height / 2).clamp(0.0, maxY).toDouble();
+                                                                if (hitX) nextX = (page.width / 2 - layer.width / 2).clamp(minX, maxX).toDouble();
+                                                                if (hitY) nextY = (page.height / 2 - layer.height / 2).clamp(minY, maxY).toDouble();
                                                                 layer.x = nextX;
                                                                 layer.y = nextY;
                                                                 if (_snapX != hitX || _snapY != hitY) {
@@ -613,11 +675,28 @@ class _LayerCanvasState extends State<LayerCanvas> {
     final ringWidth = 2.8 * invScale;
     final pad = hitSize * 0.52;
 
+    final isUnrotated = (layer.rotation % 360).abs() < 0.01;
+    const minVis = 24.0;
+    final visLeft = isUnrotated
+        ? layer.x.clamp(0.0, math.max(0.0, page.width - minVis)).toDouble()
+        : layer.x.clamp(-page.width * 0.35, page.width - minVis).toDouble();
+    final visTop = isUnrotated
+        ? layer.y.clamp(0.0, math.max(0.0, page.height - minVis)).toDouble()
+        : layer.y.clamp(-page.height * 0.35, page.height - minVis).toDouble();
+    final visRight = isUnrotated
+        ? (layer.x + layer.width).clamp(visLeft + minVis, page.width).toDouble()
+        : (layer.x + layer.width).clamp(visLeft + minVis, page.width * 1.35).toDouble();
+    final visBottom = isUnrotated
+        ? (layer.y + layer.height).clamp(visTop + minVis, page.height).toDouble()
+        : (layer.y + layer.height).clamp(visTop + minVis, page.height * 1.35).toDouble();
+    final visW = math.max(minVis, visRight - visLeft);
+    final visH = math.max(minVis, visBottom - visTop);
+
     return Positioned(
-      left: layer.x - pad,
-      top: layer.y - pad,
-      width: layer.width + pad * 2,
-      height: layer.height + pad * 2,
+      left: visLeft - pad,
+      top: visTop - pad,
+      width: visW + pad * 2,
+      height: visH + pad * 2,
       child: Transform.rotate(
         angle: layer.rotation * math.pi / 180.0,
         alignment: Alignment.center,
@@ -631,6 +710,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 behavior: HitTestBehavior.opaque,
                 onPanStart: (d) {
                   if (_blockLayerInteraction) return;
+                  _capturePreDrag(layer);
                   widget.onInteractionStart?.call();
                   _rotateCenterGlobal = _layerCenterGlobal(layer);
                   _rotateStartAngle = math.atan2(
@@ -692,11 +772,13 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onPanStart: (_) {
-                    if (!_blockLayerInteraction) widget.onInteractionStart?.call();
+                    if (_blockLayerInteraction) return;
+                    _capturePreDrag(layer);
+                    widget.onInteractionStart?.call();
                   },
                   onPanUpdate: (d) {
                     if (_blockLayerInteraction) return;
-                    final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
+                    final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.4, 4.0);
                     final rawDx = d.delta.dx / scale;
                     final rawDy = d.delta.dy / scale;
                     final rad = layer.rotation * math.pi / 180.0;
@@ -704,14 +786,17 @@ class _LayerCanvasState extends State<LayerCanvas> {
                     final localDy = rawDx * math.sin(-rad) + rawDy * math.cos(-rad);
 
                     final prevW = layer.width;
-                    final nextW = (prevW - localDx).clamp(60.0, math.max(60.0, page.width)).toDouble();
+                    final nextW = (prevW - localDx).clamp(60.0, page.width * 2.5).toDouble();
                     final shiftLeft = prevW - nextW;
-                    final maxH = math.max(40.0, page.height - layer.y);
-                    layer.x = (layer.x + shiftLeft * math.cos(rad)).clamp(0.0, math.max(0.0, page.width - nextW)).toDouble();
-                    layer.y = (layer.y + shiftLeft * math.sin(rad)).clamp(0.0, math.max(0.0, page.height - 40.0)).toDouble();
-                    layer.width = nextW.clamp(60.0, math.max(60.0, page.width - layer.x)).toDouble();
-                    layer.height = (layer.height + localDy).clamp(40.0, math.max(40.0, page.height - layer.y)).toDouble();
-                    if (layer.height > maxH) layer.height = maxH;
+                    const minOverlap = 24.0;
+                    layer.x = (layer.x + shiftLeft * math.cos(rad))
+                        .clamp(-(nextW - minOverlap), page.width - minOverlap)
+                        .toDouble();
+                    layer.y = (layer.y + shiftLeft * math.sin(rad))
+                        .clamp(-(layer.height - minOverlap), page.height - minOverlap)
+                        .toDouble();
+                    layer.width = nextW;
+                    layer.height = (layer.height + localDy).clamp(40.0, page.height * 2.5).toDouble();
                     widget.onUpdateLayer(layer);
                   },
                   child: SizedBox(
@@ -745,17 +830,22 @@ class _LayerCanvasState extends State<LayerCanvas> {
               alignment: Alignment.bottomRight,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
+                onPanStart: (_) {
+                  if (_blockLayerInteraction) return;
+                  _capturePreDrag(layer);
+                  widget.onInteractionStart?.call();
+                },
                 onPanUpdate: (d) {
                   if (_blockLayerInteraction) return;
-                  final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.5, 4.0);
+                  final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.4, 4.0);
                   final rawDx = d.delta.dx / scale;
                   final rawDy = d.delta.dy / scale;
                   final rad = -layer.rotation * math.pi / 180.0;
                   final dx = rawDx * math.cos(rad) - rawDy * math.sin(rad);
                   final dy = rawDx * math.sin(rad) + rawDy * math.cos(rad);
 
-                  final availW = math.max(40.0, page.width - layer.x);
-                  final availH = math.max(24.0, page.height - layer.y);
+                  final availW = page.width * 3.0;
+                  final availH = page.height * 3.0;
                   if (layer.type == LayerType.image && layer.aspectLocked) {
                     final ratio = layer.width / math.max(1.0, layer.height);
                     final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
