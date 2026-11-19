@@ -80,15 +80,24 @@ List<String> _processImagesIsolate(BatchJobRequest req) {
     }
 
     if (req.blackAndWhite) {
-      decoded = img.grayscale(decoded);
+      for (final pixel in decoded) {
+        if (decoded.numChannels == 4 && pixel.a == 0) continue;
+        final lum = 0.299 * pixel.r + 0.587 * pixel.g + 0.114 * pixel.b;
+        final boosted = ((lum - 128.0) * req.contrast + 128.0 * req.brightness)
+            .clamp(0.0, 255.0)
+            .round();
+        pixel.r = boosted;
+        pixel.g = boosted;
+        pixel.b = boosted;
+      }
+    } else if (req.brightness != 1.0 || req.contrast != 1.0 || req.saturation != 1.0) {
+      decoded = img.adjustColor(
+        decoded,
+        brightness: req.brightness,
+        contrast: req.contrast,
+        saturation: req.saturation,
+      );
     }
-
-    decoded = img.adjustColor(
-      decoded,
-      brightness: req.brightness,
-      contrast: req.contrast,
-      saturation: req.blackAndWhite ? 0.0 : req.saturation,
-    );
 
     final usePng = req.removeWhiteTolerance > 0;
     final ext = usePng ? 'png' : 'jpg';

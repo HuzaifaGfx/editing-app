@@ -80,11 +80,14 @@ class DesignLayer {
   TextAlign? textAlign;
   Color textBgColor;
 
-  // Image overlay properties
+  // Image & shape overlay properties
   String? localImagePath;
   bool aspectLocked;
   BoxFit objectFit;
   double borderRadius;
+  String shapeKind;
+  Color shapeStrokeColor;
+  double shapeStrokeWidth;
   bool flipX;
   bool flipY;
   FilterSettings filters;
@@ -119,6 +122,9 @@ class DesignLayer {
     this.aspectLocked = true,
     this.objectFit = BoxFit.cover,
     this.borderRadius = 0,
+    this.shapeKind = 'rect',
+    this.shapeStrokeColor = const Color(0xFFF59E0B),
+    this.shapeStrokeWidth = 0.0,
     this.flipX = false,
     this.flipY = false,
     FilterSettings? filters,
@@ -152,6 +158,9 @@ class DesignLayer {
         aspectLocked: aspectLocked,
         objectFit: objectFit,
         borderRadius: borderRadius,
+        shapeKind: shapeKind,
+        shapeStrokeColor: shapeStrokeColor,
+        shapeStrokeWidth: shapeStrokeWidth,
         flipX: flipX,
         flipY: flipY,
         filters: filters.copy(),
@@ -185,6 +194,9 @@ class DesignLayer {
         'aspectLocked': aspectLocked,
         'objectFit': objectFit.index,
         'borderRadius': borderRadius,
+        'shapeKind': shapeKind,
+        'shapeStrokeColor': shapeStrokeColor.value,
+        'shapeStrokeWidth': shapeStrokeWidth,
         'flipX': flipX,
         'flipY': flipY,
         'filters': filters.toJson(),
@@ -222,6 +234,9 @@ class DesignLayer {
         aspectLocked: json['aspectLocked'] ?? true,
         objectFit: BoxFit.values[json['objectFit'] ?? BoxFit.cover.index],
         borderRadius: (json['borderRadius'] ?? 0).toDouble(),
+        shapeKind: (json['shapeKind'] ?? 'rect').toString(),
+        shapeStrokeColor: Color(json['shapeStrokeColor'] ?? 0xFFF59E0B),
+        shapeStrokeWidth: (json['shapeStrokeWidth'] ?? 0.0).toDouble(),
         flipX: json['flipX'] ?? false,
         flipY: json['flipY'] ?? false,
         filters: FilterSettings.fromJson(json['filters'] ?? {}),

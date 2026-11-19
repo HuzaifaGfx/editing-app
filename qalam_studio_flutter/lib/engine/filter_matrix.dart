@@ -15,10 +15,31 @@ ColorFilter buildLayerColorFilter(FilterSettings f) {
   final sg = (1.0 - s) * 0.7152;
   final sb = (1.0 - s) * 0.0722;
 
+  var m00 = sr + s, m01 = sg, m02 = sb;
+  var m10 = sr, m11 = sg + s, m12 = sb;
+  var m20 = sr, m21 = sg, m22 = sb + s;
+
+  final sp = f.sepia.clamp(0.0, 1.0);
+  if (sp > 0.0 && !f.blackAndWhite) {
+    final inv = 1.0 - sp;
+    final nm00 = m00 * (inv + sp * 0.393) + m10 * (sp * 0.769) + m20 * (sp * 0.189);
+    final nm01 = m01 * (inv + sp * 0.393) + m11 * (sp * 0.769) + m21 * (sp * 0.189);
+    final nm02 = m02 * (inv + sp * 0.393) + m12 * (sp * 0.769) + m22 * (sp * 0.189);
+    final nm10 = m00 * (sp * 0.349) + m10 * (inv + sp * 0.686) + m20 * (sp * 0.168);
+    final nm11 = m01 * (sp * 0.349) + m11 * (inv + sp * 0.686) + m21 * (sp * 0.168);
+    final nm12 = m02 * (sp * 0.349) + m12 * (inv + sp * 0.686) + m22 * (sp * 0.168);
+    final nm20 = m00 * (sp * 0.272) + m10 * (sp * 0.534) + m20 * (inv + sp * 0.131);
+    final nm21 = m01 * (sp * 0.272) + m11 * (sp * 0.534) + m21 * (inv + sp * 0.131);
+    final nm22 = m02 * (sp * 0.272) + m12 * (sp * 0.534) + m22 * (inv + sp * 0.131);
+    m00 = nm00; m01 = nm01; m02 = nm02;
+    m10 = nm10; m11 = nm11; m12 = nm12;
+    m20 = nm20; m21 = nm21; m22 = nm22;
+  }
+
   final matrix = <double>[
-    (sr + s) * c, sg * c, sb * c, 0, b + t,
-    sr * c, (sg + s) * c, sb * c, 0, b + t,
-    sr * c, sg * c, (sb + s) * c, 0, b + t,
+    m00 * c, m01 * c, m02 * c, 0, b + t,
+    m10 * c, m11 * c, m12 * c, 0, b + t,
+    m20 * c, m21 * c, m22 * c, 0, b + t,
     0, 0, 0, 1, 0,
   ];
   return ColorFilter.matrix(matrix);

@@ -43,7 +43,7 @@ class _StudioScreenState extends State<StudioScreen> {
   int _pageIndex = 0;
   String? _selectedLayerId;
   int _navIndex = 0; // 0=Studio, 1=Fill, 2=Sign, 3=Docs, 4=Batch, 5=Projects
-  int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=BG Clean, 3=Layers
+  int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Effects, 3=Layers
   bool _sheetExpanded = true;
   bool _exportTransparentCanvas = false;
   bool _showGuides = true;
@@ -89,6 +89,7 @@ class _StudioScreenState extends State<StudioScreen> {
   List<String> _batchInputs = [];
   List<String> _batchOutputs = [];
   bool _batchProcessing = false;
+  bool _batchBw = false;
   double _batchRemoveWhite = 0.0;
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
@@ -1254,25 +1255,180 @@ class _StudioScreenState extends State<StudioScreen> {
     });
   }
 
-  void _addShapeLayer() {
+  void _openShapePickerSheet() {
+    const items = <(String, String, IconData)>[
+      ('rect', 'Rectangle', Icons.crop_square_rounded),
+      ('rounded', 'Rounded', Icons.rounded_corner_rounded),
+      ('circle', 'Circle', Icons.circle_outlined),
+      ('arrow', 'Arrow', Icons.arrow_forward_rounded),
+      ('double_arrow', '2-Way Arrow', Icons.compare_arrows_rounded),
+      ('line', 'Line', Icons.horizontal_rule_rounded),
+      ('triangle', 'Triangle', Icons.change_history_rounded),
+      ('star', 'Star', Icons.star_rounded),
+    ];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _panelBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Choose a Shape',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              Text(
+                'Full opacity vector shapes — customize colors & borders in Design.',
+                style: TextStyle(fontSize: 12, color: _subColor),
+              ),
+              const SizedBox(height: 14),
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 4,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 0.95,
+                children: items.map((item) {
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _addShapeKind(item.$1);
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: _chipBg,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: _borderColor),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(item.$3, size: 26, color: _amber),
+                          const SizedBox(height: 6),
+                          Text(
+                            item.$2,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: _textColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _addShapeKind(String kind) {
+    final minSide = math.min(_page.width, _page.height);
+    final sq = math.max(120.0, minSide * 0.34);
+    String name = 'Rectangle';
+    double w = _page.width * 0.56;
+    double h = 200;
+    Color fill = const Color(0xFF111317);
+    Color strokeCol = _amber;
+    double strokeW = 2.0;
+    double radius = 8.0;
+
+    if (kind == 'rounded') {
+      name = 'Rounded Box';
+      radius = 32.0;
+    } else if (kind == 'circle') {
+      name = 'Circle';
+      w = sq;
+      h = sq;
+      radius = 999.0;
+    } else if (kind == 'arrow') {
+      name = 'Arrow';
+      w = _page.width * 0.45;
+      h = 110.0;
+      fill = _amber;
+      strokeCol = const Color(0xFF111317);
+      strokeW = 0.0;
+      radius = 0.0;
+    } else if (kind == 'double_arrow') {
+      name = 'Double Arrow';
+      w = _page.width * 0.52;
+      h = 110.0;
+      fill = _amber;
+      strokeCol = const Color(0xFF111317);
+      strokeW = 0.0;
+      radius = 0.0;
+    } else if (kind == 'line') {
+      name = 'Line';
+      w = _page.width * 0.65;
+      h = 14.0;
+      fill = _amber;
+      strokeCol = Colors.transparent;
+      strokeW = 0.0;
+      radius = 999.0;
+    } else if (kind == 'triangle') {
+      name = 'Triangle';
+      w = sq;
+      h = sq;
+      fill = _amber;
+      strokeCol = const Color(0xFF111317);
+      strokeW = 0.0;
+      radius = 0.0;
+    } else if (kind == 'star') {
+      name = 'Star';
+      w = sq;
+      h = sq;
+      fill = _amber;
+      strokeCol = const Color(0xFF111317);
+      strokeW = 0.0;
+      radius = 0.0;
+    }
+
     final layer = DesignLayer(
       id: 'shp_${DateTime.now().microsecondsSinceEpoch}',
-      name: 'Card Overlay',
+      name: name,
       type: LayerType.shape,
-      x: _page.width * 0.15,
-      y: _page.height * 0.35,
-      width: _page.width * 0.7,
-      height: 220,
-      opacity: 0.75,
-      borderRadius: 20,
-      textColor: const Color(0xFF111317),
+      x: (_page.width - w) / 2,
+      y: (_page.height - h) / 2,
+      width: w,
+      height: h,
+      opacity: 1.0,
+      borderRadius: radius,
+      shapeKind: kind,
+      textColor: fill,
+      shapeStrokeColor: strokeCol,
+      shapeStrokeWidth: strokeW,
     );
     _clampLayerInPage(layer);
     _pushUndoSnapshot();
     setState(() {
       _page.layers.add(layer);
       _selectedLayerId = layer.id;
-      _inspectorTab = 1;
+      _inspectorTab = 0;
       _sheetExpanded = true;
     });
   }
@@ -1541,7 +1697,7 @@ class _StudioScreenState extends State<StudioScreen> {
               if (_redoStack.isNotEmpty) _quickBtn(Icons.redo_rounded, 'Redo', _redoCanvas),
               _quickBtn(Icons.title_rounded, 'Add Text', _addTextLayer),
               _quickBtn(Icons.add_photo_alternate_outlined, 'Overlay', _addOverlayImage),
-              _quickBtn(Icons.crop_square_rounded, 'Shape', _addShapeLayer),
+              _quickBtn(Icons.category_outlined, 'Shape', _openShapePickerSheet),
               if (layer != null) ...[
                 _quickBtn(Icons.copy_rounded, 'Duplicate', _duplicateSelectedLayer),
                 if (!layer.isCanvasBackground)
@@ -1573,7 +1729,7 @@ class _StudioScreenState extends State<StudioScreen> {
                           children: [
                             _tabChip(0, 'Design', Icons.tune_rounded),
                             _tabChip(1, 'Overlay', Icons.layers_outlined),
-                            _tabChip(2, 'BG Clean', Icons.cleaning_services_outlined),
+                            _tabChip(2, 'Effects', Icons.auto_fix_high_rounded),
                             _tabChip(3, 'Layers (${_page.layers.length})', Icons.format_list_bulleted_rounded),
                           ],
                         ),
@@ -1823,7 +1979,7 @@ class _StudioScreenState extends State<StudioScreen> {
       );
     }
 
-    // TAB 2: BG CLEAN
+    // TAB 2: STUDIO EFFECTS & WHITE BACKGROUND CLEAN
     if (_inspectorTab == 2) {
       DesignLayer? bgPhoto;
       for (final l in _page.layers) {
@@ -1837,19 +1993,80 @@ class _StudioScreenState extends State<StudioScreen> {
         return Padding(
           padding: const EdgeInsets.all(14),
           child: Text(
-            'Import a Canvas Pic or select an Overlay Image to use Remove White BG.',
+            'Import a Canvas Pic or select an Overlay Image to apply Studio Effects or Remove White BG.',
             style: TextStyle(color: _subColor, fontSize: 13),
           ),
         );
       }
       final isWhiteRemoved = targetImg.filters.removeWhite > 0;
+      final effectPresets = <(String, FilterSettings)>[
+        ('Original', FilterSettings(removeWhite: targetImg.filters.removeWhite)),
+        (
+          'Black & White',
+          FilterSettings(
+            brightness: 1.04,
+            contrast: 1.22,
+            saturate: 0.0,
+            blackAndWhite: true,
+            grayscale: 1.0,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Warm Gold',
+          FilterSettings(
+            brightness: 1.04,
+            contrast: 1.08,
+            saturate: 1.18,
+            sepia: 0.22,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Vivid Pop',
+          FilterSettings(
+            brightness: 1.04,
+            contrast: 1.16,
+            saturate: 1.35,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Vintage',
+          FilterSettings(
+            brightness: 0.98,
+            contrast: 1.08,
+            saturate: 0.84,
+            sepia: 0.38,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Matte Soft',
+          FilterSettings(
+            brightness: 1.08,
+            contrast: 0.90,
+            saturate: 0.84,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Crisp Clarity',
+          FilterSettings(
+            brightness: 1.03,
+            contrast: 1.28,
+            saturate: 1.08,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+      ];
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.cleaning_services_outlined, size: 15, color: _accentText),
+              Icon(Icons.auto_fix_high_rounded, size: 15, color: _accentText),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -1868,7 +2085,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 ),
                 onPressed: () async {
                   await _runWithSavingHud(
-                    savingTitle: 'Resetting BG Clean...',
+                    savingTitle: 'Resetting Effects...',
                     savedTitle: 'Reset Saved',
                     action: () async {
                       setState(() {
@@ -1890,19 +2107,19 @@ class _StudioScreenState extends State<StudioScreen> {
               style: FilledButton.styleFrom(
                 backgroundColor: isWhiteRemoved ? const Color(0xFF10B981) : _chipBg,
                 foregroundColor: isWhiteRemoved ? Colors.black : _textColor,
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(vertical: 11),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
               onPressed: () => _applyWhiteRemoval(targetImg, isWhiteRemoved ? 0.0 : 35.0),
-              icon: const Icon(Icons.cleaning_services_outlined, size: 17),
+              icon: const Icon(Icons.cleaning_services_outlined, size: 16),
               label: Text(
                 isWhiteRemoved ? 'White BG Removed ✓' : 'Remove White BG',
-                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          if (isWhiteRemoved)
+          if (isWhiteRemoved) ...[
+            const SizedBox(height: 6),
             _sliderRow(
               'White Tol.',
               targetImg.filters.removeWhite,
@@ -1911,6 +2128,70 @@ class _StudioScreenState extends State<StudioScreen> {
               (v) => setState(() => targetImg.filters.removeWhite = v),
               onChangeEnd: (v) => _applyWhiteRemoval(targetImg, v),
             ),
+          ],
+          const SizedBox(height: 10),
+          Text('Studio Effects', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _subColor)),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: effectPresets.map((entry) {
+                final label = entry.$1;
+                final preset = entry.$2;
+                final active = (targetImg.filters.brightness - preset.brightness).abs() < 0.02 &&
+                    (targetImg.filters.contrast - preset.contrast).abs() < 0.02 &&
+                    (targetImg.filters.sepia - preset.sepia).abs() < 0.02 &&
+                    targetImg.filters.blackAndWhite == preset.blackAndWhite;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: ChoiceChip(
+                    label: Text(label, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                    selected: active,
+                    selectedColor: _amber,
+                    labelStyle: TextStyle(color: active ? Colors.black : _textColor),
+                    onSelected: (_) {
+                      _pushUndoSnapshot();
+                      setState(() {
+                        targetImg.filters = preset.copy();
+                      });
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _sliderRow(
+            'Brightness',
+            targetImg.filters.brightness * 100,
+            50,
+            160,
+            (v) => setState(() => targetImg.filters.brightness = v / 100.0),
+          ),
+          _sliderRow(
+            'Contrast',
+            targetImg.filters.contrast * 100,
+            50,
+            180,
+            (v) => setState(() => targetImg.filters.contrast = v / 100.0),
+          ),
+          _sliderRow(
+            'Saturation',
+            targetImg.filters.saturate * 100,
+            0,
+            200,
+            (v) => setState(() {
+              targetImg.filters.saturate = v / 100.0;
+              if (v > 5) targetImg.filters.blackAndWhite = false;
+            }),
+          ),
+          _sliderRow(
+            'Warmth / Sepia',
+            targetImg.filters.sepia * 100,
+            0,
+            100,
+            (v) => setState(() => targetImg.filters.sepia = v / 100.0),
+          ),
         ],
       );
     }
@@ -2384,24 +2665,55 @@ class _StudioScreenState extends State<StudioScreen> {
       );
     }
 
+    const shapeTypes = <(String, String)>[
+      ('rect', 'Rectangle'),
+      ('rounded', 'Rounded'),
+      ('circle', 'Circle'),
+      ('arrow', 'Arrow'),
+      ('double_arrow', '2-Way Arrow'),
+      ('line', 'Line'),
+      ('triangle', 'Triangle'),
+      ('star', 'Star'),
+    ];
+    final palette = <Color>[
+      const Color(0xFF111317),
+      const Color(0xFFFFFFFF),
+      _amber,
+      const Color(0xFF10B981),
+      const Color(0xFFE11D48),
+      const Color(0xFF2563EB),
+      Colors.transparent,
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text('Shape Style', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: shapeTypes.map((st) {
+            final sel = layer.shapeKind == st.$1;
+            return ChoiceChip(
+              label: Text(st.$2, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+              selected: sel,
+              selectedColor: _amber,
+              labelStyle: TextStyle(color: sel ? Colors.black : _textColor),
+              onSelected: (_) => setState(() => layer.shapeKind = st.$1),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 8),
         _sliderRow('Corner Radius', layer.borderRadius, 0, 120,
             (v) => setState(() => layer.borderRadius = v)),
+        _sliderRow('Border Width', layer.shapeStrokeWidth, 0, 20,
+            (v) => setState(() => layer.shapeStrokeWidth = v)),
         const SizedBox(height: 6),
-        Text('Shape Color', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+        Text('Fill Color', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
         const SizedBox(height: 8),
         Wrap(
           spacing: 10,
-          children: [
-            const Color(0xFF111317),
-            const Color(0xFFFFFFFF),
-            _amber,
-            const Color(0xFF10B981),
-            const Color(0xFFE11D48),
-            const Color(0xFF2563EB),
-          ].map((c) {
+          children: palette.map((c) {
             final sel = layer.textColor.value == c.value;
             return GestureDetector(
               onTap: () => setState(() => layer.textColor = c),
@@ -2409,10 +2721,40 @@ class _StudioScreenState extends State<StudioScreen> {
                 width: 30,
                 height: 30,
                 decoration: BoxDecoration(
-                  color: c,
+                  color: c == Colors.transparent ? _chipBg : c,
                   shape: BoxShape.circle,
                   border: Border.all(color: sel ? _amber : _borderColor, width: sel ? 3 : 1.2),
                 ),
+                child: c == Colors.transparent ? Icon(Icons.block_rounded, size: 15, color: _subColor) : null,
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 10),
+        Text('Border Color', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 10,
+          children: palette.map((c) {
+            final sel = layer.shapeStrokeColor.value == c.value;
+            return GestureDetector(
+              onTap: () => setState(() {
+                layer.shapeStrokeColor = c;
+                if (c == Colors.transparent) {
+                  layer.shapeStrokeWidth = 0;
+                } else if (layer.shapeStrokeWidth <= 0) {
+                  layer.shapeStrokeWidth = 3;
+                }
+              }),
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: c == Colors.transparent ? _chipBg : c,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: sel ? _amber : _borderColor, width: sel ? 3 : 1.2),
+                ),
+                child: c == Colors.transparent ? Icon(Icons.block_rounded, size: 15, color: _subColor) : null,
               ),
             );
           }).toList(),
@@ -3495,7 +3837,7 @@ class _StudioScreenState extends State<StudioScreen> {
       children: [
         const Text('Offline Batch Processor', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         const SizedBox(height: 3),
-        Text('Process multiple scanned documents or images offline at once', style: TextStyle(fontSize: 12, color: _subColor)),
+        Text('Process multiple photos, preview results, then download or share', style: TextStyle(fontSize: 12, color: _subColor)),
         const SizedBox(height: 14),
         Card(
           child: Padding(
@@ -3512,7 +3854,12 @@ class _StudioScreenState extends State<StudioScreen> {
                   ),
                   onPressed: () async {
                     final imgs = await _picker.pickMultiImage();
-                    if (imgs.isNotEmpty) setState(() => _batchInputs = imgs.map((e) => e.path).toList());
+                    if (imgs.isNotEmpty) {
+                      setState(() {
+                        _batchInputs = imgs.map((e) => e.path).toList();
+                        _batchOutputs = [];
+                      });
+                    }
                   },
                   icon: Icon(Icons.photo_library_outlined, color: _accentText),
                   label: Text(
@@ -3521,6 +3868,14 @@ class _StudioScreenState extends State<StudioScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Black & White Effect', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  subtitle: Text('Crisp monochrome contrast', style: TextStyle(fontSize: 11.5, color: _subColor)),
+                  activeColor: _amber,
+                  value: _batchBw,
+                  onChanged: (v) => setState(() => _batchBw = v),
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Remove White Background (PNG)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
@@ -3550,23 +3905,20 @@ class _StudioScreenState extends State<StudioScreen> {
                     setState(() => _batchProcessing = true);
                     try {
                       await _runWithSavingHud(
-                        savingTitle: 'Processing & Saving...',
+                        savingTitle: 'Creating Previews...',
                         savingSubtitle: '${_batchInputs.length} image(s)',
-                        savedTitle: 'Batch Saved',
-                        savedSubtitle: '${_batchInputs.length} image(s) saved to Gallery',
+                        savedTitle: 'Previews Ready',
+                        savedSubtitle: 'Tap any image to inspect or download',
                         action: () async {
                           final dir = await getTemporaryDirectory();
                           final out = await runBatchOffline(BatchJobRequest(
                             inputPaths: _batchInputs,
                             outputDir: dir.path,
-                            brightness: 1.0,
-                            contrast: 1.0,
-                            blackAndWhite: false,
+                            brightness: _batchBw ? 1.03 : 1.0,
+                            contrast: _batchBw ? 1.22 : 1.0,
+                            blackAndWhite: _batchBw,
                             removeWhiteTolerance: _batchRemoveWhite,
                           ));
-                          for (final fp in out) {
-                            await _saveBytesToDeviceGallery(await File(fp).readAsBytes(), p.basename(fp));
-                          }
                           if (mounted) {
                             setState(() => _batchOutputs = out);
                           }
@@ -3576,38 +3928,184 @@ class _StudioScreenState extends State<StudioScreen> {
                       if (mounted) setState(() => _batchProcessing = false);
                     }
                   },
-            icon: Icon(_batchProcessing ? Icons.hourglass_top_rounded : Icons.auto_awesome_motion_rounded, size: 18),
+            icon: Icon(_batchProcessing ? Icons.hourglass_top_rounded : Icons.visibility_rounded, size: 18),
             label: Text(
-              _batchProcessing ? 'Processing...' : 'Process & Export Batch',
+              _batchProcessing ? 'Building Previews...' : 'Process & Preview',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
         ),
-        if (_batchOutputs.isNotEmpty)
-          Container(
-            margin: const EdgeInsets.only(top: 14),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.green.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.green.withOpacity(0.4)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.check_circle_rounded, color: _isDark ? Colors.greenAccent : Colors.green.shade700, size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Processed & saved ${_batchOutputs.length} image(s) to Gallery!',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: _isDark ? Colors.greenAccent : Colors.green.shade800,
-                    ),
-                  ),
+        if (_batchOutputs.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Processed Previews (${_batchOutputs.length})',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                 ),
-              ],
-            ),
+              ),
+              TextButton.icon(
+                onPressed: () async {
+                  await _runWithSavingHud(
+                    savingTitle: 'Downloading All...',
+                    savingSubtitle: '${_batchOutputs.length} image(s)',
+                    savedTitle: 'Saved to Gallery',
+                    savedSubtitle: '${_batchOutputs.length} image(s) downloaded',
+                    action: () async {
+                      for (final fp in _batchOutputs) {
+                        await _saveBytesToDeviceGallery(await File(fp).readAsBytes(), p.basename(fp));
+                      }
+                    },
+                  );
+                },
+                icon: const Icon(Icons.download_rounded, size: 18),
+                label: const Text('Download All', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+              IconButton(
+                tooltip: 'Share All',
+                icon: Icon(Icons.share_rounded, color: _accentText),
+                onPressed: () async {
+                  await Share.shareXFiles(
+                    _batchOutputs.map((fp) => XFile(fp)).toList(),
+                    text: 'Qalam Studio Batch (${_batchOutputs.length})',
+                  );
+                },
+              ),
+            ],
           ),
+          const SizedBox(height: 8),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              childAspectRatio: 0.78,
+            ),
+            itemCount: _batchOutputs.length,
+            itemBuilder: (ctx, idx) {
+              final fp = _batchOutputs[idx];
+              return Card(
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          showDialog<void>(
+                            context: context,
+                            builder: (dCtx) => Dialog(
+                              backgroundColor: _panelBg,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(14, 10, 6, 6),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            p.basename(fp),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                          ),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.close_rounded),
+                                          onPressed: () => Navigator.pop(dCtx),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  ConstrainedBox(
+                                    constraints: const BoxConstraints(maxHeight: 380),
+                                    child: Image.file(File(fp), fit: BoxFit.contain),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.all(10),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: FilledButton.icon(
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: _amber,
+                                              foregroundColor: Colors.black,
+                                            ),
+                                            onPressed: () async {
+                                              Navigator.pop(dCtx);
+                                              await _runWithSavingHud(
+                                                savingTitle: 'Downloading...',
+                                                savedTitle: 'Saved to Gallery',
+                                                action: () async {
+                                                  await _saveBytesToDeviceGallery(
+                                                    await File(fp).readAsBytes(),
+                                                    p.basename(fp),
+                                                  );
+                                                },
+                                              );
+                                            },
+                                            icon: const Icon(Icons.download_rounded, size: 17),
+                                            label: const Text('Download', style: TextStyle(fontWeight: FontWeight.w700)),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        IconButton(
+                                          icon: const Icon(Icons.share_rounded),
+                                          onPressed: () => Share.shareXFiles([XFile(fp)]),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                        child: Image.file(File(fp), fit: BoxFit.cover),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              p.basename(fp),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'Download',
+                            icon: const Icon(Icons.download_rounded, size: 18),
+                            onPressed: () async {
+                              await _runWithSavingHud(
+                                savingTitle: 'Downloading...',
+                                savedTitle: 'Saved to Gallery',
+                                action: () async {
+                                  await _saveBytesToDeviceGallery(
+                                    await File(fp).readAsBytes(),
+                                    p.basename(fp),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
       ],
     );
   }
@@ -3820,6 +4318,12 @@ class _StudioScreenState extends State<StudioScreen> {
                 ? BoxFit.values[(lRaw['objectFit'] as int).clamp(0, BoxFit.values.length - 1)]
                 : BoxFit.cover,
             borderRadius: (lRaw['borderRadius'] ?? 0).toDouble(),
+            shapeKind: (lRaw['shapeKind'] ?? 'rect').toString(),
+            shapeStrokeColor: _parseColorAny(
+              lRaw['shapeStrokeColor'] ?? lRaw['strokeColor'],
+              const Color(0xFFF59E0B),
+            ),
+            shapeStrokeWidth: ((lRaw['shapeStrokeWidth'] ?? lRaw['strokeWidth']) ?? 0.0).toDouble(),
             filters: FilterSettings.fromJson(fMap),
           ));
         }

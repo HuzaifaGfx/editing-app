@@ -659,10 +659,14 @@ class _LayerCanvasState extends State<LayerCanvas> {
       );
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: layer.textColor,
-        borderRadius: BorderRadius.circular(layer.borderRadius),
+    return CustomPaint(
+      size: Size(layer.width, layer.height),
+      painter: _ShapeLayerPainter(
+        shapeKind: layer.shapeKind,
+        fillColor: layer.textColor,
+        strokeColor: layer.shapeStrokeColor,
+        strokeWidth: layer.shapeStrokeWidth,
+        borderRadius: layer.borderRadius,
       ),
     );
   }
@@ -1008,4 +1012,117 @@ class _MarginGuidesPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _MarginGuidesPainter oldDelegate) =>
       oldDelegate.invScale != invScale;
+}
+
+
+class _ShapeLayerPainter extends CustomPainter {
+  final String shapeKind;
+  final Color fillColor;
+  final Color strokeColor;
+  final double strokeWidth;
+  final double borderRadius;
+
+  const _ShapeLayerPainter({
+    required this.shapeKind,
+    required this.fillColor,
+    required this.strokeColor,
+    required this.strokeWidth,
+    required this.borderRadius,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = math.max(2.0, size.width);
+    final h = math.max(2.0, size.height);
+    final path = Path();
+
+    if (shapeKind == 'circle') {
+      path.addOval(Rect.fromLTWH(0, 0, w, h));
+    } else if (shapeKind == 'arrow') {
+      final headW = math.min(w * 0.44, h * 0.85);
+      final sx = w - headW;
+      path
+        ..moveTo(0, h * 0.28)
+        ..lineTo(sx, h * 0.28)
+        ..lineTo(sx, 0)
+        ..lineTo(w, h / 2)
+        ..lineTo(sx, h)
+        ..lineTo(sx, h * 0.72)
+        ..lineTo(0, h * 0.72)
+        ..close();
+    } else if (shapeKind == 'double_arrow') {
+      final headW = math.min(w * 0.3, h * 0.65);
+      final lx = headW;
+      final rx = w - headW;
+      path
+        ..moveTo(0, h / 2)
+        ..lineTo(lx, 0)
+        ..lineTo(lx, h * 0.30)
+        ..lineTo(rx, h * 0.30)
+        ..lineTo(rx, 0)
+        ..lineTo(w, h / 2)
+        ..lineTo(rx, h)
+        ..lineTo(rx, h * 0.70)
+        ..lineTo(lx, h * 0.70)
+        ..lineTo(lx, h)
+        ..close();
+    } else if (shapeKind == 'triangle') {
+      path
+        ..moveTo(w / 2, 0)
+        ..lineTo(w, h)
+        ..lineTo(0, h)
+        ..close();
+    } else if (shapeKind == 'star') {
+      final cx = w / 2;
+      final cy = h / 2;
+      final ox = w / 2;
+      final oy = h / 2;
+      final ix = ox * 0.42;
+      final iy = oy * 0.42;
+      for (int i = 0; i < 10; i++) {
+        final a = -math.pi / 2 + (i * math.pi) / 5;
+        final rx = i.isEven ? ox : ix;
+        final ry = i.isEven ? oy : iy;
+        final px = cx + math.cos(a) * rx;
+        final py = cy + math.sin(a) * ry;
+        if (i == 0) {
+          path.moveTo(px, py);
+        } else {
+          path.lineTo(px, py);
+        }
+      }
+      path.close();
+    } else if (shapeKind == 'line') {
+      final r = math.min(h / 2, math.max(4.0, borderRadius > 0 ? borderRadius : h / 2));
+      path.addRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), Radius.circular(r)));
+    } else if (shapeKind == 'rounded') {
+      final r = math.max(24.0, borderRadius);
+      path.addRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), Radius.circular(r)));
+    } else {
+      path.addRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), Radius.circular(borderRadius)));
+    }
+
+    if (fillColor.alpha > 0) {
+      final fillPaint = Paint()
+        ..color = fillColor
+        ..style = PaintingStyle.fill;
+      canvas.drawPath(path, fillPaint);
+    }
+    if (strokeWidth > 0 && strokeColor.alpha > 0) {
+      final strokePaint = Paint()
+        ..color = strokeColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeJoin = StrokeJoin.round;
+      canvas.drawPath(path, strokePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ShapeLayerPainter oldDelegate) =>
+      oldDelegate.shapeKind != shapeKind ||
+      oldDelegate.fillColor != fillColor ||
+      oldDelegate.strokeColor != strokeColor ||
+      oldDelegate.strokeWidth != strokeWidth ||
+      oldDelegate.borderRadius != borderRadius;
 }
