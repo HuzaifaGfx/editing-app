@@ -606,6 +606,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
   }
 
   Widget _buildSelectionHandlesOverlay(DesignLayer layer, double invScale) {
+    final page = widget.page;
     final hitSize = 58.0 * invScale;
     final badgeSize = 40.0 * invScale;
     final iconSize = 22.0 * invScale;
@@ -703,13 +704,13 @@ class _LayerCanvasState extends State<LayerCanvas> {
                     final localDy = rawDx * math.sin(-rad) + rawDy * math.cos(-rad);
 
                     final prevW = layer.width;
-                    final nextW = (prevW - localDx).clamp(60.0, math.max(60.0, page.width));
+                    final nextW = (prevW - localDx).clamp(60.0, math.max(60.0, page.width)).toDouble();
                     final shiftLeft = prevW - nextW;
                     final maxH = math.max(40.0, page.height - layer.y);
-                    layer.x = (layer.x + shiftLeft * math.cos(rad)).clamp(0.0, math.max(0.0, page.width - nextW));
-                    layer.y = (layer.y + shiftLeft * math.sin(rad)).clamp(0.0, math.max(0.0, page.height - 40.0));
-                    layer.width = nextW.clamp(60.0, math.max(60.0, page.width - layer.x));
-                    layer.height = (layer.height + localDy).clamp(40.0, math.max(40.0, page.height - layer.y));
+                    layer.x = (layer.x + shiftLeft * math.cos(rad)).clamp(0.0, math.max(0.0, page.width - nextW)).toDouble();
+                    layer.y = (layer.y + shiftLeft * math.sin(rad)).clamp(0.0, math.max(0.0, page.height - 40.0)).toDouble();
+                    layer.width = nextW.clamp(60.0, math.max(60.0, page.width - layer.x)).toDouble();
+                    layer.height = (layer.height + localDy).clamp(40.0, math.max(40.0, page.height - layer.y)).toDouble();
                     if (layer.height > maxH) layer.height = maxH;
                     widget.onUpdateLayer(layer);
                   },
@@ -759,8 +760,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                     final ratio = layer.width / math.max(1.0, layer.height);
                     final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
                     final maxW = math.min(availW, availH * ratio);
-                    final nextW = (layer.width + delta).clamp(20.0, math.max(20.0, maxW));
-                    final nextH = (nextW / ratio).clamp(20.0, math.max(20.0, availH));
+                    final nextW = (layer.width + delta).clamp(20.0, math.max(20.0, maxW)).toDouble();
+                    final nextH = (nextW / ratio).clamp(20.0, math.max(20.0, availH)).toDouble();
                     layer.width = nextW;
                     layer.height = nextH;
                   } else if (layer.type == LayerType.text) {
@@ -768,14 +769,14 @@ class _LayerCanvasState extends State<LayerCanvas> {
                     final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
                     final prevW = math.max(1.0, layer.width);
                     final maxW = math.min(availW, availH * ratio);
-                    final nextW = (layer.width + delta).clamp(40.0, math.max(40.0, maxW));
-                    final nextH = (nextW / ratio).clamp(24.0, math.max(24.0, availH));
-                    layer.fontSize = (layer.fontSize * (nextW / prevW)).clamp(8.0, 600.0);
+                    final nextW = (layer.width + delta).clamp(40.0, math.max(40.0, maxW)).toDouble();
+                    final nextH = (nextW / ratio).clamp(24.0, math.max(24.0, availH)).toDouble();
+                    layer.fontSize = (layer.fontSize * (nextW / prevW)).clamp(8.0, 600.0).toDouble();
                     layer.width = nextW;
                     layer.height = nextH;
                   } else {
-                    layer.width = (layer.width + dx).clamp(20.0, availW);
-                    layer.height = (layer.height + dy).clamp(20.0, availH);
+                    layer.width = (layer.width + dx).clamp(20.0, availW).toDouble();
+                    layer.height = (layer.height + dy).clamp(20.0, availH).toDouble();
                   }
                   widget.onUpdateLayer(layer);
                 },
