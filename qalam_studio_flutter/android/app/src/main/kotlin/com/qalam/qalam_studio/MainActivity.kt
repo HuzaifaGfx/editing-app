@@ -61,6 +61,40 @@ class MainActivity : FlutterActivity() {
                         result.error("SAVE_FAILED", e.message, null)
                     }
                 }
+                "savePdfToDownloads" -> {
+                    val bytes = call.argument<ByteArray>("bytes")
+                    val name = call.argument<String>("name") ?: "qalam_scan.pdf"
+                    if (bytes == null) {
+                        result.error("INVALID_ARGS", "Missing PDF bytes", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val values = ContentValues().apply {
+                                put(MediaStore.Downloads.DISPLAY_NAME, name)
+                                put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+                                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/QalamStudio")
+                                put(MediaStore.Downloads.IS_PENDING, 1)
+                            }
+                            val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                                ?: throw Exception("MediaStore PDF insert failed")
+                            contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                            values.clear()
+                            values.put(MediaStore.Downloads.IS_PENDING, 0)
+                            contentResolver.update(uri, values, null, null)
+                            result.success("Downloads/QalamStudio/$name")
+                        } else {
+                            val outDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "QalamStudio")
+                            if (!outDir.exists()) outDir.mkdirs()
+                            val outFile = File(outDir, name)
+                            FileOutputStream(outFile).use { it.write(bytes) }
+                            MediaScannerConnection.scanFile(this, arrayOf(outFile.absolutePath), arrayOf("application/pdf"), null)
+                            result.success(outFile.absolutePath)
+                        }
+                    } catch (e: Exception) {
+                        result.error("SAVE_PDF_FAILED", e.message, null)
+                    }
+                }
                 "pickProjectFile" -> {
                     if (pendingPickResult != null) {
                         result.error("BUSY", "File picker already open", null)

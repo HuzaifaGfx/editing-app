@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
+import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -34,7 +35,7 @@ class _StudioScreenState extends State<StudioScreen> {
   final ImagePicker _picker = ImagePicker();
   final GlobalKey _canvasExportKey = GlobalKey();
   final TextEditingController _textController = TextEditingController();
-  final TextEditingController _sigTextController = TextEditingController(text: 'Huzaifa Khan');
+  final TextEditingController _sigTextController = TextEditingController(text: 'Huzaifa');
 
   List<DesignProject> _projects = [];
   late DesignProject _project;
@@ -44,6 +45,10 @@ class _StudioScreenState extends State<StudioScreen> {
   int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Filters, 3=Layers
   bool _sheetExpanded = true;
   bool _exportTransparentCanvas = false;
+  bool _showGuides = true;
+  bool _hideOverlaysForExport = false;
+  final List<_ScannedDocPage> _scannedPages = [];
+  int _activeScanIdx = 0;
   int _whiteRemovalSeq = 0;
   final List<(int, String)> _undoStack = [];
   final List<(int, String)> _redoStack = [];
@@ -581,6 +586,7 @@ class _StudioScreenState extends State<StudioScreen> {
     setState(() {
       _navIndex = 0;
       _selectedLayerId = null;
+      _hideOverlaysForExport = true;
       _exportTransparentCanvas = format == 'png' && transparent;
     });
     await Future.delayed(const Duration(milliseconds: 90));
@@ -602,6 +608,7 @@ class _StudioScreenState extends State<StudioScreen> {
     } finally {
       if (mounted) {
         setState(() {
+          _hideOverlaysForExport = false;
           _exportTransparentCanvas = false;
           _navIndex = prevNav;
         });
@@ -1029,6 +1036,7 @@ class _StudioScreenState extends State<StudioScreen> {
       lineHeight: 2.3,
       textColor: const Color(0xFFFFFFFF),
     );
+    _clampLayerInPage(layer);
     _pushUndoSnapshot();
     setState(() {
       _page.layers.add(layer);
@@ -1052,6 +1060,7 @@ class _StudioScreenState extends State<StudioScreen> {
       borderRadius: 20,
       textColor: const Color(0xFF111317),
     );
+    _clampLayerInPage(layer);
     _pushUndoSnapshot();
     setState(() {
       _page.layers.add(layer);
@@ -1061,11 +1070,20 @@ class _StudioScreenState extends State<StudioScreen> {
     });
   }
 
+  void _clampLayerInPage(DesignLayer layer) {
+    if (layer.isCanvasBackground) return;
+    layer.width = layer.width.clamp(16.0, math.max(16.0, _page.width));
+    layer.height = layer.height.clamp(16.0, math.max(16.0, _page.height));
+    layer.x = layer.x.clamp(0.0, math.max(0.0, _page.width - layer.width));
+    layer.y = layer.y.clamp(0.0, math.max(0.0, _page.height - layer.height));
+  }
+
   void _duplicateSelectedLayer() {
     final l = _activeLayer;
     if (l == null) return;
     _pushUndoSnapshot();
     final copy = l.cloneWithNewId('dup_${DateTime.now().microsecondsSinceEpoch}');
+    _clampLayerInPage(copy);
     setState(() {
       _page.layers.add(copy);
       _selectedLayerId = copy.id;
@@ -1183,6 +1201,21 @@ class _StudioScreenState extends State<StudioScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Scan Document (ML Kit / Upload)',
+            icon: Icon(Icons.document_scanner_outlined, size: 21, color: _accentText),
+            onPressed: _openDocumentScannerSheet,
+          ),
+          if (_navIndex == 0)
+            IconButton(
+              tooltip: _showGuides ? 'Guides: ON (Tap to Hide)' : 'Guides: OFF (Tap to Show)',
+              icon: Icon(
+                _showGuides ? Icons.grid_on_rounded : Icons.grid_off_rounded,
+                size: 20,
+                color: _showGuides ? _accentText : _mutedColor,
+              ),
+              onPressed: () => setState(() => _showGuides = !_showGuides),
+            ),
+          IconButton(
             tooltip: 'Quick Guide & Help',
             icon: const Icon(Icons.help_outline_rounded, size: 21),
             onPressed: _showQuickTourSheet,
@@ -1270,6 +1303,9 @@ class _StudioScreenState extends State<StudioScreen> {
               page: _page,
               selectedLayerId: _selectedLayerId,
               exportBoundaryKey: _canvasExportKey,
+              showSelectionHandles: !_hideOverlaysForExport,
+              showGuides: _showGuides,
+              hideOverlaysForExport: _hideOverlaysForExport,
               forceTransparentBackground: _exportTransparentCanvas,
               onSelectLayer: _selectLayer,
               onUpdateLayer: (_) => setState(() {}),
@@ -1288,6 +1324,7 @@ class _StudioScreenState extends State<StudioScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             children: [
               _quickBtn(Icons.photo_size_select_large, 'Canvas Pic', _importCanvasImage, highlight: true),
+              _quickBtn(Icons.document_scanner_outlined, 'Scan Doc', _openDocumentScannerSheet),
               if (_undoStack.isNotEmpty) _quickBtn(Icons.undo_rounded, 'Undo', _undoCanvas),
               if (_redoStack.isNotEmpty) _quickBtn(Icons.redo_rounded, 'Redo', _redoCanvas),
               _quickBtn(Icons.title_rounded, 'Add Text', _addTextLayer),
@@ -1441,8 +1478,30 @@ class _StudioScreenState extends State<StudioScreen> {
         );
       }
       final reversed = _page.layers.reversed.toList();
-      return Column(
-        children: reversed.map((l) {
+      return ReorderableListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        buildDefaultDragHandles: false,
+        itemCount: reversed.length,
+        onReorder: (oldIndex, newIndex) {
+          if (oldIndex < 0 || oldIndex >= reversed.length) return;
+          final dragged = reversed[oldIndex];
+          if (dragged.isCanvasBackground) return;
+          if (newIndex > oldIndex) newIndex -= 1;
+          final total = _page.layers.length;
+          final fromArr = total - 1 - oldIndex;
+          var toArr = total - 1 - newIndex;
+          final minArr = _page.layers.isNotEmpty && _page.layers.first.isCanvasBackground ? 1 : 0;
+          toArr = toArr.clamp(minArr, total - 1);
+          if (fromArr == toArr) return;
+          _pushUndoSnapshot();
+          setState(() {
+            final item = _page.layers.removeAt(fromArr);
+            _page.layers.insert(toArr, item);
+          });
+        },
+        itemBuilder: (context, index) {
+          final l = reversed[index];
           final isSel = !l.isCanvasBackground && l.id == _selectedLayerId;
           final typeIcon = l.isCanvasBackground
               ? Icons.wallpaper_rounded
@@ -1450,6 +1509,7 @@ class _StudioScreenState extends State<StudioScreen> {
                   ? Icons.title_rounded
                   : (l.type == LayerType.image ? Icons.image_outlined : Icons.crop_square_rounded));
           return Container(
+            key: ValueKey('layer_row_${l.id}'),
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.fromLTRB(10, 8, 8, 6),
             decoration: BoxDecoration(
@@ -1468,6 +1528,14 @@ class _StudioScreenState extends State<StudioScreen> {
                       : () => _selectLayer(l.id),
                   child: Row(
                     children: [
+                      if (!l.isCanvasBackground)
+                        ReorderableDragStartListener(
+                          index: index,
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 6, top: 4, bottom: 4),
+                            child: Icon(Icons.drag_indicator_rounded, size: 20, color: _mutedColor),
+                          ),
+                        ),
                       Container(
                         width: 30,
                         height: 30,
@@ -1539,7 +1607,7 @@ class _StudioScreenState extends State<StudioScreen> {
               ],
             ),
           );
-        }).toList(),
+        },
       );
     }
 
@@ -1711,10 +1779,22 @@ class _StudioScreenState extends State<StudioScreen> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _compactLayerIcon(Icons.arrow_back_rounded, 'Left', () => setState(() => layer.x -= 5)),
-                    _compactLayerIcon(Icons.arrow_upward_rounded, 'Up', () => setState(() => layer.y -= 5)),
-                    _compactLayerIcon(Icons.arrow_downward_rounded, 'Down', () => setState(() => layer.y += 5)),
-                    _compactLayerIcon(Icons.arrow_forward_rounded, 'Right', () => setState(() => layer.x += 5)),
+                    _compactLayerIcon(Icons.arrow_back_rounded, 'Left', () => setState(() {
+                      layer.x -= 5;
+                      _clampLayerInPage(layer);
+                    })),
+                    _compactLayerIcon(Icons.arrow_upward_rounded, 'Up', () => setState(() {
+                      layer.y -= 5;
+                      _clampLayerInPage(layer);
+                    })),
+                    _compactLayerIcon(Icons.arrow_downward_rounded, 'Down', () => setState(() {
+                      layer.y += 5;
+                      _clampLayerInPage(layer);
+                    })),
+                    _compactLayerIcon(Icons.arrow_forward_rounded, 'Right', () => setState(() {
+                      layer.x += 5;
+                      _clampLayerInPage(layer);
+                    })),
                     const SizedBox(width: 4),
                     _compactLayerIcon(
                       Icons.center_focus_strong_outlined,
@@ -1722,6 +1802,7 @@ class _StudioScreenState extends State<StudioScreen> {
                       () => setState(() {
                         layer.x = (_page.width - layer.width) / 2;
                         layer.y = (_page.height - layer.height) / 2;
+                        _clampLayerInPage(layer);
                       }),
                       color: _accentText,
                     ),
@@ -1780,6 +1861,9 @@ class _StudioScreenState extends State<StudioScreen> {
                   setState(() {
                     _page.width = pItem.$2;
                     _page.height = pItem.$3;
+                    for (final l in _page.layers) {
+                      _clampLayerInPage(l);
+                    }
                   });
                 },
               );
@@ -2037,6 +2121,7 @@ class _StudioScreenState extends State<StudioScreen> {
           if (layer.aspectLocked) {
             layer.height = (nextW / (ratio <= 0.05 ? 1.0 : ratio)).clamp(24.0, 4000.0);
           }
+          _clampLayerInPage(layer);
         });
       }
 
@@ -2202,6 +2287,7 @@ class _StudioScreenState extends State<StudioScreen> {
                   layer.height = (nextW / ratio).clamp(1.0, 20000.0);
                 }
                 layer.width = nextW;
+                _clampLayerInPage(layer);
               });
             },
           ),
@@ -2221,6 +2307,7 @@ class _StudioScreenState extends State<StudioScreen> {
                   layer.width = (nextH * ratio).clamp(1.0, 20000.0);
                 }
                 layer.height = nextH;
+                _clampLayerInPage(layer);
               });
             },
           ),
@@ -2980,6 +3067,47 @@ class _StudioScreenState extends State<StudioScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        Container(
+          margin: const EdgeInsets.only(bottom: 18),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _amber.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _amber.withOpacity(0.45)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: _amber,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: const Icon(Icons.document_scanner_rounded, color: Colors.black, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('ML Kit Document Scanner', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+                    Text(
+                      'Camera scan or upload pages · Live Preview · Save PDF / JPEG',
+                      style: TextStyle(fontSize: 11.5, color: _subColor),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
+                onPressed: _openDocumentScannerSheet,
+                child: const Text('Scan', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ),
         const Text('Urdu Business & Office Starters', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         const SizedBox(height: 2),
         Text('Quick-Fill ready invoices, letterheads & Urdu certificates', style: TextStyle(fontSize: 12, color: _subColor)),
@@ -4749,6 +4877,715 @@ class _StudioScreenState extends State<StudioScreen> {
       ],
     );
   }
+
+  Future<_ScannedDocPage> _renderScannedDocPreview(
+    String id,
+    String rawPath,
+    Uint8List rawBytes,
+    int rotationDeg,
+    String enhanceMode,
+  ) async {
+    var decoded = img.decodeImage(rawBytes);
+    if (decoded == null) {
+      return _ScannedDocPage(
+        id: id,
+        rawPath: rawPath,
+        rawBytes: rawBytes,
+        previewBytes: rawBytes,
+        rotationDeg: rotationDeg,
+        enhanceMode: enhanceMode,
+        width: 1000,
+        height: 1400,
+      );
+    }
+
+    if (rotationDeg % 360 != 0) {
+      decoded = img.copyRotate(decoded, angle: rotationDeg);
+    }
+    if (math.max(decoded.width, decoded.height) > 2000) {
+      final scale = 2000 / math.max(decoded.width, decoded.height);
+      decoded = img.copyResize(
+        decoded,
+        width: math.max(1, (decoded.width * scale).round()),
+        height: math.max(1, (decoded.height * scale).round()),
+      );
+    }
+
+    if (enhanceMode == 'magic') {
+      decoded = img.adjustColor(decoded, contrast: 1.24, brightness: 1.07, saturation: 1.1);
+    } else if (enhanceMode == 'gray') {
+      decoded = img.grayscale(decoded);
+      decoded = img.adjustColor(decoded, contrast: 1.15, brightness: 1.05);
+    } else if (enhanceMode == 'bw') {
+      decoded = img.grayscale(decoded);
+      decoded = img.adjustColor(decoded, contrast: 1.65, brightness: 1.14);
+      for (final pixel in decoded) {
+        final l = pixel.r.toDouble();
+        if (l > 186) {
+          pixel
+            ..r = 255
+            ..g = 255
+            ..b = 255;
+        } else if (l < 78) {
+          final d = (l * 0.8).round().clamp(0, 255);
+          pixel
+            ..r = d
+            ..g = d
+            ..b = d;
+        }
+      }
+    }
+
+    final jpg = Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
+    return _ScannedDocPage(
+      id: id,
+      rawPath: rawPath,
+      rawBytes: rawBytes,
+      previewBytes: jpg,
+      rotationDeg: rotationDeg,
+      enhanceMode: enhanceMode,
+      width: decoded.width,
+      height: decoded.height,
+    );
+  }
+
+  Future<void> _appendScannedPaths(
+    List<String> paths,
+    void Function(void Function()) setModalState,
+  ) async {
+    if (paths.isEmpty) return;
+    final added = <_ScannedDocPage>[];
+    for (final srcPath in paths) {
+      try {
+        final permanent = await _persistPickedImageOffline(srcPath);
+        final bytes = await File(permanent).readAsBytes();
+        final pageObj = await _renderScannedDocPreview(
+          'scan_${DateTime.now().microsecondsSinceEpoch}_${added.length}',
+          permanent,
+          bytes,
+          0,
+          'magic',
+        );
+        added.add(pageObj);
+      } catch (_) {}
+    }
+    if (!mounted || added.isEmpty) return;
+    setModalState(() {
+      final startIdx = _scannedPages.length;
+      _scannedPages.addAll(added);
+      _activeScanIdx = startIdx;
+    });
+  }
+
+  Future<void> _openDocumentScannerSheet() async {
+    bool localBusy = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _panelBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final safeIdx = _scannedPages.isEmpty
+                ? 0
+                : _activeScanIdx.clamp(0, _scannedPages.length - 1);
+            final activePage = _scannedPages.isEmpty ? null : _scannedPages[safeIdx];
+
+            Future<void> runMlKitCamera() async {
+              setModalState(() => localBusy = true);
+              DocumentScanner? scanner;
+              try {
+                final options = DocumentScannerOptions(
+                  documentFormat: DocumentFormat.jpeg,
+                  mode: ScannerMode.full,
+                  pageLimit: 12,
+                  isGalleryImport: true,
+                );
+                scanner = DocumentScanner(options: options);
+                final result = await scanner.scanDocument();
+                if (result.images.isNotEmpty) {
+                  await _appendScannedPaths(result.images, setModalState);
+                }
+              } on PlatformException catch (e) {
+                final msg = e.message ?? '';
+                if (!msg.toLowerCase().contains('cancel') && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('ML Kit Scanner: ${msg.isEmpty ? e.code : msg}')),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Scanner error: $e')),
+                  );
+                }
+              } finally {
+                try {
+                  await scanner?.close();
+                } catch (_) {}
+                if (ctx.mounted) setModalState(() => localBusy = false);
+              }
+            }
+
+            Future<void> runQuickCamera() async {
+              setModalState(() => localBusy = true);
+              try {
+                final shot = await _picker.pickImage(source: ImageSource.camera);
+                if (shot != null) {
+                  await _appendScannedPaths([shot.path], setModalState);
+                }
+              } finally {
+                if (ctx.mounted) setModalState(() => localBusy = false);
+              }
+            }
+
+            Future<void> runGalleryUpload() async {
+              setModalState(() => localBusy = true);
+              try {
+                final picked = await _picker.pickMultiImage();
+                if (picked.isNotEmpty) {
+                  await _appendScannedPaths(picked.map((x) => x.path).toList(), setModalState);
+                }
+              } finally {
+                if (ctx.mounted) setModalState(() => localBusy = false);
+              }
+            }
+
+            Future<void> updateActiveTransform(int nextRot, String nextMode) async {
+              if (activePage == null) return;
+              setModalState(() => localBusy = true);
+              try {
+                final updated = await _renderScannedDocPreview(
+                  activePage.id,
+                  activePage.rawPath,
+                  activePage.rawBytes,
+                  nextRot,
+                  nextMode,
+                );
+                if (ctx.mounted) {
+                  setModalState(() {
+                    _scannedPages[safeIdx] = updated;
+                  });
+                }
+              } finally {
+                if (ctx.mounted) setModalState(() => localBusy = false);
+              }
+            }
+
+            Future<Uint8List> buildScannerPdfBytes() async {
+              final doc = pw.Document();
+              for (final pg in _scannedPages) {
+                final pdfImg = pw.MemoryImage(pg.previewBytes);
+                doc.addPage(
+                  pw.Page(
+                    pageFormat: PdfPageFormat(pg.width.toDouble(), pg.height.toDouble()),
+                    margin: pw.EdgeInsets.zero,
+                    build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
+                  ),
+                );
+              }
+              return doc.save();
+            }
+
+            Future<void> downloadScannerPdf() async {
+              if (_scannedPages.isEmpty) return;
+              setModalState(() => localBusy = true);
+              try {
+                final pdfBytes = await buildScannerPdfBytes();
+                final fileName = 'qalam_scan_${DateTime.now().millisecondsSinceEpoch}.pdf';
+                String savedLoc = '';
+                if (Platform.isAndroid) {
+                  try {
+                    savedLoc = await _mediaChannel.invokeMethod<String>('savePdfToDownloads', {
+                          'bytes': pdfBytes,
+                          'name': fileName,
+                        }) ??
+                        '';
+                  } catch (_) {}
+                }
+                final tmpDir = await getTemporaryDirectory();
+                final tmpPath = p.join(tmpDir.path, fileName);
+                await File(tmpPath).writeAsBytes(pdfBytes);
+                if (savedLoc.isEmpty) {
+                  final extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+                  final outDir = Directory(p.join(extDir.path, 'QalamStudio'));
+                  if (!outDir.existsSync()) outDir.createSync(recursive: true);
+                  final outPath = p.join(outDir.path, fileName);
+                  await File(outPath).writeAsBytes(pdfBytes);
+                  savedLoc = outPath;
+                }
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('PDF Saved: $savedLoc'),
+                    duration: const Duration(seconds: 4),
+                    action: SnackBarAction(
+                      label: 'Share PDF',
+                      onPressed: () => Share.shareXFiles([XFile(tmpPath)], text: 'Qalam Scanned PDF'),
+                    ),
+                  ),
+                );
+              } finally {
+                if (ctx.mounted) setModalState(() => localBusy = false);
+              }
+            }
+
+            Future<void> saveScannerJpeg() async {
+              if (activePage == null) return;
+              setModalState(() => localBusy = true);
+              try {
+                String lastSaved = '';
+                String lastTmp = '';
+                final tmpDir = await getTemporaryDirectory();
+                for (int i = 0; i < _scannedPages.length; i++) {
+                  final pg = _scannedPages[i];
+                  final fname = 'qalam_scan_${DateTime.now().millisecondsSinceEpoch}_p${i + 1}.jpg';
+                  lastSaved = await _saveBytesToDeviceGallery(pg.previewBytes, fname);
+                  lastTmp = p.join(tmpDir.path, fname);
+                  await File(lastTmp).writeAsBytes(pg.previewBytes);
+                }
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('${_scannedPages.length} JPEG(s) Saved: $lastSaved'),
+                    duration: const Duration(seconds: 4),
+                    action: SnackBarAction(
+                      label: 'Share',
+                      onPressed: () => Share.shareXFiles([XFile(lastTmp)], text: 'Qalam Scanned JPEG'),
+                    ),
+                  ),
+                );
+              } finally {
+                if (ctx.mounted) setModalState(() => localBusy = false);
+              }
+            }
+
+            Future<void> sendScannedToStudio() async {
+              if (activePage == null) return;
+              final cleanName = 'scan_page_${DateTime.now().millisecondsSinceEpoch}.jpg';
+              final docs = await getApplicationDocumentsDirectory();
+              final outDir = Directory(p.join(docs.path, 'qalam_media'));
+              if (!outDir.existsSync()) outDir.createSync(recursive: true);
+              final outPath = p.join(outDir.path, cleanName);
+              await File(outPath).writeAsBytes(activePage.previewBytes);
+
+              final canvasLayer = DesignLayer(
+                id: 'canvas_${DateTime.now().microsecondsSinceEpoch}',
+                name: 'Scanned Doc ${safeIdx + 1}',
+                type: LayerType.image,
+                x: 0,
+                y: 0,
+                width: activePage.width.toDouble(),
+                height: activePage.height.toDouble(),
+                locked: true,
+                isCanvasBackground: true,
+                localImagePath: outPath,
+                aspectLocked: true,
+                objectFit: BoxFit.cover,
+              );
+              _pushUndoSnapshot();
+              setState(() {
+                _page.width = activePage.width.toDouble();
+                _page.height = activePage.height.toDouble();
+                if (_page.layers.isNotEmpty && _page.layers.first.isCanvasBackground) {
+                  _page.layers[0] = canvasLayer;
+                } else {
+                  _page.layers.insert(0, canvasLayer);
+                }
+                for (final l in _page.layers) {
+                  _clampLayerInPage(l);
+                }
+                _selectedLayerId = null;
+                _inspectorTab = 2;
+                _navIndex = 0;
+              });
+              await _saveCurrentProject(showToast: false);
+              if (ctx.mounted) Navigator.pop(ctx);
+            }
+
+            return SafeArea(
+              child: DraggableScrollableSheet(
+                initialChildSize: 0.9,
+                minChildSize: 0.55,
+                maxChildSize: 0.96,
+                expand: false,
+                builder: (_, scrollCtrl) {
+                  return ListView(
+                    controller: scrollCtrl,
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 42,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: _mutedColor.withOpacity(0.4),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: _amber.withOpacity(0.16),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(Icons.document_scanner_rounded, color: _accentText, size: 20),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Document Scanner (ML Kit)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                                Text('Camera Scan · Upload Photos · Preview · PDF / JPEG', style: TextStyle(fontSize: 11, color: _subColor)),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: _amber,
+                                foregroundColor: Colors.black,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                              ),
+                              onPressed: localBusy ? null : runMlKitCamera,
+                              icon: const Icon(Icons.document_scanner_outlined, size: 18),
+                              label: const Text('ML Kit Scan', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                side: BorderSide(color: _borderColor),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                              ),
+                              onPressed: localBusy ? null : runQuickCamera,
+                              icon: const Icon(Icons.camera_alt_outlined, size: 17),
+                              label: const Text('Camera', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                side: BorderSide(color: _borderColor),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                              ),
+                              onPressed: localBusy ? null : runGalleryUpload,
+                              icon: const Icon(Icons.upload_file_outlined, size: 17),
+                              label: const Text('Upload', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      if (localBusy)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 10),
+                          child: LinearProgressIndicator(minHeight: 3),
+                        ),
+                      if (activePage == null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(vertical: 42, horizontal: 20),
+                          decoration: BoxDecoration(
+                            color: _inputBg,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: _borderColor),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(Icons.insert_drive_file_outlined, size: 44, color: _accentText),
+                              const SizedBox(height: 10),
+                              const Text(
+                                'No Scanned Pages Yet',
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 5),
+                              Text(
+                                'Tap ML Kit Scan for smart auto-edge document detection, Camera for quick snap, or Upload existing document photos.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 12, color: _subColor, height: 1.4),
+                              ),
+                            ],
+                          ),
+                        )
+                      else ...[
+                        Container(
+                          height: 310,
+                          decoration: BoxDecoration(
+                            color: _isDark ? const Color(0xFF0A0C0F) : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: _borderColor),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Stack(
+                            children: [
+                              Center(
+                                child: Image.memory(
+                                  activePage.previewBytes,
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
+                              Positioned(
+                                top: 8,
+                                left: 8,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.7),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'Page ${safeIdx + 1}/${_scannedPages.length} · ${activePage.width}×${activePage.height}',
+                                    style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          height: 76,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _scannedPages.length,
+                            itemBuilder: (_, i) {
+                              final pg = _scannedPages[i];
+                              final sel = i == safeIdx;
+                              return GestureDetector(
+                                onTap: () => setModalState(() => _activeScanIdx = i),
+                                child: Container(
+                                  width: 58,
+                                  margin: const EdgeInsets.only(right: 8),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: sel ? _amber : _borderColor,
+                                      width: sel ? 2.2 : 1,
+                                    ),
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.memory(pg.previewBytes, fit: BoxFit.cover),
+                                      Positioned(
+                                        bottom: 3,
+                                        left: 3,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black87,
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text('${i + 1}', style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700)),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        top: 2,
+                                        right: 2,
+                                        child: GestureDetector(
+                                          onTap: () => setModalState(() {
+                                            _scannedPages.removeAt(i);
+                                            if (_activeScanIdx >= _scannedPages.length && _activeScanIdx > 0) {
+                                              _activeScanIdx = _scannedPages.length - 1;
+                                            }
+                                          }),
+                                          child: Container(
+                                            width: 18,
+                                            height: 18,
+                                            decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
+                                            child: const Icon(Icons.close, size: 12, color: Colors.white),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    _choicePill(
+                                      label: 'Magic Paper',
+                                      selected: activePage.enhanceMode == 'magic',
+                                      onTap: () => updateActiveTransform(activePage.rotationDeg, 'magic'),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    _choicePill(
+                                      label: 'Clean B&W',
+                                      selected: activePage.enhanceMode == 'bw',
+                                      onTap: () => updateActiveTransform(activePage.rotationDeg, 'bw'),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    _choicePill(
+                                      label: 'Gray',
+                                      selected: activePage.enhanceMode == 'gray',
+                                      onTap: () => updateActiveTransform(activePage.rotationDeg, 'gray'),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    _choicePill(
+                                      label: 'Original',
+                                      selected: activePage.enhanceMode == 'original',
+                                      onTap: () => updateActiveTransform(activePage.rotationDeg, 'original'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                side: BorderSide(color: _borderColor),
+                              ),
+                              onPressed: localBusy
+                                  ? null
+                                  : () => updateActiveTransform((activePage.rotationDeg + 90) % 360, activePage.enhanceMode),
+                              icon: Icon(Icons.rotate_right_rounded, size: 17, color: _accentText),
+                              label: const Text('90°', style: TextStyle(fontSize: 12)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: _amber,
+                                  foregroundColor: Colors.black,
+                                  padding: const EdgeInsets.symmetric(vertical: 13),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                ),
+                                onPressed: localBusy ? null : downloadScannerPdf,
+                                icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                                label: Text(
+                                  _scannedPages.length > 1 ? 'Download PDF (${_scannedPages.length}p)' : 'Download PDF',
+                                  style: const TextStyle(fontWeight: FontWeight.w800),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: _isDark ? Colors.white12 : const Color(0xFF0F172A),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 13),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                ),
+                                onPressed: localBusy ? null : saveScannerJpeg,
+                                icon: Icon(Icons.download_rounded, size: 18, color: _amber),
+                                label: Text(
+                                  _scannedPages.length > 1 ? 'Save JPEGs (${_scannedPages.length})' : 'Save JPEG',
+                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 11),
+                                  side: BorderSide(color: _borderColor),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                ),
+                                onPressed: localBusy
+                                    ? null
+                                    : () async {
+                                        final bytes = await buildScannerPdfBytes();
+                                        await Printing.layoutPdf(onLayout: (_) async => bytes);
+                                      },
+                                icon: const Icon(Icons.print_outlined, size: 17),
+                                label: const Text('Print / Preview PDF', style: TextStyle(fontSize: 12.5)),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 11),
+                                  side: BorderSide(color: _amber.withOpacity(0.75)),
+                                  foregroundColor: _accentText,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                ),
+                                onPressed: localBusy ? null : sendScannedToStudio,
+                                icon: const Icon(Icons.brush_outlined, size: 17),
+                                label: const Text('Open in Studio', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+}
+
+class _ScannedDocPage {
+  final String id;
+  final String rawPath;
+  final Uint8List rawBytes;
+  final Uint8List previewBytes;
+  final int rotationDeg;
+  final String enhanceMode;
+  final int width;
+  final int height;
+
+  const _ScannedDocPage({
+    required this.id,
+    required this.rawPath,
+    required this.rawBytes,
+    required this.previewBytes,
+    required this.rotationDeg,
+    required this.enhanceMode,
+    required this.width,
+    required this.height,
+  });
 }
 
 class _ExactNumberBox extends StatefulWidget {
