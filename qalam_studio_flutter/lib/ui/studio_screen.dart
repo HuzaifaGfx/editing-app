@@ -55,6 +55,9 @@ class _StudioScreenState extends State<StudioScreen> {
   final List<(int, String)> _undoStack = [];
   final List<(int, String)> _redoStack = [];
   final List<_CustomInstalledFont> _customFonts = [];
+  List<_FontCatalogEntry> _googleDirectoryFonts = [];
+  bool _loadingGoogleDirectory = false;
+  final Set<String> _previewLoadingFamilies = {};
   final Set<String> _loadedFontFamilies = {
     'NotoNastaliqUrdu',
     'Gulzar',
@@ -305,7 +308,7 @@ class _StudioScreenState extends State<StudioScreen> {
   Future<void> _checkQuickTourOnFirstLaunch() async {
     try {
       final docsDir = await getApplicationDocumentsDirectory();
-      final flag = File(p.join(docsDir.path, 'qalam_tour_seen_v1.flag'));
+      final flag = File(p.join(docsDir.path, 'qalamix_tour_seen_v1.flag'));
       if (!flag.existsSync() && mounted) {
         await flag.writeAsString('1');
         if (mounted) _showQuickTourSheet();
@@ -346,10 +349,17 @@ class _StudioScreenState extends State<StudioScreen> {
                       width: 38,
                       height: 38,
                       decoration: BoxDecoration(
-                        color: _amber.withOpacity(0.16),
+                        color: _isDark ? const Color(0xFF16191E) : Colors.white,
                         borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: _borderColor),
                       ),
-                      child: Icon(Icons.explore_outlined, color: _accentText, size: 20),
+                      clipBehavior: Clip.antiAlias,
+                      child: Image.asset(
+                        _isDark
+                            ? 'assets/images/qalamix_logo_dark.png'
+                            : 'assets/images/qalamix_logo.jpg',
+                        fit: BoxFit.cover,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -517,7 +527,7 @@ class _StudioScreenState extends State<StudioScreen> {
   Future<String> _persistPickedImageOffline(String sourcePath) async {
     try {
       final docsDir = await getApplicationDocumentsDirectory();
-      final imgDir = Directory(p.join(docsDir.path, 'qalam_images'));
+      final imgDir = Directory(p.join(docsDir.path, 'qalamix_images'));
       if (!imgDir.existsSync()) imgDir.createSync(recursive: true);
       final ext = p.extension(sourcePath).isEmpty ? '.jpg' : p.extension(sourcePath);
       final destPath = p.join(imgDir.path, 'img_${DateTime.now().microsecondsSinceEpoch}$ext');
@@ -897,7 +907,7 @@ class _StudioScreenState extends State<StudioScreen> {
         );
         if (bytes == null) throw Exception('Canvas capture failed');
         final ext = format == 'jpg' ? 'jpg' : 'png';
-        final fileName = 'qalam_export_${DateTime.now().millisecondsSinceEpoch}.$ext';
+        final fileName = 'qalamix_export_${DateTime.now().millisecondsSinceEpoch}.$ext';
         final tmpDir = await getTemporaryDirectory();
         final tmpPath = p.join(tmpDir.path, fileName);
         await File(tmpPath).writeAsBytes(bytes);
@@ -1128,7 +1138,7 @@ class _StudioScreenState extends State<StudioScreen> {
                           _shareProjectFile(_project);
                         },
                         icon: Icon(Icons.folder_shared_outlined, size: 18, color: _accentText),
-                        label: const Text('Share Editable Project (.qalam.json)'),
+                        label: const Text('Share Editable Project (.qalamix.json)'),
                       ),
                     ),
                   ],
@@ -1544,7 +1554,9 @@ class _StudioScreenState extends State<StudioScreen> {
               ),
               clipBehavior: Clip.antiAlias,
               child: Image.asset(
-                'assets/images/qalamix_logo.jpg',
+                _isDark
+                    ? 'assets/images/qalamix_logo_dark.png'
+                    : 'assets/images/qalamix_logo.jpg',
                 fit: BoxFit.cover,
               ),
             ),
@@ -2268,43 +2280,77 @@ class _StudioScreenState extends State<StudioScreen> {
           ),
           const SizedBox(height: 10),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: _inputBg,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: _borderColor),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Quick Align', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
                 Row(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _compactLayerIcon(Icons.align_horizontal_left_rounded, 'Align Left', () => setState(() {
-                      layer.x = 0;
-                      _clampLayerInPage(layer);
-                    })),
-                    _compactLayerIcon(Icons.align_horizontal_center_rounded, 'Center H', () => setState(() {
-                      layer.x = (_page.width - layer.width) / 2;
-                      _clampLayerInPage(layer);
-                    })),
-                    _compactLayerIcon(Icons.align_horizontal_right_rounded, 'Align Right', () => setState(() {
-                      layer.x = _page.width - layer.width;
-                      _clampLayerInPage(layer);
-                    })),
-                    _compactLayerIcon(Icons.align_vertical_top_rounded, 'Align Top', () => setState(() {
-                      layer.y = 0;
-                      _clampLayerInPage(layer);
-                    })),
-                    _compactLayerIcon(Icons.align_vertical_center_rounded, 'Middle V', () => setState(() {
-                      layer.y = (_page.height - layer.height) / 2;
-                      _clampLayerInPage(layer);
-                    })),
-                    _compactLayerIcon(Icons.align_vertical_bottom_rounded, 'Align Bottom', () => setState(() {
-                      layer.y = _page.height - layer.height;
-                      _clampLayerInPage(layer);
-                    })),
+                    Text('Align Layer on Canvas', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        layer.x = (_page.width - layer.width) / 2;
+                        layer.y = (_page.height - layer.height) / 2;
+                        _clampLayerInPage(layer);
+                      }),
+                      child: Text('Center Both', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _accentText)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _canvasAlignBtn(Icons.align_horizontal_left_rounded, 'Left', () => setState(() {
+                        layer.x = 0;
+                        _clampLayerInPage(layer);
+                      })),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _canvasAlignBtn(Icons.align_horizontal_center_rounded, 'Center', () => setState(() {
+                        layer.x = (_page.width - layer.width) / 2;
+                        _clampLayerInPage(layer);
+                      })),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _canvasAlignBtn(Icons.align_horizontal_right_rounded, 'Right', () => setState(() {
+                        layer.x = _page.width - layer.width;
+                        _clampLayerInPage(layer);
+                      })),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _canvasAlignBtn(Icons.align_vertical_top_rounded, 'Top', () => setState(() {
+                        layer.y = 0;
+                        _clampLayerInPage(layer);
+                      })),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _canvasAlignBtn(Icons.align_vertical_center_rounded, 'Middle', () => setState(() {
+                        layer.y = (_page.height - layer.height) / 2;
+                        _clampLayerInPage(layer);
+                      })),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _canvasAlignBtn(Icons.align_vertical_bottom_rounded, 'Bottom', () => setState(() {
+                        layer.y = _page.height - layer.height;
+                        _clampLayerInPage(layer);
+                      })),
+                    ),
                   ],
                 ),
               ],
@@ -2571,31 +2617,68 @@ class _StudioScreenState extends State<StudioScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          Text('Alignment & Direction', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Text Alignment', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
+          Row(
             children: [
-              _choicePill(
-                label: 'Left',
-                selected: (layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left)) == TextAlign.left,
-                onTap: () => setState(() => layer.textAlign = TextAlign.left),
+              Expanded(
+                child: _textAlignBtn(
+                  Icons.format_align_left_rounded,
+                  'Left',
+                  (layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left)) == TextAlign.left,
+                  () => setState(() => layer.textAlign = TextAlign.left),
+                ),
               ),
-              _choicePill(
-                label: 'Center',
-                selected: layer.textAlign == TextAlign.center,
-                onTap: () => setState(() => layer.textAlign = TextAlign.center),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _textAlignBtn(
+                  Icons.format_align_center_rounded,
+                  'Center',
+                  layer.textAlign == TextAlign.center,
+                  () => setState(() => layer.textAlign = TextAlign.center),
+                ),
               ),
-              _choicePill(
-                label: 'Right',
-                selected: (layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left)) == TextAlign.right,
-                onTap: () => setState(() => layer.textAlign = TextAlign.right),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _textAlignBtn(
+                  Icons.format_align_right_rounded,
+                  'Right',
+                  (layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left)) == TextAlign.right,
+                  () => setState(() => layer.textAlign = TextAlign.right),
+                ),
               ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _textAlignBtn(
+                  Icons.format_align_justify_rounded,
+                  'Justify',
+                  layer.textAlign == TextAlign.justify,
+                  () => setState(() => layer.textAlign = TextAlign.justify),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text('Script Direction:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+              const SizedBox(width: 8),
               _choicePill(
-                label: layer.isRtl ? 'RTL (Urdu)' : 'LTR (Eng)',
-                selected: true,
-                onTap: () => setState(() => layer.isRtl = !layer.isRtl),
+                label: 'RTL (Urdu/Arabic)',
+                selected: layer.isRtl,
+                onTap: () => setState(() {
+                  layer.isRtl = true;
+                  layer.textAlign ??= TextAlign.right;
+                }),
+              ),
+              const SizedBox(width: 6),
+              _choicePill(
+                label: 'LTR (English)',
+                selected: !layer.isRtl,
+                onTap: () => setState(() {
+                  layer.isRtl = false;
+                  layer.textAlign ??= TextAlign.left;
+                }),
               ),
             ],
           ),
@@ -2867,6 +2950,70 @@ class _StudioScreenState extends State<StudioScreen> {
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             color: selected ? Colors.black : _textColor,
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _canvasAlignBtn(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _borderColor),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 15, color: _accentText),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _textColor),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _textAlignBtn(IconData icon, String label, bool selected, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        decoration: BoxDecoration(
+          color: selected ? _amber : _inputBg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: selected ? _amber : _borderColor),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 14, color: selected ? Colors.black : _subColor),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: selected ? Colors.black : _textColor,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -4201,7 +4348,7 @@ class _StudioScreenState extends State<StudioScreen> {
           }
         }
         final bundle = <String, dynamic>{
-          'format': 'qalam_project_v1',
+          'format': 'qalamix_project_v1',
           'exportedAt': DateTime.now().millisecondsSinceEpoch,
           'project': jsonDecode(proj.encode()),
           'embeddedImages': embedded,
@@ -4210,7 +4357,7 @@ class _StudioScreenState extends State<StudioScreen> {
             .toLowerCase()
             .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
             .replaceAll(RegExp(r'^-|-$'), '');
-        final fileName = '${safeName.isEmpty ? "qalam-project" : safeName}.qalam.json';
+        final fileName = '${safeName.isEmpty ? "qalamix-project" : safeName}.qalamix.json';
         final tmpDir = await getTemporaryDirectory();
         final outPath = p.join(tmpDir.path, fileName);
         await File(outPath).writeAsString(jsonEncode(bundle));
@@ -4236,7 +4383,7 @@ class _StudioScreenState extends State<StudioScreen> {
       }
       final bytes = base64Decode(raw);
       final docsDir = await getApplicationDocumentsDirectory();
-      final imgDir = Directory(p.join(docsDir.path, 'qalam_images'));
+      final imgDir = Directory(p.join(docsDir.path, 'qalamix_images'));
       if (!imgDir.existsSync()) imgDir.createSync(recursive: true);
       final dest = p.join(imgDir.path, '${prefix}_${DateTime.now().microsecondsSinceEpoch}$ext');
       await File(dest).writeAsBytes(bytes);
@@ -4349,7 +4496,7 @@ class _StudioScreenState extends State<StudioScreen> {
 
       Map<String, dynamic> projMap;
       final embedded = <String, String>{};
-      if ((decoded['format'] == 'qalam_project_v1' || decoded['format'] == 'qalamix_project_v1') && decoded['project'] is Map<String, dynamic>) {
+      if ((decoded['format'] == 'qalamix_project_v1' || decoded['format'] == ('qalam' '_project_v1')) && decoded['project'] is Map<String, dynamic>) {
         projMap = Map<String, dynamic>.from(decoded['project'] as Map);
         final embRaw = decoded['embeddedImages'];
         if (embRaw is Map) {
@@ -4550,7 +4697,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     ),
                     onPressed: _importProjectFile,
                     icon: const Icon(Icons.file_open_outlined, size: 18),
-                    label: const Text('Import .qalam', style: TextStyle(fontWeight: FontWeight.w700)),
+                    label: const Text('Import .qalamix', style: TextStyle(fontWeight: FontWeight.w700)),
                   ),
                 ),
               ],
@@ -4652,7 +4799,7 @@ class _StudioScreenState extends State<StudioScreen> {
                         }),
                         _compactLayerIcon(
                           Icons.share_outlined,
-                          'Share Project (.qalam.json)',
+                          'Share Project (.qalamix.json)',
                           () => _shareProjectFile(proj),
                           color: _accentText,
                         ),
@@ -5057,7 +5204,7 @@ class _StudioScreenState extends State<StudioScreen> {
         final bytes = await _renderSignaturePngBytes(forceTransparent: true);
         if (bytes == null) throw Exception('Signature render failed');
         final docsDir = await getApplicationDocumentsDirectory();
-        final assetsDir = Directory(p.join(docsDir.path, 'qalam_assets'));
+        final assetsDir = Directory(p.join(docsDir.path, 'qalamix_assets'));
         if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
         final filePath = p.join(assetsDir.path, 'sig_${DateTime.now().microsecondsSinceEpoch}.png');
         await File(filePath).writeAsBytes(bytes);
@@ -5096,7 +5243,7 @@ class _StudioScreenState extends State<StudioScreen> {
       action: () async {
         final bytes = await _renderSignaturePngBytes();
         if (bytes == null) throw Exception('Signature render failed');
-        final fileName = 'qalam_signature_${DateTime.now().millisecondsSinceEpoch}.png';
+        final fileName = 'qalamix_signature_${DateTime.now().millisecondsSinceEpoch}.png';
         final tmpDir = await getTemporaryDirectory();
         final tmpPath = p.join(tmpDir.path, fileName);
         await File(tmpPath).writeAsBytes(bytes);
@@ -5135,7 +5282,7 @@ class _StudioScreenState extends State<StudioScreen> {
     final bytes = await _renderStampPngBytes(forceTransparent: true);
     if (bytes == null) return;
     final docsDir = await getApplicationDocumentsDirectory();
-    final assetsDir = Directory(p.join(docsDir.path, 'qalam_assets'));
+    final assetsDir = Directory(p.join(docsDir.path, 'qalamix_assets'));
     if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
     final filePath = p.join(assetsDir.path, 'stamp_${DateTime.now().microsecondsSinceEpoch}.png');
     await File(filePath).writeAsBytes(bytes);
@@ -5175,7 +5322,7 @@ class _StudioScreenState extends State<StudioScreen> {
       action: () async {
         final bytes = await _renderStampPngBytes();
         if (bytes == null) throw Exception('Stamp render failed');
-        final fileName = 'qalam_stamp_${DateTime.now().millisecondsSinceEpoch}.png';
+        final fileName = 'qalamix_stamp_${DateTime.now().millisecondsSinceEpoch}.png';
         final tmpDir = await getTemporaryDirectory();
         final tmpPath = p.join(tmpDir.path, fileName);
         await File(tmpPath).writeAsBytes(bytes);
@@ -6057,7 +6204,7 @@ class _StudioScreenState extends State<StudioScreen> {
     } catch (_) {}
   }
 
-  Future<Uint8List> _fetchRemoteFontBytes(String url) async {
+  Future<Uint8List> _downloadBytesRaw(String url) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
     try {
       final req = await client.getUrl(Uri.parse(url));
@@ -6070,10 +6217,158 @@ class _StudioScreenState extends State<StudioScreen> {
         chunks.addAll(chunk);
       }
       final bytes = Uint8List.fromList(chunks);
-      if (bytes.length < 1024) throw Exception('Invalid font file');
+      if (bytes.length < 512) throw Exception('Invalid payload');
       return bytes;
     } finally {
       client.close(force: true);
+    }
+  }
+
+  Future<String?> _resolveGoogleCssTtfUrl(String familyName) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 12);
+    try {
+      final encoded = Uri.encodeComponent(familyName.trim()).replaceAll('%20', '+');
+      final req = await client.getUrl(
+        Uri.parse('https://fonts.googleapis.com/css2?family=$encoded&display=swap'),
+      );
+      req.headers.set(HttpHeaders.userAgentHeader, 'Dart/3.4 (dart:io)');
+      final resp = await req.close();
+      if (resp.statusCode < 200 || resp.statusCode >= 300) return null;
+      final css = await utf8.decoder.bind(resp).join();
+      final match = RegExp(r'https://[^\s)]+\.ttf').firstMatch(css);
+      return match?.group(0);
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<Uint8List> _fetchRemoteFontBytes(String primaryUrl, {String? fallbackFamilyName}) async {
+    if (primaryUrl.isNotEmpty) {
+      try {
+        final raw = await _downloadBytesRaw(primaryUrl);
+        if (raw.length >= 1024) return raw;
+      } catch (_) {}
+    }
+    if (fallbackFamilyName != null && fallbackFamilyName.trim().isNotEmpty) {
+      final ttfUrl = await _resolveGoogleCssTtfUrl(fallbackFamilyName);
+      if (ttfUrl != null) {
+        final raw = await _downloadBytesRaw(ttfUrl);
+        if (raw.length >= 1024) return raw;
+      }
+    }
+    throw Exception('Could not download font from Google Fonts');
+  }
+
+  List<_FontCatalogEntry> _mapGoogleDirectoryJson(List<dynamic> rawList) {
+    final result = <_FontCatalogEntry>[];
+    for (final item in rawList) {
+      if (item is! Map) continue;
+      final id = (item['id'] ?? '').toString();
+      final familyName = (item['family'] ?? '').toString();
+      if (id.isEmpty || familyName.isEmpty) continue;
+      final subsetsRaw = item['subsets'];
+      final subsets = subsetsRaw is List ? subsetsRaw.map((e) => e.toString()).toList() : const ['latin'];
+      final weightsRaw = item['weights'];
+      final weights = weightsRaw is List ? weightsRaw.whereType<num>().map((e) => e.toInt()).toList() : [400];
+      final defSubset = (item['defSubset'] ?? (subsets.contains('latin') ? 'latin' : subsets.first)).toString();
+      final category = (item['category'] ?? 'sans-serif').toString().toLowerCase();
+      final lower = familyName.toLowerCase();
+      final isArabic = subsets.contains('arabic');
+      String script = 'English';
+      if (isArabic) {
+        script = (lower.contains('nastaliq') || lower.contains('urdu') || lower.contains('gulzar'))
+            ? 'Urdu'
+            : 'Arabic';
+      } else if (category == 'handwriting') {
+        script = 'Calligraphy';
+      }
+      final w = weights.contains(400) ? 400 : (weights.isNotEmpty ? weights.first : 400);
+      final safeFamily = 'GF_${id.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+      result.add(_FontCatalogEntry(
+        family: safeFamily,
+        name: familyName,
+        script: script,
+        sample: isArabic
+            ? 'خوش آمدید — اردو و عربی خطاطی'
+            : (script == 'Calligraphy' ? 'Signature & Handwritten Style' : 'Qalamix Studio — AaBbCc 123'),
+        isRtl: isArabic,
+        defaultLineHeight: (lower.contains('nastaliq') || lower.contains('gulzar'))
+            ? 2.15
+            : (isArabic ? 1.75 : 1.35),
+        bundled: false,
+        ttfUrl: 'https://cdn.jsdelivr.net/fontsource/fonts/$id@latest/$defSubset-$w-normal.ttf',
+      ));
+    }
+    return result;
+  }
+
+  Future<void> _ensureGoogleFontsDirectoryLoaded([void Function(void Function())? setModalState]) async {
+    if (_googleDirectoryFonts.isNotEmpty || _loadingGoogleDirectory) return;
+    _loadingGoogleDirectory = true;
+    setModalState?.call(() {});
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final cacheFile = File(p.join(docsDir.path, 'qalamix_gf_directory.json'));
+      if (cacheFile.existsSync()) {
+        final age = DateTime.now().difference(cacheFile.lastModifiedSync());
+        if (age.inHours < 24) {
+          final parsed = jsonDecode(await cacheFile.readAsString());
+          if (parsed is List && parsed.isNotEmpty) {
+            _googleDirectoryFonts = _mapGoogleDirectoryJson(parsed);
+            if (mounted) setState(() {});
+            setModalState?.call(() {});
+            return;
+          }
+        }
+      }
+
+      final bytes = await _downloadBytesRaw('https://api.fontsource.org/v1/fonts');
+      final decoded = jsonDecode(utf8.decode(bytes));
+      if (decoded is List && decoded.isNotEmpty) {
+        final slim = decoded
+            .whereType<Map>()
+            .map((e) => {
+                  'id': e['id'],
+                  'family': e['family'],
+                  'subsets': e['subsets'],
+                  'weights': e['weights'],
+                  'defSubset': e['defSubset'],
+                  'category': e['category'],
+                })
+            .toList();
+        await cacheFile.writeAsString(jsonEncode(slim));
+        _googleDirectoryFonts = _mapGoogleDirectoryJson(slim);
+        if (mounted) setState(() {});
+      }
+    } catch (_) {
+    } finally {
+      _loadingGoogleDirectory = false;
+      setModalState?.call(() {});
+    }
+  }
+
+  Future<void> _preloadPreviewFont(
+    _FontCatalogEntry entry,
+    void Function(void Function()) setModalState,
+  ) async {
+    if (entry.bundled ||
+        _loadedFontFamilies.contains(entry.family) ||
+        _previewLoadingFamilies.contains(entry.family)) {
+      return;
+    }
+    _previewLoadingFamilies.add(entry.family);
+    try {
+      final raw = await _fetchRemoteFontBytes(entry.ttfUrl, fallbackFamilyName: entry.name);
+      final loader = FontLoader(entry.family)
+        ..addFont(Future.value(ByteData.sublistView(raw)));
+      await loader.load();
+      _loadedFontFamilies.add(entry.family);
+      setModalState(() {});
+    } catch (_) {
+    } finally {
+      _previewLoadingFamilies.remove(entry.family);
     }
   }
 
@@ -6085,7 +6380,7 @@ class _StudioScreenState extends State<StudioScreen> {
         savedTitle: '${entry.name} Ready',
         savedSubtitle: 'Installed & applied to Studio',
         action: () async {
-          final raw = await _fetchRemoteFontBytes(entry.ttfUrl);
+          final raw = await _fetchRemoteFontBytes(entry.ttfUrl, fallbackFamilyName: entry.name);
           final docsDir = await getApplicationDocumentsDirectory();
           final dir = Directory(p.join(docsDir.path, 'qalamix_fonts'));
           if (!dir.existsSync()) dir.createSync(recursive: true);
@@ -6158,7 +6453,7 @@ class _StudioScreenState extends State<StudioScreen> {
         if (existing != null && File(existing.filePath).existsSync()) {
           bytes = await File(existing.filePath).readAsBytes();
         } else {
-          bytes = await _fetchRemoteFontBytes(entry.ttfUrl);
+          bytes = await _fetchRemoteFontBytes(entry.ttfUrl, fallbackFamilyName: entry.name);
         }
         final fname = '${entry.family}.ttf';
         if (Platform.isAndroid) {
@@ -6252,6 +6547,7 @@ class _StudioScreenState extends State<StudioScreen> {
     String searchQuery = '';
     double previewSize = 22.0;
     final sampleCtrl = TextEditingController(text: 'خوش آمدید · Qalamix Typography');
+    bool triggeredDir = false;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -6263,24 +6559,38 @@ class _StudioScreenState extends State<StudioScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
-            final entries = <_FontCatalogEntry>[
-              ..._kFontsCatalog,
-              ..._customFonts
-                  .where((c) => !_kFontsCatalog.any((k) => k.family == c.family))
-                  .map((c) => _FontCatalogEntry(
-                        family: c.family,
-                        name: c.name,
-                        script: c.script,
-                        sample: c.isRtl ? 'خوش آمدید — قلمکس' : 'Custom Uploaded Font Preview',
-                        isRtl: c.isRtl,
-                        defaultLineHeight: c.defaultLineHeight,
-                        bundled: true,
-                        ttfUrl: '',
-                      )),
-            ];
+            if (!triggeredDir) {
+              triggeredDir = true;
+              Future.microtask(() => _ensureGoogleFontsDirectoryLoaded(setModalState));
+            }
+            final seenNames = <String>{};
+            final entries = <_FontCatalogEntry>[];
+            for (final c in _customFonts) {
+              if (_kFontsCatalog.any((k) => k.family == c.family)) continue;
+              seenNames.add(c.name.toLowerCase());
+              entries.add(_FontCatalogEntry(
+                family: c.family,
+                name: c.name,
+                script: c.script,
+                sample: c.isRtl ? 'خوش آمدید — قلمکس' : 'Installed Custom Font Preview',
+                isRtl: c.isRtl,
+                defaultLineHeight: c.defaultLineHeight,
+                bundled: true,
+                ttfUrl: 'https://cdn.jsdelivr.net/fontsource/fonts/${c.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-')}@latest/latin-400-normal.ttf',
+              ));
+            }
+            for (final k in _kFontsCatalog) {
+              seenNames.add(k.name.toLowerCase());
+              entries.add(k);
+            }
+            for (final g in _googleDirectoryFonts) {
+              if (seenNames.add(g.name.toLowerCase())) {
+                entries.add(g);
+              }
+            }
 
-            final filtered = entries.where((e) {
-              final q = searchQuery.trim().toLowerCase();
+            final q = searchQuery.trim().toLowerCase();
+            var matched = entries.where((e) {
               if (q.isNotEmpty && !e.name.toLowerCase().contains(q) && !e.script.toLowerCase().contains(q)) {
                 return false;
               }
@@ -6292,6 +6602,43 @@ class _StudioScreenState extends State<StudioScreen> {
               }
               return true;
             }).toList();
+
+            if (q.isNotEmpty) {
+              matched.sort((a, b) {
+                final an = a.name.toLowerCase();
+                final bn = b.name.toLowerCase();
+                final aRank = an == q ? 0 : (an.startsWith(q) ? 1 : 2);
+                final bRank = bn == q ? 0 : (bn.startsWith(q) ? 1 : 2);
+                if (aRank != bRank) return aRank - bRank;
+                final aReady = (a.bundled || _loadedFontFamilies.contains(a.family)) ? 0 : 1;
+                final bReady = (b.bundled || _loadedFontFamilies.contains(b.family)) ? 0 : 1;
+                return aReady.compareTo(bReady);
+              });
+            }
+
+            var filtered = matched.take(60).toList();
+            if (q.isNotEmpty && filtered.isEmpty) {
+              final rawName = searchQuery.trim();
+              final slug = rawName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-|-$'), '');
+              filtered = [
+                _FontCatalogEntry(
+                  family: 'GF_${slug.replaceAll('-', '_')}',
+                  name: rawName,
+                  script: 'English',
+                  sample: 'Qalamix Studio — $rawName',
+                  isRtl: false,
+                  defaultLineHeight: 1.35,
+                  bundled: false,
+                  ttfUrl: slug.isNotEmpty ? 'https://cdn.jsdelivr.net/fontsource/fonts/$slug@latest/latin-400-normal.ttf' : '',
+                ),
+              ];
+            }
+
+            if (q.length >= 2) {
+              for (final topItem in filtered.take(3)) {
+                Future.microtask(() => _preloadPreviewFont(topItem, setModalState));
+              }
+            }
 
             return SafeArea(
               child: DraggableScrollableSheet(
@@ -6332,7 +6679,12 @@ class _StudioScreenState extends State<StudioScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text('Qalamix Fonts Library', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-                                Text('Preview, Install, Download .TTF & Import Device Fonts', style: TextStyle(fontSize: 11, color: _subColor)),
+                                Text(
+                                  _loadingGoogleDirectory
+                                      ? 'Loading full Google Fonts directory...'
+                                      : '${entries.length} Google Fonts · Search, Preview & Save .TTF',
+                                  style: TextStyle(fontSize: 11, color: _subColor),
+                                ),
                               ],
                             ),
                           ),
@@ -6348,7 +6700,7 @@ class _StudioScreenState extends State<StudioScreen> {
                           Expanded(
                             child: TextField(
                               decoration: const InputDecoration(
-                                hintText: 'Search Urdu, Arabic, English fonts...',
+                                hintText: 'Search any Google Font (e.g. Roboto, Poppins, Amiri)...',
                                 prefixIcon: Icon(Icons.search_rounded, size: 19),
                                 isDense: true,
                               ),
@@ -6612,7 +6964,7 @@ class _StudioScreenState extends State<StudioScreen> {
                   savedSubtitle: '${_scannedPages.length} page(s) saved',
                   action: () async {
                     final pdfBytes = await buildScannerPdfBytes();
-                    final fileName = 'qalam_scan_${DateTime.now().millisecondsSinceEpoch}.pdf';
+                    final fileName = 'qalamix_scan_${DateTime.now().millisecondsSinceEpoch}.pdf';
                     if (Platform.isAndroid) {
                       try {
                         savedLoc = await _mediaChannel.invokeMethod<String>('savePdfToDownloads', {
@@ -6667,7 +7019,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     final tmpDir = await getTemporaryDirectory();
                     for (int i = 0; i < _scannedPages.length; i++) {
                       final pg = _scannedPages[i];
-                      final fname = 'qalam_scan_${DateTime.now().millisecondsSinceEpoch}_p${i + 1}.jpg';
+                      final fname = 'qalamix_scan_${DateTime.now().millisecondsSinceEpoch}_p${i + 1}.jpg';
                       lastSaved = await _saveBytesToDeviceGallery(pg.previewBytes, fname);
                       lastTmp = p.join(tmpDir.path, fname);
                       await File(lastTmp).writeAsBytes(pg.previewBytes);
@@ -6699,7 +7051,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 action: () async {
                   final cleanName = 'scan_page_${DateTime.now().millisecondsSinceEpoch}.jpg';
                   final docs = await getApplicationDocumentsDirectory();
-                  final outDir = Directory(p.join(docs.path, 'qalam_media'));
+                  final outDir = Directory(p.join(docs.path, 'qalamix_media'));
                   if (!outDir.existsSync()) outDir.createSync(recursive: true);
                   final outPath = p.join(outDir.path, cleanName);
                   await File(outPath).writeAsBytes(activePage.previewBytes);

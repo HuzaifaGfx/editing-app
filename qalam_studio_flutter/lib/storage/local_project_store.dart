@@ -11,7 +11,7 @@ class LocalProjectStore {
   Future<Database> get database async {
     if (_db != null) return _db!;
     final docsDir = await getApplicationDocumentsDirectory();
-    final dbPath = p.join(docsDir.path, 'qalam_offline_projects.db');
+    final dbPath = p.join(docsDir.path, 'qalamix_offline_projects.db');
     _db = await openDatabase(
       dbPath,
       version: 1,

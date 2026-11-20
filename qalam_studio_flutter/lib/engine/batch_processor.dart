@@ -101,7 +101,7 @@ List<String> _processImagesIsolate(BatchJobRequest req) {
 
     final usePng = req.removeWhiteTolerance > 0;
     final ext = usePng ? 'png' : 'jpg';
-    final outName = 'qalam_${p.basenameWithoutExtension(inputPath)}.$ext';
+    final outName = 'qalamix_${p.basenameWithoutExtension(inputPath)}.$ext';
     final outPath = p.join(req.outputDir, outName);
     final encoded = usePng ? img.encodePng(decoded) : img.encodeJpg(decoded, quality: req.quality);
     File(outPath).writeAsBytesSync(encoded);

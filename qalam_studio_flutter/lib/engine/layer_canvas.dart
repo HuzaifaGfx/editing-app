@@ -619,17 +619,26 @@ class _LayerCanvasState extends State<LayerCanvas> {
         );
       }
 
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(layer.borderRadius),
-        child: Transform.flip(
-          flipX: layer.flipX,
-          flipY: layer.flipY,
-          child: ColorFiltered(
-            colorFilter: buildLayerColorFilter(layer.filters),
-            child: imgWidget,
-          ),
-        ),
-      );
+      final hasCustomFilter = !_filtersAreNeutral(layer.filters);
+      final Widget filteredImg = hasCustomFilter
+          ? _LayerColorFilter(
+              colorFilter: buildLayerColorFilter(layer.filters),
+              child: imgWidget,
+            )
+          : imgWidget;
+      final Widget flippedImg = (layer.flipX || layer.flipY)
+          ? Transform.flip(
+              flipX: layer.flipX,
+              flipY: layer.flipY,
+              child: filteredImg,
+            )
+          : filteredImg;
+      return layer.borderRadius > 0
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(layer.borderRadius),
+              child: flippedImg,
+            )
+          : flippedImg;
     }
 
     if (layer.type == LayerType.text) {
@@ -638,7 +647,10 @@ class _LayerCanvasState extends State<LayerCanvas> {
           layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left);
       final alignBox = effectiveAlign == TextAlign.center
           ? Alignment.topCenter
-          : (effectiveAlign == TextAlign.right ? Alignment.topRight : Alignment.topLeft);
+          : (effectiveAlign == TextAlign.right ||
+                  (effectiveAlign == TextAlign.justify && layer.isRtl)
+              ? Alignment.topRight
+              : Alignment.topLeft);
       final hasBg = layer.textBgColor.alpha > 0;
       return Directionality(
         textDirection: layer.isRtl ? TextDirection.rtl : TextDirection.ltr,
@@ -652,17 +664,20 @@ class _LayerCanvasState extends State<LayerCanvas> {
               : null,
           child: Align(
             alignment: alignBox,
-            child: Text(
-              layer.text,
-              textAlign: effectiveAlign,
-              style: TextStyle(
-                fontFamily: layer.fontFamily,
-                fontSize: layer.fontSize,
-                fontWeight: FontWeight.values[weightIndex],
-                fontVariations: [FontVariation('wght', layer.fontWeight.toDouble())],
-                height: layer.lineHeight,
-                color: layer.textColor,
-                shadows: const [],
+            child: SizedBox(
+              width: double.infinity,
+              child: Text(
+                layer.text,
+                textAlign: effectiveAlign,
+                style: TextStyle(
+                  fontFamily: layer.fontFamily,
+                  fontSize: layer.fontSize,
+                  fontWeight: FontWeight.values[weightIndex],
+                  fontVariations: [FontVariation('wght', layer.fontWeight.toDouble())],
+                  height: layer.lineHeight,
+                  color: layer.textColor,
+                  shadows: const [],
+                ),
               ),
             ),
           ),
@@ -968,11 +983,57 @@ class _RenderLayerBlend extends RenderProxyBox {
       context.paintChild(child!, offset);
       return;
     }
-    final paint = Paint()..blendMode = _blendMode;
-    if (_opacity < 0.999) {
-      paint.color = Color.fromRGBO(255, 255, 255, _opacity);
-    }
+    final alpha = (_opacity * 255).round().clamp(0, 255);
+    final paint = Paint()
+      ..blendMode = _blendMode
+      ..color = Color.fromARGB(alpha, 255, 255, 255);
     context.canvas.saveLayer(offset & size, paint);
+    context.paintChild(child!, offset);
+    context.canvas.restore();
+  }
+}
+
+bool _filtersAreNeutral(FilterSettings f) {
+  return (f.brightness - 1.0).abs() < 0.005 &&
+      (f.contrast - 1.0).abs() < 0.005 &&
+      (f.saturate - 1.0).abs() < 0.005 &&
+      f.sepia < 0.005 &&
+      f.grayscale < 0.005 &&
+      !f.blackAndWhite;
+}
+
+class _LayerColorFilter extends SingleChildRenderObjectWidget {
+  final ColorFilter colorFilter;
+  const _LayerColorFilter({
+    required this.colorFilter,
+    super.child,
+  });
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderLayerColorFilter(colorFilter);
+
+  @override
+  void updateRenderObject(
+      BuildContext context, covariant _RenderLayerColorFilter renderObject) {
+    renderObject.colorFilter = colorFilter;
+  }
+}
+
+class _RenderLayerColorFilter extends RenderProxyBox {
+  ColorFilter _colorFilter;
+  _RenderLayerColorFilter(this._colorFilter);
+
+  set colorFilter(ColorFilter value) {
+    if (_colorFilter == value) return;
+    _colorFilter = value;
+    markNeedsPaint();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child == null) return;
+    context.canvas.saveLayer(offset & size, Paint()..colorFilter = _colorFilter);
     context.paintChild(child!, offset);
     context.canvas.restore();
   }

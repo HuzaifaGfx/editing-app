@@ -5,11 +5,11 @@ final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.dark);
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const QalamStudioApp());
+  runApp(const QalamixApp());
 }
 
-class QalamStudioApp extends StatelessWidget {
-  const QalamStudioApp({super.key});
+class QalamixApp extends StatelessWidget {
+  const QalamixApp({super.key});
 
   @override
   Widget build(BuildContext context) {
