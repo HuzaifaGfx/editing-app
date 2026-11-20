@@ -59,8 +59,15 @@ class _LayerCanvasState extends State<LayerCanvas> {
   double _rotateStartAngle = 0.0;
   double _rotateStartDeg = 0.0;
   Offset _rotateCenterGlobal = Offset.zero;
+  Offset _panStartCanvas = Offset.zero;
   bool _snapX = false;
   bool _snapY = false;
+
+  Offset _globalToCanvas(Offset globalPos) {
+    final box = _canvasStackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return Offset.zero;
+    return box.globalToLocal(globalPos);
+  }
 
   bool get _blockLayerInteraction =>
       _activePointers.length > 1 ||
@@ -316,10 +323,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                     Positioned.fill(
                                                       child: _LayerBlendWrapper(
                                                         blendMode: layer.blendMode,
-                                                        child: Opacity(
-                                                          opacity: layer.opacity.clamp(0.0, 1.0),
-                                                          child: _buildLayerContent(layer),
-                                                        ),
+                                                        opacity: layer.opacity.clamp(0.0, 1.0),
+                                                        child: _buildLayerContent(layer),
                                                       ),
                                                     ),
                                                     if (selected)
@@ -350,9 +355,10 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                           if (_blockLayerInteraction) return;
                                                           widget.onSelectLayer(layer.id);
                                                         },
-                                                        onPanStart: (_) {
+                                                        onPanStart: (d) {
                                                           if (_blockLayerInteraction) return;
                                                           _capturePreDrag(layer);
+                                                          _panStartCanvas = _globalToCanvas(d.globalPosition);
                                                           widget.onSelectLayer(layer.id);
                                                           if (!layer.locked) widget.onInteractionStart?.call();
                                                         },
@@ -360,32 +366,28 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                             ? null
                                                             : (d) {
                                                                 if (_blockLayerInteraction) return;
-                                                                final scale = _transformController.value
-                                                                    .getMaxScaleOnAxis()
-                                                                    .clamp(0.4, 4.0);
+                                                                final curCanvas = _globalToCanvas(d.globalPosition);
+                                                                final totalDelta = curCanvas - _panStartCanvas;
                                                                 const minOverlap = 24.0;
                                                                 final minX = -(layer.width - minOverlap);
                                                                 final maxX = page.width - minOverlap;
                                                                 final minY = -(layer.height - minOverlap);
                                                                 final maxY = page.height - minOverlap;
-                                                                var nextX = (layer.x + d.delta.dx / scale).clamp(minX, maxX).toDouble();
-                                                                var nextY = (layer.y + d.delta.dy / scale).clamp(minY, maxY).toDouble();
+                                                                var nextX = (_preDragX + totalDelta.dx).clamp(minX, maxX).toDouble();
+                                                                var nextY = (_preDragY + totalDelta.dy).clamp(minY, maxY).toDouble();
                                                                 final cx = nextX + layer.width / 2;
                                                                 final cy = nextY + layer.height / 2;
-                                                                const snapTol = 8.0;
+                                                                const snapTol = 10.0;
                                                                 final hitX = (cx - page.width / 2).abs() <= snapTol;
                                                                 final hitY = (cy - page.height / 2).abs() <= snapTol;
                                                                 if (hitX) nextX = (page.width / 2 - layer.width / 2).clamp(minX, maxX).toDouble();
                                                                 if (hitY) nextY = (page.height / 2 - layer.height / 2).clamp(minY, maxY).toDouble();
-                                                                layer.x = nextX;
-                                                                layer.y = nextY;
-                                                                if (_snapX != hitX || _snapY != hitY) {
-                                                                  setState(() {
-                                                                    _snapX = hitX;
-                                                                    _snapY = hitY;
-                                                                  });
-                                                                }
-                                                                widget.onUpdateLayer(layer);
+                                                                setState(() {
+                                                                  layer.x = nextX;
+                                                                  layer.y = nextY;
+                                                                  _snapX = hitX;
+                                                                  _snapY = hitY;
+                                                                });
                                                               },
                                                         onPanEnd: (_) {
                                                           if (_snapX || _snapY) {
@@ -394,6 +396,16 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                               _snapY = false;
                                                             });
                                                           }
+                                                          widget.onUpdateLayer(layer);
+                                                        },
+                                                        onPanCancel: () {
+                                                          if (_snapX || _snapY) {
+                                                            setState(() {
+                                                              _snapX = false;
+                                                              _snapY = false;
+                                                            });
+                                                          }
+                                                          widget.onUpdateLayer(layer);
                                                         },
                                                         child: layerChild,
                                                       ),
@@ -590,14 +602,13 @@ class _LayerCanvasState extends State<LayerCanvas> {
         imgWidget = Image.memory(
           layer.processedWhiteRemovedBytes!,
           fit: fit,
-          colorBlendMode: layer.blendMode,
           gaplessPlayback: true,
         );
       } else if (layer.localImagePath != null && File(layer.localImagePath!).existsSync()) {
         imgWidget = Image.file(
           File(layer.localImagePath!),
           fit: fit,
-          colorBlendMode: layer.blendMode,
+          gaplessPlayback: true,
         );
       }
 
@@ -740,9 +751,10 @@ class _LayerCanvasState extends State<LayerCanvas> {
                   if ((deg - nearest90).abs() <= 3.0) {
                     deg = nearest90;
                   }
-                  layer.rotation = deg;
-                  widget.onUpdateLayer(layer);
+                  setState(() => layer.rotation = deg);
                 },
+                onPanEnd: (_) => widget.onUpdateLayer(layer),
+                onPanCancel: () => widget.onUpdateLayer(layer),
                 child: SizedBox(
                   width: hitSize,
                   height: hitSize,
@@ -775,34 +787,36 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 alignment: Alignment.bottomLeft,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onPanStart: (_) {
+                  onPanStart: (d) {
                     if (_blockLayerInteraction) return;
                     _capturePreDrag(layer);
+                    _panStartCanvas = _globalToCanvas(d.globalPosition);
                     widget.onInteractionStart?.call();
                   },
                   onPanUpdate: (d) {
                     if (_blockLayerInteraction) return;
-                    final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.4, 4.0);
-                    final rawDx = d.delta.dx / scale;
-                    final rawDy = d.delta.dy / scale;
-                    final rad = layer.rotation * math.pi / 180.0;
-                    final localDx = rawDx * math.cos(-rad) - rawDy * math.sin(-rad);
-                    final localDy = rawDx * math.sin(-rad) + rawDy * math.cos(-rad);
+                    final total = _globalToCanvas(d.globalPosition) - _panStartCanvas;
+                    final rad = _preDragRot * math.pi / 180.0;
+                    final localDx = total.dx * math.cos(-rad) - total.dy * math.sin(-rad);
+                    final localDy = total.dx * math.sin(-rad) + total.dy * math.cos(-rad);
 
-                    final prevW = layer.width;
-                    final nextW = (prevW - localDx).clamp(60.0, page.width * 2.5).toDouble();
-                    final shiftLeft = prevW - nextW;
+                    final nextW = (_preDragW - localDx).clamp(60.0, page.width * 2.5).toDouble();
+                    final nextH = (_preDragH + localDy).clamp(40.0, page.height * 2.5).toDouble();
+                    final shiftLeft = _preDragW - nextW;
                     const minOverlap = 24.0;
-                    layer.x = (layer.x + shiftLeft * math.cos(rad))
-                        .clamp(-(nextW - minOverlap), page.width - minOverlap)
-                        .toDouble();
-                    layer.y = (layer.y + shiftLeft * math.sin(rad))
-                        .clamp(-(layer.height - minOverlap), page.height - minOverlap)
-                        .toDouble();
-                    layer.width = nextW;
-                    layer.height = (layer.height + localDy).clamp(40.0, page.height * 2.5).toDouble();
-                    widget.onUpdateLayer(layer);
+                    setState(() {
+                      layer.x = (_preDragX + shiftLeft * math.cos(rad))
+                          .clamp(-(nextW - minOverlap), page.width - minOverlap)
+                          .toDouble();
+                      layer.y = (_preDragY + shiftLeft * math.sin(rad))
+                          .clamp(-(nextH - minOverlap), page.height - minOverlap)
+                          .toDouble();
+                      layer.width = nextW;
+                      layer.height = nextH;
+                    });
                   },
+                  onPanEnd: (_) => widget.onUpdateLayer(layer),
+                  onPanCancel: () => widget.onUpdateLayer(layer),
                   child: SizedBox(
                     width: hitSize,
                     height: hitSize,
@@ -834,46 +848,48 @@ class _LayerCanvasState extends State<LayerCanvas> {
               alignment: Alignment.bottomRight,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onPanStart: (_) {
+                onPanStart: (d) {
                   if (_blockLayerInteraction) return;
                   _capturePreDrag(layer);
+                  _panStartCanvas = _globalToCanvas(d.globalPosition);
                   widget.onInteractionStart?.call();
                 },
                 onPanUpdate: (d) {
                   if (_blockLayerInteraction) return;
-                  final scale = _transformController.value.getMaxScaleOnAxis().clamp(0.4, 4.0);
-                  final rawDx = d.delta.dx / scale;
-                  final rawDy = d.delta.dy / scale;
-                  final rad = -layer.rotation * math.pi / 180.0;
-                  final dx = rawDx * math.cos(rad) - rawDy * math.sin(rad);
-                  final dy = rawDx * math.sin(rad) + rawDy * math.cos(rad);
+                  final total = _globalToCanvas(d.globalPosition) - _panStartCanvas;
+                  final rad = -_preDragRot * math.pi / 180.0;
+                  final dx = total.dx * math.cos(rad) - total.dy * math.sin(rad);
+                  final dy = total.dx * math.sin(rad) + total.dy * math.cos(rad);
 
                   final availW = page.width * 3.0;
                   final availH = page.height * 3.0;
-                  if (layer.type == LayerType.image && layer.aspectLocked) {
-                    final ratio = layer.width / math.max(1.0, layer.height);
-                    final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
-                    final maxW = math.min(availW, availH * ratio);
-                    final nextW = (layer.width + delta).clamp(20.0, math.max(20.0, maxW)).toDouble();
-                    final nextH = (nextW / ratio).clamp(20.0, math.max(20.0, availH)).toDouble();
-                    layer.width = nextW;
-                    layer.height = nextH;
-                  } else if (layer.type == LayerType.text) {
-                    final ratio = layer.width / math.max(1.0, layer.height);
-                    final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
-                    final prevW = math.max(1.0, layer.width);
-                    final maxW = math.min(availW, availH * ratio);
-                    final nextW = (layer.width + delta).clamp(40.0, math.max(40.0, maxW)).toDouble();
-                    final nextH = (nextW / ratio).clamp(24.0, math.max(24.0, availH)).toDouble();
-                    layer.fontSize = (layer.fontSize * (nextW / prevW)).clamp(8.0, 600.0).toDouble();
-                    layer.width = nextW;
-                    layer.height = nextH;
-                  } else {
-                    layer.width = (layer.width + dx).clamp(20.0, availW).toDouble();
-                    layer.height = (layer.height + dy).clamp(20.0, availH).toDouble();
-                  }
-                  widget.onUpdateLayer(layer);
+                  setState(() {
+                    if (layer.type == LayerType.image && layer.aspectLocked) {
+                      final ratio = _preDragW / math.max(1.0, _preDragH);
+                      final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
+                      final maxW = math.min(availW, availH * ratio);
+                      final nextW = (_preDragW + delta).clamp(20.0, math.max(20.0, maxW)).toDouble();
+                      final nextH = (nextW / ratio).clamp(20.0, math.max(20.0, availH)).toDouble();
+                      layer.width = nextW;
+                      layer.height = nextH;
+                    } else if (layer.type == LayerType.text) {
+                      final ratio = _preDragW / math.max(1.0, _preDragH);
+                      final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
+                      final prevW = math.max(1.0, _preDragW);
+                      final maxW = math.min(availW, availH * ratio);
+                      final nextW = (_preDragW + delta).clamp(40.0, math.max(40.0, maxW)).toDouble();
+                      final nextH = (nextW / ratio).clamp(24.0, math.max(24.0, availH)).toDouble();
+                      layer.fontSize = (_preDragFontSize * (nextW / prevW)).clamp(8.0, 600.0).toDouble();
+                      layer.width = nextW;
+                      layer.height = nextH;
+                    } else {
+                      layer.width = (_preDragW + dx).clamp(20.0, availW).toDouble();
+                      layer.height = (_preDragH + dy).clamp(20.0, availH).toDouble();
+                    }
+                  });
                 },
+                onPanEnd: (_) => widget.onUpdateLayer(layer),
+                onPanCancel: () => widget.onUpdateLayer(layer),
                 child: SizedBox(
                   width: hitSize,
                   height: hitSize,
@@ -908,20 +924,29 @@ class _LayerCanvasState extends State<LayerCanvas> {
 
 class _LayerBlendWrapper extends SingleChildRenderObjectWidget {
   final BlendMode blendMode;
-  const _LayerBlendWrapper({required this.blendMode, super.child});
+  final double opacity;
+  const _LayerBlendWrapper({
+    required this.blendMode,
+    this.opacity = 1.0,
+    super.child,
+  });
 
   @override
-  RenderObject createRenderObject(BuildContext context) => _RenderLayerBlend(blendMode);
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderLayerBlend(blendMode, opacity);
 
   @override
   void updateRenderObject(BuildContext context, covariant _RenderLayerBlend renderObject) {
-    renderObject.blendMode = blendMode;
+    renderObject
+      ..blendMode = blendMode
+      ..opacity = opacity;
   }
 }
 
 class _RenderLayerBlend extends RenderProxyBox {
   BlendMode _blendMode;
-  _RenderLayerBlend(this._blendMode);
+  double _opacity;
+  _RenderLayerBlend(this._blendMode, this._opacity);
 
   set blendMode(BlendMode value) {
     if (_blendMode == value) return;
@@ -929,14 +954,25 @@ class _RenderLayerBlend extends RenderProxyBox {
     markNeedsPaint();
   }
 
+  set opacity(double value) {
+    final clamped = value.clamp(0.0, 1.0).toDouble();
+    if ((_opacity - clamped).abs() < 0.001) return;
+    _opacity = clamped;
+    markNeedsPaint();
+  }
+
   @override
   void paint(PaintingContext context, Offset offset) {
-    if (child == null) return;
-    if (_blendMode == BlendMode.srcOver) {
+    if (child == null || _opacity <= 0.001) return;
+    if (_blendMode == BlendMode.srcOver && _opacity >= 0.999) {
       context.paintChild(child!, offset);
       return;
     }
-    context.canvas.saveLayer(offset & size, Paint()..blendMode = _blendMode);
+    final paint = Paint()..blendMode = _blendMode;
+    if (_opacity < 0.999) {
+      paint.color = Color.fromRGBO(255, 255, 255, _opacity);
+    }
+    context.canvas.saveLayer(offset & size, paint);
     context.paintChild(child!, offset);
     context.canvas.restore();
   }
@@ -994,6 +1030,24 @@ class _MarginGuidesPainter extends CustomPainter {
     _drawDashedLine(canvas, rect.topRight, rect.bottomRight, paint, dash, gap);
     _drawDashedLine(canvas, rect.bottomRight, rect.bottomLeft, paint, dash, gap);
     _drawDashedLine(canvas, rect.bottomLeft, rect.topLeft, paint, dash, gap);
+
+    final thirdsPaint = Paint()
+      ..color = const Color(0xFF06B6D4).withOpacity(0.18)
+      ..strokeWidth = (0.85 * invScale).clamp(0.5, 1.8)
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(Offset(size.width / 3, 0), Offset(size.width / 3, size.height), thirdsPaint);
+    canvas.drawLine(Offset(size.width * 2 / 3, 0), Offset(size.width * 2 / 3, size.height), thirdsPaint);
+    canvas.drawLine(Offset(0, size.height / 3), Offset(size.width, size.height / 3), thirdsPaint);
+    canvas.drawLine(Offset(0, size.height * 2 / 3), Offset(size.width, size.height * 2 / 3), thirdsPaint);
+
+    final crossPaint = Paint()
+      ..color = const Color(0xFFF59E0B).withOpacity(0.45)
+      ..strokeWidth = (1.1 * invScale).clamp(0.7, 2.2);
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final tick = 10.0 * invScale.clamp(0.6, 2.4);
+    canvas.drawLine(Offset(cx - tick, cy), Offset(cx + tick, cy), crossPaint);
+    canvas.drawLine(Offset(cx, cy - tick), Offset(cx, cy + tick), crossPaint);
   }
 
   void _drawDashedLine(Canvas canvas, Offset start, Offset end, Paint paint, double dash, double gap) {

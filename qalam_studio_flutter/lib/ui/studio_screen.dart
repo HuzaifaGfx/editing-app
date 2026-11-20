@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -53,6 +54,15 @@ class _StudioScreenState extends State<StudioScreen> {
   int _whiteRemovalSeq = 0;
   final List<(int, String)> _undoStack = [];
   final List<(int, String)> _redoStack = [];
+  final List<_CustomInstalledFont> _customFonts = [];
+  final Set<String> _loadedFontFamilies = {
+    'NotoNastaliqUrdu',
+    'Gulzar',
+    'NotoNaskhArabic',
+    'IBMPlexSansArabicSemiBold',
+    'PlusJakartaSans',
+    'PlayfairDisplay',
+  };
 
   // Global Saving HUD overlay state
   OverlayEntry? _saveHudEntry;
@@ -78,7 +88,7 @@ class _StudioScreenState extends State<StudioScreen> {
 
   // Rubber Stamp / مہر Maker state
   String _stampShape = 'round'; // 'round', 'oval', 'box'
-  final TextEditingController _stampOrgCtrl = TextEditingController(text: 'QALAM TRADERS');
+  final TextEditingController _stampOrgCtrl = TextEditingController(text: 'QALAMIX TRADERS');
   final TextEditingController _stampStatusCtrl = TextEditingController(text: 'PAID · ادا شدہ');
   final TextEditingController _stampSubCtrl = TextEditingController(text: 'LAHORE · PAKISTAN');
   Color _stampInkColor = const Color(0xFF1E3A8A);
@@ -108,6 +118,7 @@ class _StudioScreenState extends State<StudioScreen> {
     super.initState();
     _project = _buildDefaultProject();
     _loadSavedProjects();
+    _loadInstalledCustomFonts();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkQuickTourOnFirstLaunch());
   }
 
@@ -345,7 +356,7 @@ class _StudioScreenState extends State<StudioScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Qalam Studio — Quick Guide', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _textColor)),
+                          Text('Qalamix — Quick Guide', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _textColor)),
                           Text('Urdu Nastaliq & Business Design Suite (Offline)', style: TextStyle(fontSize: 11.5, color: _subColor)),
                         ],
                       ),
@@ -355,8 +366,8 @@ class _StudioScreenState extends State<StudioScreen> {
                 const SizedBox(height: 14),
                 _tourTile(
                   Icons.receipt_long_rounded,
-                  'Cash Memo, Letterhead & Sanad',
-                  'Docs tab mein ready-to-edit Urdu Cash Memo, Letterhead aur Certificate templates maujood hain.',
+                  'Cash Memo, Letterhead & Certificate',
+                  'The Docs tab includes ready-to-edit Urdu Cash Memo, Letterhead, and Certificate templates.',
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() => _navIndex = 3);
@@ -364,8 +375,8 @@ class _StudioScreenState extends State<StudioScreen> {
                 ),
                 _tourTile(
                   Icons.verified_rounded,
-                  'Official Stamps (مہر) & Signatures',
-                  'Sign/Seal tab mein Round, Oval ya Box rubber stamp banayen (PAID, منظور شدہ) aur 1 tap mein canvas par lagayen.',
+                  'Official Stamps & Signatures',
+                  'Create Round, Oval, or Box rubber stamps in the Sign/Seal tab and add them to the canvas in 1 tap.',
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() {
@@ -375,9 +386,18 @@ class _StudioScreenState extends State<StudioScreen> {
                   },
                 ),
                 _tourTile(
+                  Icons.font_download_outlined,
+                  'Fonts Library & Download (.TTF)',
+                  'Browse, preview, install, or download Urdu, Arabic & English fonts or import local .TTF/.OTF files.',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openFontsLibrarySheet();
+                  },
+                ),
+                _tourTile(
                   Icons.touch_app_rounded,
                   'Canvas Handle Colors',
-                  'Amber Corner = Size Scale · Blue Top = Rotate · Green Side = Urdu/English Text Box Width.',
+                  'Amber Corner = Size Scale · Blue Top = Rotate · Green Corner = Text Box Wrap Width.',
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() => _navIndex = 0);
@@ -386,7 +406,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 _tourTile(
                   Icons.edit_note_rounded,
                   'Quick Fill & Portable Share',
-                  'Fill tab se Customer Name ya Photo seconds mein badlen — exact coordinates wahin rehte hain.',
+                  'Swap customer names or photos in seconds from the Fill tab without changing layer coordinates.',
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() => _navIndex = 1);
@@ -449,7 +469,7 @@ class _StudioScreenState extends State<StudioScreen> {
 
   DesignProject _buildDefaultProject() => DesignProject(
         id: 'proj_default_${DateTime.now().millisecondsSinceEpoch}',
-        name: 'Qalam Design Studio',
+        name: 'Qalamix Design Studio',
         updatedAt: DateTime.now().millisecondsSinceEpoch,
         pages: [
           DocumentPage(
@@ -482,7 +502,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 y: 420,
                 width: 740,
                 height: 120,
-                text: 'QALAM STUDIO — OFFLINE DESIGN & DOCS',
+                text: 'QALAMIX — OFFLINE DESIGN & DOCS',
                 isRtl: false,
                 fontFamily: 'PlusJakartaSans',
                 fontSize: 24,
@@ -766,7 +786,7 @@ class _StudioScreenState extends State<StudioScreen> {
       } catch (_) {}
     }
     final extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-    final outDir = Directory(p.join(extDir.path, 'QalamStudio'));
+    final outDir = Directory(p.join(extDir.path, 'Qalamix'));
     if (!outDir.existsSync()) outDir.createSync(recursive: true);
     final outPath = p.join(outDir.path, fileName);
     await File(outPath).writeAsBytes(bytes);
@@ -1515,20 +1535,17 @@ class _StudioScreenState extends State<StudioScreen> {
         title: Row(
           children: [
             Container(
-              width: 30,
-              height: 30,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
-                color: _amber,
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: _borderColor),
               ),
-              alignment: Alignment.center,
-              child: const Text(
-                'Q',
-                style: TextStyle(
-                  color: Colors.black,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16,
-                ),
+              clipBehavior: Clip.antiAlias,
+              child: Image.asset(
+                'assets/images/qalamix_logo.jpg',
+                fit: BoxFit.cover,
               ),
             ),
             const SizedBox(width: 10),
@@ -1568,6 +1585,11 @@ class _StudioScreenState extends State<StudioScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Fonts Library',
+            icon: Icon(Icons.font_download_outlined, size: 21, color: _accentText),
+            onPressed: _openFontsLibrarySheet,
+          ),
           IconButton(
             tooltip: 'Document Scanner',
             icon: Icon(Icons.document_scanner_outlined, size: 21, color: _accentText),
@@ -1696,6 +1718,7 @@ class _StudioScreenState extends State<StudioScreen> {
               if (_undoStack.isNotEmpty) _quickBtn(Icons.undo_rounded, 'Undo', _undoCanvas),
               if (_redoStack.isNotEmpty) _quickBtn(Icons.redo_rounded, 'Redo', _redoCanvas),
               _quickBtn(Icons.title_rounded, 'Add Text', _addTextLayer),
+              _quickBtn(Icons.font_download_outlined, 'Fonts', _openFontsLibrarySheet),
               _quickBtn(Icons.add_photo_alternate_outlined, 'Overlay', _addOverlayImage),
               _quickBtn(Icons.category_outlined, 'Shape', _openShapePickerSheet),
               if (layer != null) ...[
@@ -2212,8 +2235,14 @@ class _StudioScreenState extends State<StudioScreen> {
         BlendMode.multiply,
         BlendMode.screen,
         BlendMode.overlay,
+        BlendMode.softLight,
+        BlendMode.hardLight,
         BlendMode.darken,
         BlendMode.lighten,
+        BlendMode.colorDodge,
+        BlendMode.colorBurn,
+        BlendMode.difference,
+        BlendMode.exclusion,
       ];
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2231,13 +2260,57 @@ class _StudioScreenState extends State<StudioScreen> {
             children: blends.map((b) {
               final sel = layer.blendMode == b;
               return _choicePill(
-                label: b.name,
+                label: _blendLabel(b),
                 selected: sel,
                 onTap: () => setState(() => layer.blendMode = b),
               );
             }).toList(),
           ),
           const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: _inputBg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _borderColor),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Quick Align', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _compactLayerIcon(Icons.align_horizontal_left_rounded, 'Align Left', () => setState(() {
+                      layer.x = 0;
+                      _clampLayerInPage(layer);
+                    })),
+                    _compactLayerIcon(Icons.align_horizontal_center_rounded, 'Center H', () => setState(() {
+                      layer.x = (_page.width - layer.width) / 2;
+                      _clampLayerInPage(layer);
+                    })),
+                    _compactLayerIcon(Icons.align_horizontal_right_rounded, 'Align Right', () => setState(() {
+                      layer.x = _page.width - layer.width;
+                      _clampLayerInPage(layer);
+                    })),
+                    _compactLayerIcon(Icons.align_vertical_top_rounded, 'Align Top', () => setState(() {
+                      layer.y = 0;
+                      _clampLayerInPage(layer);
+                    })),
+                    _compactLayerIcon(Icons.align_vertical_center_rounded, 'Middle V', () => setState(() {
+                      layer.y = (_page.height - layer.height) / 2;
+                      _clampLayerInPage(layer);
+                    })),
+                    _compactLayerIcon(Icons.align_vertical_bottom_rounded, 'Align Bottom', () => setState(() {
+                      layer.y = _page.height - layer.height;
+                      _clampLayerInPage(layer);
+                    })),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
@@ -2407,19 +2480,7 @@ class _StudioScreenState extends State<StudioScreen> {
     }
 
     if (layer.type == LayerType.text) {
-      const fontItems = [
-        ('NotoNastaliqUrdu', 'Urdu Nastaliq', true, 2.3),
-        ('Gulzar', 'Gulzar Urdu', true, 2.1),
-        ('NotoNaskhArabic', 'Naskh Urdu', true, 1.9),
-        ('IBMPlexSansArabicSemiBold', 'Halka Bold (Urdu+Eng)', true, 1.8),
-        ('PlusJakartaSans', 'Jakarta Sans', false, 1.35),
-        ('Montserrat', 'Montserrat', false, 1.3),
-        ('Poppins', 'Poppins', false, 1.35),
-        ('PlayfairDisplay', 'Playfair Serif', false, 1.3),
-        ('Lora', 'Lora Serif', false, 1.4),
-        ('Oswald', 'Oswald Bold', false, 1.2),
-        ('BebasNeue', 'Bebas Poster', false, 1.1),
-      ];
+      final fontItems = _availableTextFontOptions();
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2433,7 +2494,22 @@ class _StudioScreenState extends State<StudioScreen> {
             onChanged: (val) => setState(() => layer.text = val),
           ),
           const SizedBox(height: 10),
-          Text('Font Family', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Font Family (${fontItems.length})', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: _openFontsLibrarySheet,
+                icon: Icon(Icons.font_download_outlined, size: 15, color: _accentText),
+                label: Text('Fonts Library (.TTF)', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _accentText)),
+              ),
+            ],
+          ),
           const SizedBox(height: 6),
           Wrap(
             spacing: 6,
@@ -2461,9 +2537,15 @@ class _StudioScreenState extends State<StudioScreen> {
               ),
               const SizedBox(width: 8),
               _choicePill(
-                label: 'Halka Bold (SemiBold)',
-                selected: layer.fontWeight >= 550,
+                label: 'SemiBold',
+                selected: layer.fontWeight >= 550 && layer.fontWeight < 680,
                 onTap: () => setState(() => layer.fontWeight = 600),
+              ),
+              const SizedBox(width: 8),
+              _choicePill(
+                label: 'Bold',
+                selected: layer.fontWeight >= 680,
+                onTap: () => setState(() => layer.fontWeight = 700),
               ),
             ],
           ),
@@ -2956,19 +3038,9 @@ class _StudioScreenState extends State<StudioScreen> {
                   context: context,
                   backgroundColor: _cardBg,
                   builder: (ctx) {
-                    const presets = [
-                      ('NotoNastaliqUrdu', 'Urdu Nastaliq', 400, 2.3),
-                      ('Gulzar', 'Gulzar Urdu', 400, 2.1),
-                      ('NotoNaskhArabic', 'Naskh Urdu', 400, 1.9),
-                      ('IBMPlexSansArabicSemiBold', 'Halka Bold (Urdu+Eng)', 600, 1.8),
-                      ('PlusJakartaSans', 'Jakarta Sans', 400, 1.35),
-                      ('Montserrat', 'Montserrat', 400, 1.3),
-                      ('Poppins', 'Poppins', 400, 1.35),
-                      ('PlayfairDisplay', 'Playfair Serif', 400, 1.3),
-                      ('Lora', 'Lora Serif', 400, 1.4),
-                      ('Oswald', 'Oswald Bold', 400, 1.2),
-                      ('BebasNeue', 'Bebas Poster', 400, 1.1),
-                    ];
+                    final presets = _availableTextFontOptions()
+                        .map((f) => (f.$1, f.$2, f.$1 == 'IBMPlexSansArabicSemiBold' ? 600 : 400, f.$4))
+                        .toList();
                     return SafeArea(
                       child: ListView(
                         padding: const EdgeInsets.all(14),
@@ -3336,7 +3408,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 y: 66,
                 width: 460,
                 height: 110,
-                text: 'QALAM ENTERPRISES\nLegal & Design Consultancy',
+                text: 'QALAMIX ENTERPRISES\nLegal & Design Consultancy',
                 fontFamily: 'PlayfairDisplay',
                 fontSize: 34,
                 fontWeight: 700,
@@ -3968,7 +4040,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 onPressed: () async {
                   await Share.shareXFiles(
                     _batchOutputs.map((fp) => XFile(fp)).toList(),
-                    text: 'Qalam Studio Batch (${_batchOutputs.length})',
+                    text: 'Qalamix Batch (${_batchOutputs.length})',
                   );
                 },
               ),
@@ -4144,8 +4216,8 @@ class _StudioScreenState extends State<StudioScreen> {
         await File(outPath).writeAsString(jsonEncode(bundle));
         await Share.shareXFiles(
           [XFile(outPath)],
-          subject: 'Qalam Studio Project: ${proj.name}',
-          text: 'Qalam Studio Project (${proj.pages.length} page(s))',
+          subject: 'Qalamix Project: ${proj.name}',
+          text: 'Qalamix Project (${proj.pages.length} page(s))',
         );
       },
     );
@@ -4197,22 +4269,69 @@ class _StudioScreenState extends State<StudioScreen> {
       return BlendMode.values[raw];
     }
     if (raw is String) {
-      switch (raw.toLowerCase()) {
+      switch (raw.toLowerCase().replaceAll('_', '-')) {
         case 'multiply':
           return BlendMode.multiply;
         case 'screen':
           return BlendMode.screen;
         case 'overlay':
           return BlendMode.overlay;
+        case 'softlight':
+        case 'soft-light':
+          return BlendMode.softLight;
+        case 'hardlight':
+        case 'hard-light':
+          return BlendMode.hardLight;
         case 'darken':
           return BlendMode.darken;
         case 'lighten':
           return BlendMode.lighten;
+        case 'colordodge':
+        case 'color-dodge':
+          return BlendMode.colorDodge;
+        case 'colorburn':
+        case 'color-burn':
+          return BlendMode.colorBurn;
+        case 'difference':
+          return BlendMode.difference;
+        case 'exclusion':
+          return BlendMode.exclusion;
         default:
           return BlendMode.srcOver;
       }
     }
     return BlendMode.srcOver;
+  }
+
+  String _blendLabel(BlendMode b) {
+    switch (b) {
+      case BlendMode.srcOver:
+        return 'Normal';
+      case BlendMode.multiply:
+        return 'Multiply';
+      case BlendMode.screen:
+        return 'Screen';
+      case BlendMode.overlay:
+        return 'Overlay';
+      case BlendMode.softLight:
+        return 'Soft Light';
+      case BlendMode.hardLight:
+        return 'Hard Light';
+      case BlendMode.darken:
+        return 'Darken';
+      case BlendMode.lighten:
+        return 'Lighten';
+      case BlendMode.colorDodge:
+        return 'Color Dodge';
+      case BlendMode.colorBurn:
+        return 'Color Burn';
+      case BlendMode.difference:
+        return 'Difference';
+      case BlendMode.exclusion:
+        return 'Exclusion';
+      default:
+        return b.name;
+    }
   }
 
   Future<void> _importProjectFile() async {
@@ -4230,7 +4349,7 @@ class _StudioScreenState extends State<StudioScreen> {
 
       Map<String, dynamic> projMap;
       final embedded = <String, String>{};
-      if (decoded['format'] == 'qalam_project_v1' && decoded['project'] is Map<String, dynamic>) {
+      if ((decoded['format'] == 'qalam_project_v1' || decoded['format'] == 'qalamix_project_v1') && decoded['project'] is Map<String, dynamic>) {
         projMap = Map<String, dynamic>.from(decoded['project'] as Map);
         final embRaw = decoded['embeddedImages'];
         if (embRaw is Map) {
@@ -4243,7 +4362,7 @@ class _StudioScreenState extends State<StudioScreen> {
       } else if (decoded['pages'] is List) {
         projMap = Map<String, dynamic>.from(decoded);
       } else {
-        throw const FormatException('Not a Qalam Studio project file');
+        throw const FormatException('Not a Qalamix project file');
       }
 
       final restoredPaths = <String, String>{};
@@ -5637,40 +5756,18 @@ class _StudioScreenState extends State<StudioScreen> {
     Uint8List rawBytes,
     int rotationDeg,
   ) async {
-    var decoded = img.decodeImage(rawBytes);
-    if (decoded == null) {
-      return _ScannedDocPage(
-        id: id,
-        rawPath: rawPath,
-        rawBytes: rawBytes,
-        previewBytes: rawBytes,
-        rotationDeg: rotationDeg,
-        width: 1000,
-        height: 1400,
-      );
-    }
-
-    if (rotationDeg % 360 != 0) {
-      decoded = img.copyRotate(decoded, angle: rotationDeg);
-    }
-    if (math.max(decoded.width, decoded.height) > 2000) {
-      final scale = 2000 / math.max(decoded.width, decoded.height);
-      decoded = img.copyResize(
-        decoded,
-        width: math.max(1, (decoded.width * scale).round()),
-        height: math.max(1, (decoded.height * scale).round()),
-      );
-    }
-
-    final jpg = Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
+    final res = await compute(
+      _decodeAndRenderScanIsolate,
+      _ScanRenderArgs(rawBytes, rotationDeg),
+    );
     return _ScannedDocPage(
       id: id,
       rawPath: rawPath,
       rawBytes: rawBytes,
-      previewBytes: jpg,
+      previewBytes: res.previewBytes,
       rotationDeg: rotationDeg,
-      width: decoded.width,
-      height: decoded.height,
+      width: res.width,
+      height: res.height,
     );
   }
 
@@ -5699,6 +5796,718 @@ class _StudioScreenState extends State<StudioScreen> {
       _scannedPages.addAll(added);
       _activeScanIdx = startIdx;
     });
+  }
+
+  static const List<_FontCatalogEntry> _kFontsCatalog = [
+    _FontCatalogEntry(
+      family: 'NotoNastaliqUrdu',
+      name: 'Noto Nastaliq Urdu',
+      script: 'Urdu',
+      sample: 'خوش آمدید — قلمکس اردو نستعلیق',
+      isRtl: true,
+      defaultLineHeight: 2.3,
+      bundled: true,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/notonastaliqurdu/NotoNastaliqUrdu%5Bwght%5D.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'Gulzar',
+      name: 'Gulzar Nastaliq',
+      script: 'Urdu',
+      sample: 'گلزار خطاطی — اردو و فارسی',
+      isRtl: true,
+      defaultLineHeight: 2.1,
+      bundled: true,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/gulzar/Gulzar-Regular.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'NotoNaskhArabic',
+      name: 'Noto Naskh Arabic',
+      script: 'Urdu',
+      sample: 'معیاری نسخ خط — اردو دستاویزات',
+      isRtl: true,
+      defaultLineHeight: 1.9,
+      bundled: true,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'IBMPlexSansArabicSemiBold',
+      name: 'IBM Plex SemiBold',
+      script: 'Urdu',
+      sample: 'جدید اردو اور انگلش ہیڈنگ',
+      isRtl: true,
+      defaultLineHeight: 1.8,
+      bundled: true,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'Amiri',
+      name: 'Amiri Classical',
+      script: 'Calligraphy',
+      sample: 'امیری خطاطی — بسم اللہ الرحمن الرحیم',
+      isRtl: true,
+      defaultLineHeight: 1.95,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'Lateef',
+      name: 'Lateef Naskh',
+      script: 'Urdu',
+      sample: 'لطیف اردو خط — واضح تحریر',
+      isRtl: true,
+      defaultLineHeight: 1.9,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/lateef/Lateef-Regular.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'ScheherazadeNew',
+      name: 'Scheherazade New',
+      script: 'Arabic',
+      sample: 'شہر زاد عربی و اردو خط',
+      isRtl: true,
+      defaultLineHeight: 1.95,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/scheherazadenew/ScheherazadeNew-Regular.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'Cairo',
+      name: 'Cairo Modern',
+      script: 'Arabic',
+      sample: 'قاہرہ ماڈرن سانس ٹائپوگرافی',
+      isRtl: true,
+      defaultLineHeight: 1.75,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/cairo/Cairo%5Bslnt%2Cwght%5D.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'Tajawal',
+      name: 'Tajawal Clean',
+      script: 'Arabic',
+      sample: 'تجوّل صاف اور جدید عربی خط',
+      isRtl: true,
+      defaultLineHeight: 1.75,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Regular.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'ReemKufi',
+      name: 'Reem Kufi Display',
+      script: 'Calligraphy',
+      sample: 'ریم کوفی — منفرد خطاطی',
+      isRtl: true,
+      defaultLineHeight: 1.85,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'ArefRuqaa',
+      name: 'Aref Ruqaa Ink',
+      script: 'Calligraphy',
+      sample: 'عارف رقعہ — دستخط اور خطاطی',
+      isRtl: true,
+      defaultLineHeight: 1.95,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'PlusJakartaSans',
+      name: 'Plus Jakarta Sans',
+      script: 'English',
+      sample: 'Qalamix Modern Studio UI',
+      isRtl: false,
+      defaultLineHeight: 1.35,
+      bundled: true,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/plusjakartasans/PlusJakartaSans%5Bwght%5D.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'PlayfairDisplay',
+      name: 'Playfair Display Serif',
+      script: 'English',
+      sample: 'Editorial Elegance & Titles',
+      isRtl: false,
+      defaultLineHeight: 1.3,
+      bundled: true,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'Montserrat',
+      name: 'Montserrat Geometric',
+      script: 'English',
+      sample: 'CLEAN BRANDING & POSTERS',
+      isRtl: false,
+      defaultLineHeight: 1.3,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'Poppins',
+      name: 'Poppins Rounded',
+      script: 'English',
+      sample: 'Friendly Headline Typeface',
+      isRtl: false,
+      defaultLineHeight: 1.35,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'Lora',
+      name: 'Lora Document Serif',
+      script: 'English',
+      sample: 'Formal Letters & Certificates',
+      isRtl: false,
+      defaultLineHeight: 1.4,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/lora/Lora%5Bwght%5D.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'Oswald',
+      name: 'Oswald Condensed',
+      script: 'English',
+      sample: 'BOLD THUMBNAIL DISPLAY',
+      isRtl: false,
+      defaultLineHeight: 1.2,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/oswald/Oswald%5Bwght%5D.ttf',
+    ),
+    _FontCatalogEntry(
+      family: 'BebasNeue',
+      name: 'Bebas Neue Poster',
+      script: 'English',
+      sample: 'CINEMATIC BANNER HEADLINES',
+      isRtl: false,
+      defaultLineHeight: 1.1,
+      bundled: false,
+      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/bebasneue/BebasNeue-Regular.ttf',
+    ),
+  ];
+
+  List<(String, String, bool, double)> _availableTextFontOptions() {
+    final base = <(String, String, bool, double)>[
+      ('NotoNastaliqUrdu', 'Urdu Nastaliq', true, 2.3),
+      ('Gulzar', 'Gulzar Urdu', true, 2.1),
+      ('NotoNaskhArabic', 'Naskh Urdu', true, 1.9),
+      ('IBMPlexSansArabicSemiBold', 'IBM Plex SemiBold', true, 1.8),
+      ('PlusJakartaSans', 'Jakarta Sans', false, 1.35),
+      ('PlayfairDisplay', 'Playfair Serif', false, 1.3),
+    ];
+    final seen = base.map((e) => e.$1).toSet();
+    for (final c in _customFonts) {
+      if (seen.add(c.family)) {
+        base.add((c.family, c.name, c.isRtl, c.defaultLineHeight));
+      }
+    }
+    return base;
+  }
+
+  Future<void> _loadInstalledCustomFonts() async {
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final idxFile = File(p.join(docsDir.path, 'qalamix_fonts_index.json'));
+      if (!idxFile.existsSync()) return;
+      final decoded = jsonDecode(await idxFile.readAsString());
+      if (decoded is! List) return;
+      final restored = <_CustomInstalledFont>[];
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final family = (item['family'] ?? '').toString();
+        final name = (item['name'] ?? family).toString();
+        final script = (item['script'] ?? 'Urdu').toString();
+        final filePath = (item['filePath'] ?? '').toString();
+        final isRtl = item['isRtl'] == true;
+        final lh = (item['defaultLineHeight'] as num?)?.toDouble() ?? (isRtl ? 2.0 : 1.35);
+        if (family.isEmpty || filePath.isEmpty || !File(filePath).existsSync()) continue;
+        final bytes = await File(filePath).readAsBytes();
+        final loader = FontLoader(family)..addFont(Future.value(ByteData.sublistView(bytes)));
+        await loader.load();
+        restored.add(_CustomInstalledFont(
+          family: family,
+          name: name,
+          script: script,
+          filePath: filePath,
+          isRtl: isRtl,
+          defaultLineHeight: lh,
+        ));
+        _loadedFontFamilies.add(family);
+      }
+      if (mounted && restored.isNotEmpty) {
+        setState(() {
+          _customFonts
+            ..clear()
+            ..addAll(restored);
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistCustomFontsIndex() async {
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final idxFile = File(p.join(docsDir.path, 'qalamix_fonts_index.json'));
+      final payload = _customFonts
+          .map((f) => {
+                'family': f.family,
+                'name': f.name,
+                'script': f.script,
+                'filePath': f.filePath,
+                'isRtl': f.isRtl,
+                'defaultLineHeight': f.defaultLineHeight,
+              })
+          .toList();
+      await idxFile.writeAsString(jsonEncode(payload));
+    } catch (_) {}
+  }
+
+  Future<Uint8List> _fetchRemoteFontBytes(String url) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      final resp = await req.close();
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        throw Exception('HTTP ${resp.statusCode}');
+      }
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in resp) {
+        builder.add(chunk);
+      }
+      final bytes = builder.takeBytes();
+      if (bytes.length < 1024) throw Exception('Invalid font file');
+      return bytes;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<void> _installOrApplyCatalogFont(_FontCatalogEntry entry) async {
+    if (!entry.bundled && !_loadedFontFamilies.contains(entry.family)) {
+      final bytes = await _runWithSavingHud<Uint8List>(
+        savingTitle: 'Installing ${entry.name}...',
+        savingSubtitle: 'Saving offline font',
+        savedTitle: '${entry.name} Ready',
+        savedSubtitle: 'Installed & applied to Studio',
+        action: () async {
+          final raw = await _fetchRemoteFontBytes(entry.ttfUrl);
+          final docsDir = await getApplicationDocumentsDirectory();
+          final dir = Directory(p.join(docsDir.path, 'qalamix_fonts'));
+          if (!dir.existsSync()) dir.createSync(recursive: true);
+          final outPath = p.join(dir.path, '${entry.family}.ttf');
+          await File(outPath).writeAsBytes(raw);
+          final loader = FontLoader(entry.family)
+            ..addFont(Future.value(ByteData.sublistView(raw)));
+          await loader.load();
+          _loadedFontFamilies.add(entry.family);
+          _customFonts.removeWhere((f) => f.family == entry.family);
+          _customFonts.add(_CustomInstalledFont(
+            family: entry.family,
+            name: entry.name,
+            script: entry.script,
+            filePath: outPath,
+            isRtl: entry.isRtl,
+            defaultLineHeight: entry.defaultLineHeight,
+          ));
+          await _persistCustomFontsIndex();
+          return raw;
+        },
+      );
+      if (bytes == null) return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      final active = _activeLayer;
+      if (active != null && active.type == LayerType.text) {
+        active.fontFamily = entry.family;
+        active.isRtl = entry.isRtl;
+        active.lineHeight = entry.defaultLineHeight;
+      } else {
+        final newLayer = DesignLayer(
+          id: 'txt_${DateTime.now().microsecondsSinceEpoch}',
+          name: entry.isRtl ? 'Urdu Typography' : 'Heading Text',
+          type: LayerType.text,
+          x: _page.width * 0.1,
+          y: _page.height * 0.25,
+          width: _page.width * 0.8,
+          height: 180,
+          text: entry.isRtl ? 'نیا عنوان لکھیں' : 'Qalamix Heading',
+          fontFamily: entry.family,
+          fontSize: 46,
+          fontWeight: 600,
+          lineHeight: entry.defaultLineHeight,
+          isRtl: entry.isRtl,
+          textColor: Colors.white,
+        );
+        _page.layers.add(newLayer);
+        _selectedLayerId = newLayer.id;
+        _textController.text = newLayer.text;
+        _inspectorTab = 0;
+      }
+      _navIndex = 0;
+    });
+  }
+
+  Future<void> _downloadFontFileToDevice(_FontCatalogEntry entry) async {
+    String? savedPath;
+    String? tmpPath;
+    await _runWithSavingHud<void>(
+      savingTitle: 'Downloading ${entry.name}.ttf...',
+      savingSubtitle: 'Fetching typeface file',
+      savedTitle: 'Font Saved (.TTF)',
+      savedSubtitle: '${entry.name} saved to Downloads/Qalamix/Fonts',
+      action: () async {
+        Uint8List bytes;
+        final existing = _customFonts.cast<_CustomInstalledFont?>().firstWhere((f) => f!.family == entry.family, orElse: () => null);
+        if (existing != null && File(existing.filePath).existsSync()) {
+          bytes = await File(existing.filePath).readAsBytes();
+        } else {
+          bytes = await _fetchRemoteFontBytes(entry.ttfUrl);
+        }
+        final fname = '${entry.family}.ttf';
+        if (Platform.isAndroid) {
+          try {
+            savedPath = await _mediaChannel.invokeMethod<String>('saveFontToDownloads', {
+              'bytes': bytes,
+              'name': fname,
+            });
+          } catch (_) {}
+        }
+        final tmpDir = await getTemporaryDirectory();
+        tmpPath = p.join(tmpDir.path, fname);
+        await File(tmpPath!).writeAsBytes(bytes);
+      },
+    );
+    if (!mounted || tmpPath == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(savedPath != null ? 'Saved: $savedPath' : '${entry.name}.ttf ready'),
+        action: SnackBarAction(
+          label: 'Share .TTF',
+          onPressed: () => Share.shareXFiles([XFile(tmpPath!)], text: '${entry.name} Font (.ttf)'),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _importLocalFontFromDevice(void Function(void Function()) setModalState) async {
+    try {
+      final res = await _mediaChannel.invokeMethod<dynamic>('pickFontFile');
+      if (res is! Map) return;
+      final fileName = (res['name'] ?? 'CustomFont.ttf').toString();
+      final rawBytes = res['bytes'];
+      if (rawBytes is! Uint8List || rawBytes.isEmpty) return;
+
+      final lower = fileName.toLowerCase();
+      if (!lower.endsWith('.ttf') && !lower.endsWith('.otf')) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please pick a valid .ttf or .otf font file')),
+          );
+        }
+        return;
+      }
+
+      final cleanLabel = p.basenameWithoutExtension(fileName).replaceAll(RegExp(r'[_-]+'), ' ').trim();
+      final family = 'Custom_${DateTime.now().millisecondsSinceEpoch}';
+      final isUrduGuess = RegExp(r'urdu|nastaliq|jameel|noori|alvi|faiz|mehr|arabic|naskh', caseSensitive: false)
+          .hasMatch(fileName);
+
+      await _runWithSavingHud<void>(
+        savingTitle: 'Importing $cleanLabel...',
+        savedTitle: 'Custom Font Installed',
+        savedSubtitle: cleanLabel,
+        action: () async {
+          final docsDir = await getApplicationDocumentsDirectory();
+          final dir = Directory(p.join(docsDir.path, 'qalamix_fonts'));
+          if (!dir.existsSync()) dir.createSync(recursive: true);
+          final outPath = p.join(dir.path, '$family${p.extension(fileName)}');
+          await File(outPath).writeAsBytes(rawBytes);
+
+          final loader = FontLoader(family)
+            ..addFont(Future.value(ByteData.sublistView(rawBytes)));
+          await loader.load();
+
+          _loadedFontFamilies.add(family);
+          _customFonts.add(_CustomInstalledFont(
+            family: family,
+            name: cleanLabel.isEmpty ? 'Custom Font' : cleanLabel,
+            script: isUrduGuess ? 'Urdu' : 'English',
+            filePath: outPath,
+            isRtl: isUrduGuess,
+            defaultLineHeight: isUrduGuess ? 2.1 : 1.35,
+          ));
+          await _persistCustomFontsIndex();
+        },
+      );
+      if (mounted) setState(() {});
+      setModalState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Font import error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _openFontsLibrarySheet() async {
+    String filterTab = 'All';
+    String searchQuery = '';
+    double previewSize = 22.0;
+    final sampleCtrl = TextEditingController(text: 'خوش آمدید · Qalamix Typography');
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _panelBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final entries = <_FontCatalogEntry>[
+              ..._kFontsCatalog,
+              ..._customFonts
+                  .where((c) => !_kFontsCatalog.any((k) => k.family == c.family))
+                  .map((c) => _FontCatalogEntry(
+                        family: c.family,
+                        name: c.name,
+                        script: c.script,
+                        sample: c.isRtl ? 'خوش آمدید — قلمکس' : 'Custom Uploaded Font Preview',
+                        isRtl: c.isRtl,
+                        defaultLineHeight: c.defaultLineHeight,
+                        bundled: true,
+                        ttfUrl: '',
+                      )),
+            ];
+
+            final filtered = entries.where((e) {
+              final q = searchQuery.trim().toLowerCase();
+              if (q.isNotEmpty && !e.name.toLowerCase().contains(q) && !e.script.toLowerCase().contains(q)) {
+                return false;
+              }
+              if (filterTab == 'Installed') {
+                return e.bundled || _loadedFontFamilies.contains(e.family);
+              }
+              if (filterTab != 'All') {
+                return e.script == filterTab;
+              }
+              return true;
+            }).toList();
+
+            return SafeArea(
+              child: DraggableScrollableSheet(
+                initialChildSize: 0.9,
+                minChildSize: 0.55,
+                maxChildSize: 0.96,
+                expand: false,
+                builder: (_, scrollCtrl) {
+                  return ListView(
+                    controller: scrollCtrl,
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 42,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: _mutedColor.withOpacity(0.4),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: _amber.withOpacity(0.16),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(Icons.font_download_rounded, color: _accentText, size: 20),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Qalamix Fonts Library', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                                Text('Preview, Install, Download .TTF & Import Device Fonts', style: TextStyle(fontSize: 11, color: _subColor)),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                hintText: 'Search Urdu, Arabic, English fonts...',
+                                prefixIcon: Icon(Icons.search_rounded, size: 19),
+                                isDense: true,
+                              ),
+                              onChanged: (v) => setModalState(() => searchQuery = v),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: _amber,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            onPressed: () => _importLocalFontFromDevice(setModalState),
+                            icon: const Icon(Icons.upload_file_rounded, size: 18),
+                            label: const Text('Import .TTF', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: sampleCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Live Preview Text',
+                          isDense: true,
+                        ),
+                        onChanged: (_) => setModalState(() {}),
+                      ),
+                      _sliderRow('Preview Size', previewSize, 14, 38, (v) => setModalState(() => previewSize = v)),
+                      const SizedBox(height: 6),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: ['All', 'Urdu', 'Arabic', 'Calligraphy', 'English', 'Installed'].map((tab) {
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: _choicePill(
+                                label: tab,
+                                selected: filterTab == tab,
+                                onTap: () => setModalState(() => filterTab = tab),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...filtered.map((entry) {
+                        final installed = entry.bundled || _loadedFontFamilies.contains(entry.family);
+                        final previewText = sampleCtrl.text.trim().isEmpty ? entry.sample : sampleCtrl.text;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: _inputBg,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: installed ? _amber.withOpacity(0.45) : _borderColor,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      entry.name,
+                                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: installed ? const Color(0xFF10B981).withOpacity(0.16) : _chipBg,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      installed ? '${entry.script} · Ready' : entry.script,
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: installed ? const Color(0xFF10B981) : _subColor,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: _cardBg,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: _borderColor),
+                                ),
+                                child: Text(
+                                  previewText,
+                                  textDirection: entry.isRtl ? TextDirection.rtl : TextDirection.ltr,
+                                  textAlign: entry.isRtl ? TextAlign.right : TextAlign.left,
+                                  style: TextStyle(
+                                    fontFamily: installed ? entry.family : null,
+                                    fontSize: previewSize,
+                                    height: entry.isRtl ? 1.9 : 1.3,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: FilledButton.icon(
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: _amber,
+                                        foregroundColor: Colors.black,
+                                        padding: const EdgeInsets.symmetric(vertical: 9),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                                      ),
+                                      onPressed: () async {
+                                        await _installOrApplyCatalogFont(entry);
+                                        if (ctx.mounted) Navigator.pop(ctx);
+                                      },
+                                      icon: Icon(installed ? Icons.check_circle_outline : Icons.download_done_rounded, size: 16),
+                                      label: Text(
+                                        installed ? 'Use in Studio' : 'Install & Use',
+                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                                      ),
+                                    ),
+                                  ),
+                                  if (entry.ttfUrl.isNotEmpty) ...[
+                                    const SizedBox(width: 8),
+                                    OutlinedButton.icon(
+                                      style: OutlinedButton.styleFrom(
+                                        side: BorderSide(color: _borderColor),
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                                      ),
+                                      onPressed: () => _downloadFontFileToDevice(entry),
+                                      icon: const Icon(Icons.download_rounded, size: 16),
+                                      label: const Text('.TTF', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
+    sampleCtrl.dispose();
   }
 
   Future<void> _openDocumentScannerSheet() async {
@@ -5819,7 +6628,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     shareTmpPath = tmpPath;
                     if (savedLoc.isEmpty) {
                       final extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-                      final outDir = Directory(p.join(extDir.path, 'QalamStudio'));
+                      final outDir = Directory(p.join(extDir.path, 'Qalamix'));
                       if (!outDir.existsSync()) outDir.createSync(recursive: true);
                       final outPath = p.join(outDir.path, fileName);
                       await File(outPath).writeAsBytes(pdfBytes);
@@ -5834,7 +6643,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     duration: const Duration(seconds: 3),
                     action: SnackBarAction(
                       label: 'Share PDF',
-                      onPressed: () => Share.shareXFiles([XFile(shareTmpPath!)], text: 'Qalam Scanned PDF'),
+                      onPressed: () => Share.shareXFiles([XFile(shareTmpPath!)], text: 'Qalamix Scanned PDF'),
                     ),
                   ),
                 );
@@ -5872,7 +6681,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     duration: const Duration(seconds: 3),
                     action: SnackBarAction(
                       label: 'Share',
-                      onPressed: () => Share.shareXFiles([XFile(lastTmp)], text: 'Qalam Scanned JPEG'),
+                      onPressed: () => Share.shareXFiles([XFile(lastTmp)], text: 'Qalamix Scanned JPEG'),
                     ),
                   ),
                 );
@@ -6043,6 +6852,7 @@ class _StudioScreenState extends State<StudioScreen> {
                                 child: Image.memory(
                                   activePage.previewBytes,
                                   fit: BoxFit.contain,
+                                  gaplessPlayback: true,
                                 ),
                               ),
                               Positioned(
@@ -6498,7 +7308,7 @@ class _StampPainter extends CustomPainter {
     final w = size.width;
     final h = size.height;
     final center = Offset(w / 2, h / 2);
-    final orgText = org.trim().isEmpty ? 'QALAM STUDIO' : org.trim();
+    final orgText = org.trim().isEmpty ? 'QALAMIX' : org.trim();
     final statusText = status.trim().isEmpty ? 'APPROVED' : status.trim();
     final subText = sub.trim().isEmpty ? 'OFFICIAL SEAL' : sub.trim();
     final today = _todayBadge();
@@ -6580,4 +7390,77 @@ class _StampPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _StampPainter oldDelegate) => true;
+}
+
+class _ScanRenderArgs {
+  final Uint8List rawBytes;
+  final int rotationDeg;
+  const _ScanRenderArgs(this.rawBytes, this.rotationDeg);
+}
+
+class _ScanRenderOutput {
+  final Uint8List previewBytes;
+  final int width;
+  final int height;
+  const _ScanRenderOutput(this.previewBytes, this.width, this.height);
+}
+
+_ScanRenderOutput _decodeAndRenderScanIsolate(_ScanRenderArgs args) {
+  var decoded = img.decodeImage(args.rawBytes);
+  if (decoded == null) {
+    return _ScanRenderOutput(args.rawBytes, 1000, 1400);
+  }
+  if (args.rotationDeg % 360 != 0) {
+    decoded = img.copyRotate(decoded, angle: args.rotationDeg);
+  }
+  if (math.max(decoded.width, decoded.height) > 2000) {
+    final scale = 2000 / math.max(decoded.width, decoded.height);
+    decoded = img.copyResize(
+      decoded,
+      width: math.max(1, (decoded.width * scale).round()),
+      height: math.max(1, (decoded.height * scale).round()),
+    );
+  }
+  final jpg = Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
+  return _ScanRenderOutput(jpg, decoded.width, decoded.height);
+}
+
+class _FontCatalogEntry {
+  final String family;
+  final String name;
+  final String script;
+  final String sample;
+  final bool isRtl;
+  final double defaultLineHeight;
+  final bool bundled;
+  final String ttfUrl;
+
+  const _FontCatalogEntry({
+    required this.family,
+    required this.name,
+    required this.script,
+    required this.sample,
+    required this.isRtl,
+    required this.defaultLineHeight,
+    required this.bundled,
+    required this.ttfUrl,
+  });
+}
+
+class _CustomInstalledFont {
+  final String family;
+  final String name;
+  final String script;
+  final String filePath;
+  final bool isRtl;
+  final double defaultLineHeight;
+
+  const _CustomInstalledFont({
+    required this.family,
+    required this.name,
+    required this.script,
+    required this.filePath,
+    required this.isRtl,
+    required this.defaultLineHeight,
+  });
 }

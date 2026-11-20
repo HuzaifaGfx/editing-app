@@ -7,6 +7,7 @@ import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -16,7 +17,9 @@ import java.io.FileOutputStream
 class MainActivity : FlutterActivity() {
     private val channelName = "com.qalam.studio/media"
     private val pickProjectReq = 9042
+    private val pickFontReq = 9043
     private var pendingPickResult: MethodChannel.Result? = null
+    private var pendingFontResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -24,7 +27,7 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "saveImageToGallery" -> {
                     val bytes = call.argument<ByteArray>("bytes")
-                    val name = call.argument<String>("name") ?: "qalam_export.png"
+                    val name = call.argument<String>("name") ?: "qalamix_export.png"
                     if (bytes == null) {
                         result.error("INVALID_ARGS", "Missing image bytes", null)
                         return@setMethodCallHandler
@@ -39,7 +42,7 @@ class MainActivity : FlutterActivity() {
                             val values = ContentValues().apply {
                                 put(MediaStore.Images.Media.DISPLAY_NAME, name)
                                 put(MediaStore.Images.Media.MIME_TYPE, mime)
-                                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/QalamStudio")
+                                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Qalamix")
                                 put(MediaStore.Images.Media.IS_PENDING, 1)
                             }
                             val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
@@ -48,9 +51,9 @@ class MainActivity : FlutterActivity() {
                             values.clear()
                             values.put(MediaStore.Images.Media.IS_PENDING, 0)
                             contentResolver.update(uri, values, null, null)
-                            result.success("Pictures/QalamStudio/$name")
+                            result.success("Pictures/Qalamix/$name")
                         } else {
-                            val outDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "QalamStudio")
+                            val outDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Qalamix")
                             if (!outDir.exists()) outDir.mkdirs()
                             val outFile = File(outDir, name)
                             FileOutputStream(outFile).use { it.write(bytes) }
@@ -63,7 +66,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "savePdfToDownloads" -> {
                     val bytes = call.argument<ByteArray>("bytes")
-                    val name = call.argument<String>("name") ?: "qalam_scan.pdf"
+                    val name = call.argument<String>("name") ?: "qalamix_scan.pdf"
                     if (bytes == null) {
                         result.error("INVALID_ARGS", "Missing PDF bytes", null)
                         return@setMethodCallHandler
@@ -73,7 +76,7 @@ class MainActivity : FlutterActivity() {
                             val values = ContentValues().apply {
                                 put(MediaStore.Downloads.DISPLAY_NAME, name)
                                 put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
-                                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/QalamStudio")
+                                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Qalamix")
                                 put(MediaStore.Downloads.IS_PENDING, 1)
                             }
                             val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
@@ -82,9 +85,9 @@ class MainActivity : FlutterActivity() {
                             values.clear()
                             values.put(MediaStore.Downloads.IS_PENDING, 0)
                             contentResolver.update(uri, values, null, null)
-                            result.success("Downloads/QalamStudio/$name")
+                            result.success("Downloads/Qalamix/$name")
                         } else {
-                            val outDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "QalamStudio")
+                            val outDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Qalamix")
                             if (!outDir.exists()) outDir.mkdirs()
                             val outFile = File(outDir, name)
                             FileOutputStream(outFile).use { it.write(bytes) }
@@ -93,6 +96,40 @@ class MainActivity : FlutterActivity() {
                         }
                     } catch (e: Exception) {
                         result.error("SAVE_PDF_FAILED", e.message, null)
+                    }
+                }
+                "saveFontToDownloads" -> {
+                    val bytes = call.argument<ByteArray>("bytes")
+                    val name = call.argument<String>("name") ?: "font.ttf"
+                    if (bytes == null) {
+                        result.error("INVALID_ARGS", "Missing font bytes", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val mime = if (name.endsWith(".otf", ignoreCase = true)) "font/otf" else "font/ttf"
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val values = ContentValues().apply {
+                                put(MediaStore.Downloads.DISPLAY_NAME, name)
+                                put(MediaStore.Downloads.MIME_TYPE, mime)
+                                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Qalamix/Fonts")
+                                put(MediaStore.Downloads.IS_PENDING, 1)
+                            }
+                            val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                                ?: throw Exception("MediaStore font insert failed")
+                            contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                            values.clear()
+                            values.put(MediaStore.Downloads.IS_PENDING, 0)
+                            contentResolver.update(uri, values, null, null)
+                            result.success("Downloads/Qalamix/Fonts/$name")
+                        } else {
+                            val outDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Qalamix/Fonts")
+                            if (!outDir.exists()) outDir.mkdirs()
+                            val outFile = File(outDir, name)
+                            FileOutputStream(outFile).use { it.write(bytes) }
+                            result.success(outFile.absolutePath)
+                        }
+                    } catch (e: Exception) {
+                        result.error("SAVE_FONT_FAILED", e.message, null)
                     }
                 }
                 "pickProjectFile" -> {
@@ -110,6 +147,23 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Exception) {
                         pendingPickResult = null
                         result.error("PICK_FAILED", e.message, null)
+                    }
+                }
+                "pickFontFile" -> {
+                    if (pendingFontResult != null) {
+                        result.error("BUSY", "Font picker already open", null)
+                        return@setMethodCallHandler
+                    }
+                    pendingFontResult = result
+                    try {
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                        }
+                        startActivityForResult(intent, pickFontReq)
+                    } catch (e: Exception) {
+                        pendingFontResult = null
+                        result.error("PICK_FONT_FAILED", e.message, null)
                     }
                 }
                 else -> result.notImplemented()
@@ -134,6 +188,32 @@ class MainActivity : FlutterActivity() {
                 res.success(text)
             } catch (e: Exception) {
                 res.error("READ_FAILED", e.message, null)
+            }
+        } else if (requestCode == pickFontReq) {
+            val res = pendingFontResult
+            pendingFontResult = null
+            if (res == null) return
+            if (resultCode != Activity.RESULT_OK || data?.data == null) {
+                res.success(null)
+                return
+            }
+            try {
+                val uri = data.data!!
+                var displayName = "CustomFont.ttf"
+                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (idx >= 0) displayName = cursor.getString(idx) ?: displayName
+                    }
+                }
+                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes == null || bytes.isEmpty()) {
+                    res.success(null)
+                    return
+                }
+                res.success(mapOf("name" to displayName, "bytes" to bytes))
+            } catch (e: Exception) {
+                res.error("READ_FONT_FAILED", e.message, null)
             }
         }
     }

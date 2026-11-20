@@ -176,7 +176,7 @@ class QalamStudioApp extends StatelessWidget {
       valueListenable: appThemeMode,
       builder: (context, mode, _) {
         return MaterialApp(
-          title: 'Qalam Studio',
+          title: 'Qalamix',
           debugShowCheckedModeBanner: false,
           themeMode: mode,
           theme: lightTheme,
