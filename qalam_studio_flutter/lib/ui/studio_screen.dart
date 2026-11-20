@@ -6065,11 +6065,11 @@ class _StudioScreenState extends State<StudioScreen> {
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
         throw Exception('HTTP ${resp.statusCode}');
       }
-      final builder = BytesBuilder(copy: false);
+      final chunks = <int>[];
       await for (final chunk in resp) {
-        builder.add(chunk);
+        chunks.addAll(chunk);
       }
-      final bytes = builder.takeBytes();
+      final bytes = Uint8List.fromList(chunks);
       if (bytes.length < 1024) throw Exception('Invalid font file');
       return bytes;
     } finally {
