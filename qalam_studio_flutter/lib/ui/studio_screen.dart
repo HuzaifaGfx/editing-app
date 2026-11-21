@@ -207,8 +207,8 @@ class _StudioScreenState extends State<StudioScreen> {
                             AnimatedSwitcher(
                               duration: const Duration(milliseconds: 200),
                               child: isSaving
-                                  ? const SizedBox(
-                                      key: ValueKey('hud_spin'),
+                                  ? SizedBox(
+                                      key: const ValueKey('hud_spin'),
                                       width: 22,
                                       height: 22,
                                       child: CircularProgressIndicator(
@@ -7944,7 +7944,7 @@ class _StudioScreenState extends State<StudioScreen> {
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                                 ),
                                 onPressed: localBusy ? null : saveScannerJpeg,
-                                icon: Icon(Icons.download_rounded, size: 18, color: _amber),
+                                icon: const Icon(Icons.download_rounded, size: 18, color: Colors.white),
                                 label: Text(
                                   _scannedPages.length > 1 ? 'Save JPEGs (${_scannedPages.length})' : 'Save JPEG',
                                   style: const TextStyle(fontWeight: FontWeight.w700),
