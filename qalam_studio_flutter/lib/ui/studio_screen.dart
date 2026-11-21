@@ -31,8 +31,11 @@ class StudioScreen extends StatefulWidget {
 }
 
 class _StudioScreenState extends State<StudioScreen> {
+  static const Color _brandNib = Color(0xFFF59E0B);
   Color get _inkPrimary => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF111317);
   Color get _onInkPrimary => _isDark ? const Color(0xFF111317) : Colors.white;
+  Color get _brandNibInk => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+  Color get _brandNibOnInk => _isDark ? const Color(0xFFD97706) : const Color(0xFFF59E0B);
   Color get _amber => _inkPrimary;
   static const MethodChannel _mediaChannel = MethodChannel('com.qalam.studio/media');
 
@@ -173,7 +176,7 @@ class _StudioScreenState extends State<StudioScreen> {
           final isError = _saveHudPhase == 'error';
           final borderCol = isError
               ? const Color(0xFFEF4444)
-              : (isSaving ? _amber : const Color(0xFF10B981));
+              : (isSaving ? _brandNib : const Color(0xFF10B981));
           return Positioned(
             top: MediaQuery.of(ctx).padding.top + 12,
             left: 16,
@@ -211,9 +214,9 @@ class _StudioScreenState extends State<StudioScreen> {
                                       key: const ValueKey('hud_spin'),
                                       width: 22,
                                       height: 22,
-                                      child: CircularProgressIndicator(
+                                      child: const CircularProgressIndicator(
                                         strokeWidth: 2.6,
-                                        color: _amber,
+                                        color: _brandNib,
                                       ),
                                     )
                                   : Icon(
@@ -260,8 +263,8 @@ class _StudioScreenState extends State<StudioScreen> {
                             borderRadius: BorderRadius.circular(4),
                             child: LinearProgressIndicator(
                               minHeight: 3,
-                              color: _amber,
-                              backgroundColor: _amber.withOpacity(0.18),
+                              color: _brandNib,
+                              backgroundColor: _brandNib.withOpacity(0.18),
                             ),
                           ),
                         ],
@@ -481,7 +484,7 @@ class _StudioScreenState extends State<StudioScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: _amber, size: 20),
+            Icon(icon, color: _brandNibInk, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -840,7 +843,7 @@ class _StudioScreenState extends State<StudioScreen> {
                   child: Icon(
                     _isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
                     size: 14,
-                    color: _isDark ? const Color(0xFF111317) : Colors.white,
+                    color: _isDark ? const Color(0xFF111317) : _brandNib,
                   ),
                 ),
               ),
@@ -1946,7 +1949,7 @@ class _StudioScreenState extends State<StudioScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                 ),
                 onPressed: _showExportOptionsSheet,
-                icon: const Icon(Icons.download_rounded, size: 17),
+                icon: Icon(Icons.download_rounded, size: 17, color: _brandNibOnInk),
                 label: const Text('Export', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
               ),
             ),
@@ -2101,7 +2104,7 @@ class _StudioScreenState extends State<StudioScreen> {
                                   borderRadius: BorderRadius.circular(2),
                                   child: const LinearProgressIndicator(
                                     backgroundColor: Color(0xFFE2E8F0),
-                                    color: Color(0xFF111317),
+                                    color: Color(0xFFF59E0B),
                                   ),
                                 ),
                               ),
@@ -4531,10 +4534,11 @@ class _StudioScreenState extends State<StudioScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: _amber,
+                                    color: _brandNib.withOpacity(0.15),
+                                    border: Border.all(color: _brandNib.withOpacity(0.45)),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
-                                  child: Text('ACTIVE', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: _onInkPrimary)),
+                                  child: Text('ACTIVE', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: _brandNibInk)),
                                 ),
                               ],
                             ],
@@ -5289,7 +5293,7 @@ class _StudioScreenState extends State<StudioScreen> {
                         },
                       );
                     },
-                    icon: const Icon(Icons.add_rounded, size: 18),
+                    icon: Icon(Icons.add_rounded, size: 18, color: _brandNibOnInk),
                     label: const Text('New Project', style: TextStyle(fontWeight: FontWeight.w700)),
                   ),
                 ),
@@ -5370,8 +5374,12 @@ class _StudioScreenState extends State<StudioScreen> {
                                     const SizedBox(width: 8),
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                      decoration: BoxDecoration(color: _amber, borderRadius: BorderRadius.circular(6)),
-                                      child: Text('OPEN', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: _onInkPrimary)),
+                                      decoration: BoxDecoration(
+                                        color: _brandNib.withOpacity(0.15),
+                                        border: Border.all(color: _brandNib.withOpacity(0.45)),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text('OPEN', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: _brandNibInk)),
                                     ),
                                   ],
                                 ],

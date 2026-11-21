@@ -60,7 +60,7 @@ class QalamixApp extends StatelessWidget {
         elevation: 0,
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
-        indicatorColor: inkBlack.withOpacity(0.10),
+        indicatorColor: const Color(0xFFF59E0B).withOpacity(0.14),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final sel = states.contains(WidgetState.selected);
@@ -74,7 +74,7 @@ class QalamixApp extends StatelessWidget {
           final sel = states.contains(WidgetState.selected);
           return IconThemeData(
             size: 22,
-            color: sel ? inkBlack : const Color(0xFF64748B),
+            color: sel ? const Color(0xFFD97706) : const Color(0xFF64748B),
           );
         }),
       ),
@@ -138,7 +138,7 @@ class QalamixApp extends StatelessWidget {
         elevation: 0,
         backgroundColor: const Color(0xFF16191E),
         surfaceTintColor: Colors.transparent,
-        indicatorColor: inkWhite.withOpacity(0.14),
+        indicatorColor: const Color(0xFFF59E0B).withOpacity(0.18),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final sel = states.contains(WidgetState.selected);
@@ -152,7 +152,7 @@ class QalamixApp extends StatelessWidget {
           final sel = states.contains(WidgetState.selected);
           return IconThemeData(
             size: 22,
-            color: sel ? inkWhite : const Color(0xFF94A3B8),
+            color: sel ? const Color(0xFFFBBF24) : const Color(0xFF94A3B8),
           );
         }),
       ),

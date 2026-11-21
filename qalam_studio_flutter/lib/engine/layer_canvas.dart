@@ -431,7 +431,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                         bottom: 0,
                                         width: 2.0 * invScale,
                                         child: IgnorePointer(
-                                          child: Container(color: const Color(0xFF111317).withOpacity(0.85)),
+                                          child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
                                         ),
                                       ),
                                     if (_snapY && !widget.hideOverlaysForExport)
@@ -441,7 +441,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                         right: 0,
                                         height: 2.0 * invScale,
                                         child: IgnorePointer(
-                                          child: Container(color: const Color(0xFF111317).withOpacity(0.85)),
+                                          child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
                                         ),
                                       ),
                                     if (!widget.hideOverlaysForExport && selectedLayer != null && !selectedLayer.locked)
@@ -1110,7 +1110,7 @@ class _MarginGuidesPainter extends CustomPainter {
     canvas.drawLine(Offset(0, size.height * 2 / 3), Offset(size.width, size.height * 2 / 3), thirdsPaint);
 
     final crossPaint = Paint()
-      ..color = const Color(0xFF111317).withOpacity(0.45)
+      ..color = const Color(0xFFF59E0B).withOpacity(0.55)
       ..strokeWidth = (1.1 * invScale).clamp(0.7, 2.2);
     final cx = size.width / 2;
     final cy = size.height / 2;
