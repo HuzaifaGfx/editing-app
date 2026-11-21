@@ -31,7 +31,9 @@ class StudioScreen extends StatefulWidget {
 }
 
 class _StudioScreenState extends State<StudioScreen> {
-  static const Color _amber = Color(0xFFF59E0B);
+  Color get _inkPrimary => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF111317);
+  Color get _onInkPrimary => _isDark ? const Color(0xFF111317) : Colors.white;
+  Color get _amber => _inkPrimary;
   static const MethodChannel _mediaChannel = MethodChannel('com.qalam.studio/media');
 
   final ImagePicker _picker = ImagePicker();
@@ -43,7 +45,9 @@ class _StudioScreenState extends State<StudioScreen> {
   late DesignProject _project;
   int _pageIndex = 0;
   String? _selectedLayerId;
-  int _navIndex = 0; // 0=Studio, 1=Fill, 2=Sign, 3=Docs, 4=Batch, 5=Projects
+  int _navIndex = 0; // 0=Projects, 1=Fill, 2=Sign/Seal, 3=Docs, 4=Batch
+  bool _inStudio = false;
+  (int, String)? _studioEntrySnapshot;
   int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Effects, 3=Layers
   bool _sheetExpanded = true;
   bool _exportTransparentCanvas = false;
@@ -119,7 +123,7 @@ class _StudioScreenState extends State<StudioScreen> {
   Color get _textColor => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
   Color get _subColor => _isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569);
   Color get _mutedColor => _isDark ? const Color(0xFF64748B) : const Color(0xFF64748B);
-  Color get _accentText => _isDark ? _amber : const Color(0xFFB45309);
+  Color get _accentText => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF111317);
 
   @override
   void initState() {
@@ -391,7 +395,10 @@ class _StudioScreenState extends State<StudioScreen> {
                   'The Docs tab includes ready-to-edit Urdu Cash Memo, Letterhead, and Certificate templates.',
                   onTap: () {
                     Navigator.pop(ctx);
-                    setState(() => _navIndex = 3);
+                    setState(() {
+                      _inStudio = false;
+                      _navIndex = 3;
+                    });
                   },
                 ),
                 _tourTile(
@@ -401,6 +408,7 @@ class _StudioScreenState extends State<StudioScreen> {
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() {
+                      _inStudio = false;
                       _navIndex = 2;
                       _sigMode = 2;
                     });
@@ -417,11 +425,11 @@ class _StudioScreenState extends State<StudioScreen> {
                 ),
                 _tourTile(
                   Icons.touch_app_rounded,
-                  'Canvas Handle Colors',
-                  'Amber Corner = Size Scale · Blue Top = Rotate · Green Corner = Text Box Wrap Width.',
+                  'Canvas Handle Controls',
+                  'Black Corners = Size Scale · Blue Top = Rotate · Green Corner = Text Box Wrap Width.',
                   onTap: () {
                     Navigator.pop(ctx);
-                    setState(() => _navIndex = 0);
+                    _enterStudio();
                   },
                 ),
                 _tourTile(
@@ -430,7 +438,10 @@ class _StudioScreenState extends State<StudioScreen> {
                   'Swap customer names or photos in seconds from the Fill tab without changing layer coordinates.',
                   onTap: () {
                     Navigator.pop(ctx);
-                    setState(() => _navIndex = 1);
+                    setState(() {
+                      _inStudio = false;
+                      _navIndex = 1;
+                    });
                   },
                 ),
                 const SizedBox(height: 12),
@@ -439,8 +450,8 @@ class _StudioScreenState extends State<StudioScreen> {
                   height: 44,
                   child: FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor: _amber,
-                      foregroundColor: Colors.black,
+                      backgroundColor: _inkPrimary,
+                      foregroundColor: _onInkPrimary,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: () => Navigator.pop(ctx),
@@ -683,6 +694,163 @@ class _StudioScreenState extends State<StudioScreen> {
     _restoreEncodedSnapshot(next);
   }
 
+  void _enterStudio({bool snapshotCurrent = true}) {
+    setState(() {
+      if (snapshotCurrent) {
+        _studioEntrySnapshot = (_pageIndex, _project.encode());
+      }
+      _inStudio = true;
+      if (_activeLayer?.type == LayerType.text) {
+        _textController.text = _activeLayer!.text;
+      }
+    });
+  }
+
+  Future<void> _confirmExitStudio() async {
+    if (!_inStudio) return;
+    final hasEntrySnap = _studioEntrySnapshot != null;
+    final hasChanges =
+        hasEntrySnap && _studioEntrySnapshot!.$2 != _project.encode();
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text(
+          'Exit Studio?',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          hasChanges
+              ? 'Do you want to save your changes to "${_project.name}" before exiting Studio?'
+              : 'Do you want to save "${_project.name}" before returning to Projects?',
+          style: TextStyle(fontSize: 13.5, color: _subColor, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
+            child: const Text("Don't Save", style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: _inkPrimary,
+              foregroundColor: _onInkPrimary,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, 'save'),
+            child: const Text('Save & Exit', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null || choice == 'cancel') return;
+    if (choice == 'discard') {
+      final snap = _studioEntrySnapshot;
+      if (snap != null) {
+        _restoreEncodedSnapshot(snap);
+      }
+      if (mounted) {
+        setState(() {
+          _inStudio = false;
+          _navIndex = 0;
+          _studioEntrySnapshot = null;
+        });
+      }
+      return;
+    }
+    if (choice == 'save') {
+      await _saveCurrentProject(showToast: true);
+      if (mounted) {
+        setState(() {
+          _inStudio = false;
+          _navIndex = 0;
+          _studioEntrySnapshot = null;
+        });
+      }
+    }
+  }
+
+  Widget _buildModernThemeToggle() {
+    return Tooltip(
+      message: _isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+      child: GestureDetector(
+        onTap: () {
+          appThemeMode.value = _isDark ? ThemeMode.light : ThemeMode.dark;
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          width: 60,
+          height: 32,
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: _isDark ? const Color(0xFF1F242D) : const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: _isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+            ),
+          ),
+          child: Stack(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Center(
+                      child: Icon(
+                        Icons.light_mode_rounded,
+                        size: 13.5,
+                        color: !_isDark ? Colors.transparent : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Icon(
+                        Icons.dark_mode_rounded,
+                        size: 13.5,
+                        color: _isDark ? Colors.transparent : const Color(0xFF94A3B8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              AnimatedAlign(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                alignment: _isDark ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  width: 26,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF111317),
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                        color: Colors.black.withOpacity(0.18),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    _isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+                    size: 14,
+                    color: _isDark ? const Color(0xFF111317) : Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _renameProjectDialog(DesignProject proj) async {
     final ctrl = TextEditingController(text: proj.name);
     final nextName = await showDialog<String>(
@@ -699,7 +867,7 @@ class _StudioScreenState extends State<StudioScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
+            style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
             child: const Text('Save'),
           ),
@@ -755,7 +923,7 @@ class _StudioScreenState extends State<StudioScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
+            style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
             child: const Text('Save'),
           ),
@@ -848,9 +1016,10 @@ class _StudioScreenState extends State<StudioScreen> {
     String format = 'png',
     bool transparent = false,
   }) async {
+    final prevInStudio = _inStudio;
     final prevNav = _navIndex;
     setState(() {
-      _navIndex = 0;
+      _inStudio = true;
       _selectedLayerId = null;
       _hideOverlaysForExport = true;
       _exportTransparentCanvas = format == 'png' && transparent;
@@ -876,6 +1045,7 @@ class _StudioScreenState extends State<StudioScreen> {
         setState(() {
           _hideOverlaysForExport = false;
           _exportTransparentCanvas = false;
+          _inStudio = prevInStudio;
           _navIndex = prevNav;
         });
       }
@@ -1097,8 +1267,8 @@ class _StudioScreenState extends State<StudioScreen> {
                       width: double.infinity,
                       child: FilledButton.icon(
                         style: FilledButton.styleFrom(
-                          backgroundColor: _amber,
-                          foregroundColor: Colors.black,
+                          backgroundColor: _inkPrimary,
+                          foregroundColor: _onInkPrimary,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
@@ -1214,7 +1384,7 @@ class _StudioScreenState extends State<StudioScreen> {
           style: TextStyle(
             fontSize: 12.5,
             fontWeight: FontWeight.w700,
-            color: selected ? Colors.black : _textColor,
+            color: selected ? _onInkPrimary : _textColor,
           ),
         ),
       ),
@@ -1603,40 +1773,35 @@ class _StudioScreenState extends State<StudioScreen> {
   Widget build(BuildContext context) {
     final stageBg = _isDark ? const Color(0xFF0A0C0F) : const Color(0xFFEAECEF);
 
-    return Stack(
+    const hubTitles = ['Projects', 'Quick Fill', 'Sign & Seal', 'Docs & Scanner', 'Batch Studio'];
+    return PopScope(
+      canPop: !_inStudio,
+      onPopInvoked: (didPop) {
+        if (!didPop && _inStudio) {
+          _confirmExitStudio();
+        }
+      },
+      child: Stack(
       children: [
         Scaffold(
       appBar: AppBar(
         toolbarHeight: 56,
-        titleSpacing: 12,
+        automaticallyImplyLeading: false,
+        leadingWidth: _inStudio ? 48 : null,
+        leading: _inStudio
+            ? IconButton(
+                tooltip: 'Back to Projects',
+                icon: const Icon(Icons.arrow_back_rounded, size: 22),
+                onPressed: _confirmExitStudio,
+              )
+            : null,
+        titleSpacing: _inStudio ? 4 : 12,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: _borderColor),
         ),
-        title: Row(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              padding: _isDark ? EdgeInsets.zero : const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                color: _isDark ? const Color(0xFF111317) : const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _borderColor),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Image.asset(
-                _isDark
-                    ? 'assets/images/qalamix_logo_dark.png'
-                    : 'assets/images/qalamix_mark.png',
-                fit: _isDark ? BoxFit.cover : BoxFit.contain,
-                filterQuality: FilterQuality.high,
-                isAntiAlias: true,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: InkWell(
+        title: _inStudio
+            ? InkWell(
                 onTap: () => _renameProjectDialog(_project),
                 borderRadius: BorderRadius.circular(8),
                 child: Column(
@@ -1666,125 +1831,199 @@ class _StudioScreenState extends State<StudioScreen> {
                     ),
                   ],
                 ),
+              )
+            : Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    padding: _isDark ? EdgeInsets.zero : const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: _isDark ? const Color(0xFF111317) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: _borderColor),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Image.asset(
+                      _isDark
+                          ? 'assets/images/qalamix_logo_dark.png'
+                          : 'assets/images/qalamix_mark.png',
+                      fit: _isDark ? BoxFit.cover : BoxFit.contain,
+                      filterQuality: FilterQuality.high,
+                      isAntiAlias: true,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Qalamix',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                        ),
+                        Text(
+                          hubTitles[_navIndex.clamp(0, hubTitles.length - 1)],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, color: _subColor),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
         actions: [
-          IconButton(
-            tooltip: _isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-            icon: Icon(
-              _isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              color: _accentText,
-              size: 20,
-            ),
-            onPressed: () {
-              appThemeMode.value = _isDark ? ThemeMode.light : ThemeMode.dark;
-            },
-          ),
-          IconButton(
-            tooltip: 'Save Offline',
-            icon: const Icon(Icons.save_outlined, size: 20),
-            onPressed: _saveCurrentProject,
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'Studio Tools',
-            icon: const Icon(Icons.more_vert_rounded, size: 21),
-            onSelected: (val) {
-              if (val == 'fonts') _openFontsLibrarySheet();
-              if (val == 'scanner') _openDocumentScannerSheet();
-              if (val == 'guides') setState(() => _showGuides = !_showGuides);
-              if (val == 'guide') _showQuickTourSheet();
-            },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(
-                value: 'fonts',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.font_download_outlined, size: 20),
-                  title: Text('Fonts Library'),
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'scanner',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.document_scanner_outlined, size: 20),
-                  title: Text('Document Scanner'),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'guides',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(_showGuides ? Icons.grid_on_rounded : Icons.grid_off_rounded, size: 20),
-                  title: Text(_showGuides ? 'Hide Margin Guides' : 'Show Margin Guides'),
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'guide',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.help_outline_rounded, size: 20),
-                  title: Text('Quick Guide & Help'),
-                ),
-              ),
-            ],
-          ),
           Padding(
-            padding: const EdgeInsets.only(right: 10, left: 2),
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: _amber,
-                foregroundColor: Colors.black,
-                minimumSize: const Size(0, 34),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-              ),
-              onPressed: _showExportOptionsSheet,
-              icon: const Icon(Icons.download_rounded, size: 17),
-              label: const Text('Export', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-            ),
+            padding: const EdgeInsets.only(right: 4),
+            child: _buildModernThemeToggle(),
           ),
+          if (_inStudio) ...[
+            IconButton(
+              tooltip: 'Save Offline',
+              icon: const Icon(Icons.save_outlined, size: 20),
+              onPressed: _saveCurrentProject,
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'Studio Tools',
+              icon: const Icon(Icons.more_vert_rounded, size: 21),
+              onSelected: (val) {
+                if (val == 'fonts') _openFontsLibrarySheet();
+                if (val == 'scanner') _openDocumentScannerSheet();
+                if (val == 'guides') setState(() => _showGuides = !_showGuides);
+                if (val == 'guide') _showQuickTourSheet();
+              },
+              itemBuilder: (ctx) => [
+                const PopupMenuItem(
+                  value: 'fonts',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.font_download_outlined, size: 20),
+                    title: Text('Fonts Library'),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'scanner',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.document_scanner_outlined, size: 20),
+                    title: Text('Document Scanner'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'guides',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(_showGuides ? Icons.grid_on_rounded : Icons.grid_off_rounded, size: 20),
+                    title: Text(_showGuides ? 'Hide Margin Guides' : 'Show Margin Guides'),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'guide',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.help_outline_rounded, size: 20),
+                    title: Text('Quick Guide & Help'),
+                  ),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 10, left: 2),
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: _inkPrimary,
+                  foregroundColor: _onInkPrimary,
+                  minimumSize: const Size(0, 34),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                ),
+                onPressed: _showExportOptionsSheet,
+                icon: const Icon(Icons.download_rounded, size: 17),
+                label: const Text('Export', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ] else ...[
+            PopupMenuButton<String>(
+              tooltip: 'Tools',
+              icon: const Icon(Icons.more_vert_rounded, size: 21),
+              onSelected: (val) {
+                if (val == 'fonts') _openFontsLibrarySheet();
+                if (val == 'scanner') _openDocumentScannerSheet();
+                if (val == 'guide') _showQuickTourSheet();
+              },
+              itemBuilder: (ctx) => const [
+                PopupMenuItem(
+                  value: 'fonts',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.font_download_outlined, size: 20),
+                    title: Text('Fonts Library'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'scanner',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.document_scanner_outlined, size: 20),
+                    title: Text('Document Scanner'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'guide',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.help_outline_rounded, size: 20),
+                    title: Text('Quick Guide & Help'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 4),
+          ],
         ],
       ),
       body: IndexedStack(
-        index: _navIndex,
+        index: _inStudio ? 0 : (_navIndex + 1),
         children: [
           _buildStudioView(stageBg),
-          _navIndex == 1 ? _buildQuickFillView() : const SizedBox.shrink(),
-          _navIndex == 2 ? _buildSignatureView() : const SizedBox.shrink(),
+          _buildProjectsView(),
+          (!_inStudio && _navIndex == 1) ? _buildQuickFillView() : const SizedBox.shrink(),
+          (!_inStudio && _navIndex == 2) ? _buildSignatureView() : const SizedBox.shrink(),
           _buildPagesView(),
           _buildBatchView(),
-          _buildProjectsView(),
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: _borderColor)),
-        ),
-        child: NavigationBar(
-          selectedIndex: _navIndex,
-          onDestinationSelected: (i) => setState(() {
-            _navIndex = i;
-            if (i == 0 && _activeLayer?.type == LayerType.text) {
-              _textController.text = _activeLayer!.text;
-            }
-          }),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.brush_outlined), selectedIcon: Icon(Icons.brush_rounded), label: 'Studio'),
-            NavigationDestination(icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
-            NavigationDestination(icon: Icon(Icons.draw_outlined), selectedIcon: Icon(Icons.draw_rounded), label: 'Sign/Seal'),
-            NavigationDestination(icon: Icon(Icons.description_outlined), selectedIcon: Icon(Icons.description_rounded), label: 'Docs'),
-            NavigationDestination(icon: Icon(Icons.auto_awesome_motion_outlined), selectedIcon: Icon(Icons.auto_awesome_motion_rounded), label: 'Batch'),
-            NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder_rounded), label: 'Projects'),
-          ],
-        ),
-      ),
+      bottomNavigationBar: _inStudio
+          ? null
+          : Container(
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: _borderColor)),
+              ),
+              child: NavigationBar(
+                selectedIndex: _navIndex,
+                onDestinationSelected: (i) => setState(() {
+                  _navIndex = i;
+                }),
+                destinations: const [
+                  NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder_rounded), label: 'Projects'),
+                  NavigationDestination(icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
+                  NavigationDestination(icon: Icon(Icons.draw_outlined), selectedIcon: Icon(Icons.draw_rounded), label: 'Sign/Seal'),
+                  NavigationDestination(icon: Icon(Icons.description_outlined), selectedIcon: Icon(Icons.description_rounded), label: 'Docs'),
+                  NavigationDestination(icon: Icon(Icons.auto_awesome_motion_outlined), selectedIcon: Icon(Icons.auto_awesome_motion_rounded), label: 'Batch'),
+                ],
+              ),
+            ),
         ),
         if (_showLaunchSplash)
           Positioned.fill(
@@ -1862,7 +2101,7 @@ class _StudioScreenState extends State<StudioScreen> {
                                   borderRadius: BorderRadius.circular(2),
                                   child: const LinearProgressIndicator(
                                     backgroundColor: Color(0xFFE2E8F0),
-                                    color: Color(0xFFD97706),
+                                    color: Color(0xFF111317),
                                   ),
                                 ),
                               ),
@@ -1877,6 +2116,7 @@ class _StudioScreenState extends State<StudioScreen> {
             ),
           ),
       ],
+    ),
     );
   }
 
@@ -1996,7 +2236,7 @@ class _StudioScreenState extends State<StudioScreen> {
         ? _amber
         : (danger ? Colors.redAccent.withOpacity(0.12) : _chipBg);
     final fg = highlight
-        ? Colors.black
+        ? _onInkPrimary
         : (danger ? Colors.redAccent : _textColor);
     return Padding(
       padding: const EdgeInsets.only(right: 6),
@@ -2043,14 +2283,14 @@ class _StudioScreenState extends State<StudioScreen> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: active ? Colors.black : _subColor),
+              Icon(icon, size: 14, color: active ? _onInkPrimary : _subColor),
               const SizedBox(width: 5),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: active ? FontWeight.w700 : FontWeight.w600,
-                  color: active ? Colors.black : _textColor,
+                  color: active ? _onInkPrimary : _textColor,
                 ),
               ),
             ],
@@ -2362,8 +2602,8 @@ class _StudioScreenState extends State<StudioScreen> {
               Expanded(
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: isGuilloche ? _amber : _chipBg,
-                    foregroundColor: isGuilloche ? Colors.black : _textColor,
+                    backgroundColor: isGuilloche ? _inkPrimary : _chipBg,
+                    foregroundColor: isGuilloche ? _onInkPrimary : _textColor,
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
@@ -2478,7 +2718,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     label: Text(label, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
                     selected: active,
                     selectedColor: _amber,
-                    labelStyle: TextStyle(color: active ? Colors.black : _textColor),
+                    labelStyle: TextStyle(color: active ? _onInkPrimary : _textColor),
                     onSelected: (_) {
                       _pushUndoSnapshot();
                       setState(() {
@@ -2722,8 +2962,8 @@ class _StudioScreenState extends State<StudioScreen> {
         children: [
           FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: _amber,
-              foregroundColor: Colors.black,
+              backgroundColor: _inkPrimary,
+              foregroundColor: _onInkPrimary,
               padding: const EdgeInsets.symmetric(vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
@@ -3071,8 +3311,8 @@ class _StudioScreenState extends State<StudioScreen> {
               Expanded(
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: layer.aspectLocked ? _amber : _chipBg,
-                    foregroundColor: layer.aspectLocked ? Colors.black : _textColor,
+                    backgroundColor: layer.aspectLocked ? _inkPrimary : _chipBg,
+                    foregroundColor: layer.aspectLocked ? _onInkPrimary : _textColor,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () => setState(() => layer.aspectLocked = !layer.aspectLocked),
@@ -3164,7 +3404,7 @@ class _StudioScreenState extends State<StudioScreen> {
               label: Text(st.$2, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
               selected: sel,
               selectedColor: _amber,
-              labelStyle: TextStyle(color: sel ? Colors.black : _textColor),
+              labelStyle: TextStyle(color: sel ? _onInkPrimary : _textColor),
               onSelected: (_) => setState(() => layer.shapeKind = st.$1),
             );
           }).toList(),
@@ -3249,7 +3489,7 @@ class _StudioScreenState extends State<StudioScreen> {
           style: TextStyle(
             fontSize: 11.5,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? Colors.black : _textColor,
+            color: selected ? _onInkPrimary : _textColor,
           ),
         ),
       ),
@@ -3300,7 +3540,7 @@ class _StudioScreenState extends State<StudioScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 14, color: selected ? Colors.black : _subColor),
+            Icon(icon, size: 14, color: selected ? _onInkPrimary : _subColor),
             const SizedBox(width: 4),
             Flexible(
               child: Text(
@@ -3310,7 +3550,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
-                  color: selected ? Colors.black : _textColor,
+                  color: selected ? _onInkPrimary : _textColor,
                 ),
               ),
             ),
@@ -3464,8 +3704,8 @@ class _StudioScreenState extends State<StudioScreen> {
             ),
             const SizedBox(width: 8),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
-              onPressed: () => setState(() => _navIndex = 0),
+              style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
+              onPressed: () => _enterStudio(),
               icon: const Icon(Icons.brush_outlined, size: 16),
               label: const Text('Studio'),
             ),
@@ -3673,7 +3913,7 @@ class _StudioScreenState extends State<StudioScreen> {
                                 ),
                                 const SizedBox(height: 8),
                                 FilledButton.icon(
-                                  style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
+                                  style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
                                   onPressed: () => _replaceLayerImageKeepingConfig(l),
                                   icon: const Icon(Icons.swap_horiz_rounded, size: 16),
                                   label: const Text('Replace Image'),
@@ -4051,8 +4291,8 @@ class _StudioScreenState extends State<StudioScreen> {
           _selectedLayerId = null;
           _undoStack.clear();
           _redoStack.clear();
-          _navIndex = 0;
         });
+        _enterStudio();
       },
     );
   }
@@ -4111,8 +4351,8 @@ class _StudioScreenState extends State<StudioScreen> {
             height: 36,
             child: FilledButton(
               style: FilledButton.styleFrom(
-                backgroundColor: _amber,
-                foregroundColor: Colors.black,
+                backgroundColor: _inkPrimary,
+                foregroundColor: _onInkPrimary,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
               ),
               onPressed: onTap,
@@ -4145,7 +4385,7 @@ class _StudioScreenState extends State<StudioScreen> {
                   color: _amber,
                   borderRadius: BorderRadius.circular(11),
                 ),
-                child: const Icon(Icons.document_scanner_rounded, color: Colors.black, size: 22),
+                child: Icon(Icons.document_scanner_rounded, color: _onInkPrimary, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -4162,7 +4402,7 @@ class _StudioScreenState extends State<StudioScreen> {
               ),
               const SizedBox(width: 8),
               FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
+                style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
                 onPressed: _openDocumentScannerSheet,
                 child: const Text('Scan', style: TextStyle(fontWeight: FontWeight.w700)),
               ),
@@ -4211,7 +4451,7 @@ class _StudioScreenState extends State<StudioScreen> {
               ],
             ),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: _amber, foregroundColor: Colors.black),
+              style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
               onPressed: () async {
                 setState(() {
                   _project.pages.add(DocumentPage(
@@ -4223,8 +4463,8 @@ class _StudioScreenState extends State<StudioScreen> {
                     layers: [],
                   ));
                   _pageIndex = _project.pages.length - 1;
-                  _navIndex = 0;
                 });
+                _enterStudio(snapshotCurrent: false);
                 await _runWithSavingHud(
                   savingTitle: 'Saving Page...',
                   savedTitle: 'Page Added',
@@ -4244,11 +4484,13 @@ class _StudioScreenState extends State<StudioScreen> {
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: InkWell(
-              onTap: () => setState(() {
-                _pageIndex = i;
-                _selectedLayerId = null;
-                _navIndex = 0;
-              }),
+              onTap: () {
+                setState(() {
+                  _pageIndex = i;
+                  _selectedLayerId = null;
+                });
+                _enterStudio();
+              },
               borderRadius: BorderRadius.circular(14),
               child: Container(
                 padding: const EdgeInsets.all(14),
@@ -4292,7 +4534,7 @@ class _StudioScreenState extends State<StudioScreen> {
                                     color: _amber,
                                     borderRadius: BorderRadius.circular(6),
                                   ),
-                                  child: const Text('ACTIVE', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Colors.black)),
+                                  child: Text('ACTIVE', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: _onInkPrimary)),
                                 ),
                               ],
                             ],
@@ -4453,8 +4695,8 @@ class _StudioScreenState extends State<StudioScreen> {
           width: double.infinity,
           child: FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: _amber,
-              foregroundColor: Colors.black,
+              backgroundColor: _inkPrimary,
+              foregroundColor: _onInkPrimary,
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
@@ -4593,8 +4835,8 @@ class _StudioScreenState extends State<StudioScreen> {
                                         Expanded(
                                           child: FilledButton.icon(
                                             style: FilledButton.styleFrom(
-                                              backgroundColor: _amber,
-                                              foregroundColor: Colors.black,
+                                              backgroundColor: _inkPrimary,
+                                              foregroundColor: _onInkPrimary,
                                             ),
                                             onPressed: () async {
                                               Navigator.pop(dCtx);
@@ -4968,9 +5210,9 @@ class _StudioScreenState extends State<StudioScreen> {
             _selectedLayerId = null;
             _undoStack.clear();
             _redoStack.clear();
-            _navIndex = 0;
           });
           await _rehydrateProjectFilters(imported);
+          if (mounted) _enterStudio();
         },
       );
     } catch (e) {
@@ -4988,16 +5230,38 @@ class _StudioScreenState extends State<StudioScreen> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Offline Projects', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            Text('${_projects.length} saved locally on device', style: TextStyle(fontSize: 12, color: _subColor)),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Offline Projects', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                      Text('${_projects.length} saved locally · Tap a project to edit in Studio', style: TextStyle(fontSize: 12, color: _subColor)),
+                    ],
+                  ),
+                ),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: _borderColor),
+                    foregroundColor: _textColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => _enterStudio(),
+                  icon: const Icon(Icons.brush_outlined, size: 16),
+                  label: const Text('Open Studio', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: _amber,
-                      foregroundColor: Colors.black,
+                      backgroundColor: _inkPrimary,
+                      foregroundColor: _onInkPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                     ),
@@ -5019,7 +5283,8 @@ class _StudioScreenState extends State<StudioScreen> {
                             _selectedLayerId = null;
                             _undoStack.clear();
                             _redoStack.clear();
-                            _navIndex = 0;
+                            _studioEntrySnapshot = (0, fresh.encode());
+                            _inStudio = true;
                           });
                         },
                       );
@@ -5059,7 +5324,8 @@ class _StudioScreenState extends State<StudioScreen> {
                   _selectedLayerId = null;
                   _undoStack.clear();
                   _redoStack.clear();
-                  _navIndex = 0;
+                  _studioEntrySnapshot = (0, proj.encode());
+                  _inStudio = true;
                 });
                 await _rehydrateProjectFilters(proj);
               },
@@ -5083,7 +5349,7 @@ class _StudioScreenState extends State<StudioScreen> {
                             color: isCurrent ? _amber : _chipBg,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(Icons.folder_open_rounded, color: isCurrent ? Colors.black : _subColor, size: 20),
+                          child: Icon(Icons.folder_open_rounded, color: isCurrent ? _onInkPrimary : _subColor, size: 20),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -5105,7 +5371,7 @@ class _StudioScreenState extends State<StudioScreen> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                       decoration: BoxDecoration(color: _amber, borderRadius: BorderRadius.circular(6)),
-                                      child: const Text('OPEN', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Colors.black)),
+                                      child: Text('OPEN', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: _onInkPrimary)),
                                     ),
                                   ],
                                 ],
@@ -5286,8 +5552,8 @@ class _StudioScreenState extends State<StudioScreen> {
                       padding: const EdgeInsets.only(right: 10, left: 4),
                       child: FilledButton.icon(
                         style: FilledButton.styleFrom(
-                          backgroundColor: _amber,
-                          foregroundColor: Colors.black,
+                          backgroundColor: _inkPrimary,
+                          foregroundColor: _onInkPrimary,
                           minimumSize: const Size(0, 34),
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                         ),
@@ -5568,7 +5834,7 @@ class _StudioScreenState extends State<StudioScreen> {
           setState(() {
             _page.layers.add(layer);
             _selectedLayerId = layer.id;
-            _navIndex = 0;
+            _inStudio = true;
           });
         }
         await _saveCurrentProject(showToast: false);
@@ -5646,7 +5912,7 @@ class _StudioScreenState extends State<StudioScreen> {
     setState(() {
       _page.layers.add(layer);
       _selectedLayerId = layer.id;
-      _navIndex = 0;
+      _inStudio = true;
     });
     await _runWithSavingHud(
       savingTitle: 'Saving Stamp...',
@@ -6120,8 +6386,8 @@ class _StudioScreenState extends State<StudioScreen> {
           height: 46,
           child: FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: _amber,
-              foregroundColor: Colors.black,
+              backgroundColor: _inkPrimary,
+              foregroundColor: _onInkPrimary,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: _sigMode == 2 ? _addStampToProjectCanvas : _addSignatureToProjectCanvas,
@@ -6777,7 +7043,7 @@ class _StudioScreenState extends State<StudioScreen> {
         _textController.text = newLayer.text;
         _inspectorTab = 0;
       }
-      _navIndex = 0;
+      _inStudio = true;
     });
   }
 
@@ -7052,8 +7318,8 @@ class _StudioScreenState extends State<StudioScreen> {
                           const SizedBox(width: 8),
                           FilledButton.icon(
                             style: FilledButton.styleFrom(
-                              backgroundColor: _amber,
-                              foregroundColor: Colors.black,
+                              backgroundColor: _inkPrimary,
+                              foregroundColor: _onInkPrimary,
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
@@ -7157,8 +7423,8 @@ class _StudioScreenState extends State<StudioScreen> {
                                   Expanded(
                                     child: FilledButton.icon(
                                       style: FilledButton.styleFrom(
-                                        backgroundColor: _amber,
-                                        foregroundColor: Colors.black,
+                                        backgroundColor: _inkPrimary,
+                                        foregroundColor: _onInkPrimary,
                                         padding: const EdgeInsets.symmetric(vertical: 9),
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
                                       ),
@@ -7427,7 +7693,7 @@ class _StudioScreenState extends State<StudioScreen> {
                       }
                       _selectedLayerId = null;
                       _inspectorTab = 2;
-                      _navIndex = 0;
+                      _inStudio = true;
                     });
                   }
                   await _saveCurrentProject(showToast: false);
@@ -7490,8 +7756,8 @@ class _StudioScreenState extends State<StudioScreen> {
                         width: double.infinity,
                         child: FilledButton.icon(
                           style: FilledButton.styleFrom(
-                            backgroundColor: _amber,
-                            foregroundColor: Colors.black,
+                            backgroundColor: _inkPrimary,
+                            foregroundColor: _onInkPrimary,
                             padding: const EdgeInsets.symmetric(vertical: 13),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                           ),
@@ -7655,8 +7921,8 @@ class _StudioScreenState extends State<StudioScreen> {
                             Expanded(
                               child: FilledButton.icon(
                                 style: FilledButton.styleFrom(
-                                  backgroundColor: _amber,
-                                  foregroundColor: Colors.black,
+                                  backgroundColor: _inkPrimary,
+                                  foregroundColor: _onInkPrimary,
                                   padding: const EdgeInsets.symmetric(vertical: 13),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                                 ),

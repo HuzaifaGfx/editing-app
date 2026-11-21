@@ -332,9 +332,10 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                         child: Container(
                                                           decoration: BoxDecoration(
                                                             border: Border.all(
-                                                              color: const Color(0xFFF59E0B),
+                                                              color: const Color(0xFF111317),
                                                               width: (2.5 * invScale).clamp(2.0, 20.0),
                                                             ),
+                                                            boxShadow: [BoxShadow(color: Colors.white.withOpacity(0.55), blurRadius: 0, spreadRadius: (1.0 * invScale).clamp(0.8, 4.0))],
                                                           ),
                                                         ),
                                                       ),
@@ -430,7 +431,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                         bottom: 0,
                                         width: 2.0 * invScale,
                                         child: IgnorePointer(
-                                          child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
+                                          child: Container(color: const Color(0xFF111317).withOpacity(0.85)),
                                         ),
                                       ),
                                     if (_snapY && !widget.hideOverlaysForExport)
@@ -440,7 +441,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                         right: 0,
                                         height: 2.0 * invScale,
                                         child: IgnorePointer(
-                                          child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
+                                          child: Container(color: const Color(0xFF111317).withOpacity(0.85)),
                                         ),
                                       ),
                                     if (!widget.hideOverlaysForExport && selectedLayer != null && !selectedLayer.locked)
@@ -476,7 +477,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFFF59E0B), shape: BoxShape.circle)),
+                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF111317), shape: BoxShape.circle)),
                           const SizedBox(width: 4),
                           Text('Scale', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87)),
                           const SizedBox(width: 10),
@@ -920,7 +921,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                       width: badgeSize,
                       height: badgeSize,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF59E0B),
+                        color: const Color(0xFF111317),
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: ringWidth),
                         boxShadow: [
@@ -931,7 +932,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                           ),
                         ],
                       ),
-                      child: Icon(Icons.open_in_full_rounded, size: iconSize * 0.92, color: Colors.black),
+                      child: Icon(Icons.open_in_full_rounded, size: iconSize * 0.92, color: Colors.white),
                     ),
                   ),
                 ),
@@ -1109,7 +1110,7 @@ class _MarginGuidesPainter extends CustomPainter {
     canvas.drawLine(Offset(0, size.height * 2 / 3), Offset(size.width, size.height * 2 / 3), thirdsPaint);
 
     final crossPaint = Paint()
-      ..color = const Color(0xFFF59E0B).withOpacity(0.45)
+      ..color = const Color(0xFF111317).withOpacity(0.45)
       ..strokeWidth = (1.1 * invScale).clamp(0.7, 2.2);
     final cx = size.width / 2;
     final cy = size.height / 2;

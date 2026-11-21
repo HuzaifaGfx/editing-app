@@ -20,8 +20,9 @@ class QalamixApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const amber = Color(0xFFF59E0B);
-    const amberDark = Color(0xFFD97706);
+    const inkBlack = Color(0xFF111317);
+    const inkSlate = Color(0xFF334155);
+    const inkWhite = Color(0xFFF8FAFC);
 
     final lightTheme = ThemeData(
       useMaterial3: true,
@@ -29,9 +30,9 @@ class QalamixApp extends StatelessWidget {
       scaffoldBackgroundColor: const Color(0xFFF3F5F8),
       fontFamily: 'PlusJakartaSans',
       colorScheme: const ColorScheme.light(
-        primary: amberDark,
+        primary: inkBlack,
         onPrimary: Colors.white,
-        secondary: amber,
+        secondary: inkSlate,
         surface: Color(0xFFFFFFFF),
         onSurface: Color(0xFF0F172A),
         onSurfaceVariant: Color(0xFF475569),
@@ -59,21 +60,21 @@ class QalamixApp extends StatelessWidget {
         elevation: 0,
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
-        indicatorColor: amber.withOpacity(0.18),
+        indicatorColor: inkBlack.withOpacity(0.10),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final sel = states.contains(WidgetState.selected);
           return TextStyle(
             fontSize: 10.5,
             fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-            color: sel ? amberDark : const Color(0xFF64748B),
+            color: sel ? inkBlack : const Color(0xFF64748B),
           );
         }),
         iconTheme: WidgetStateProperty.resolveWith((states) {
           final sel = states.contains(WidgetState.selected);
           return IconThemeData(
             size: 22,
-            color: sel ? amberDark : const Color(0xFF64748B),
+            color: sel ? inkBlack : const Color(0xFF64748B),
           );
         }),
       ),
@@ -90,7 +91,7 @@ class QalamixApp extends StatelessWidget {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: amberDark, width: 1.5),
+          borderSide: const BorderSide(color: inkBlack, width: 1.5),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
@@ -107,9 +108,9 @@ class QalamixApp extends StatelessWidget {
       scaffoldBackgroundColor: const Color(0xFF0D0F12),
       fontFamily: 'PlusJakartaSans',
       colorScheme: const ColorScheme.dark(
-        primary: amber,
-        onPrimary: Colors.black,
-        secondary: Color(0xFFFBBF24),
+        primary: inkWhite,
+        onPrimary: inkBlack,
+        secondary: Color(0xFF94A3B8),
         surface: Color(0xFF16191E),
         onSurface: Color(0xFFF8FAFC),
         onSurfaceVariant: Color(0xFF94A3B8),
@@ -137,21 +138,21 @@ class QalamixApp extends StatelessWidget {
         elevation: 0,
         backgroundColor: const Color(0xFF16191E),
         surfaceTintColor: Colors.transparent,
-        indicatorColor: amber.withOpacity(0.20),
+        indicatorColor: inkWhite.withOpacity(0.14),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final sel = states.contains(WidgetState.selected);
           return TextStyle(
             fontSize: 10.5,
             fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-            color: sel ? amber : const Color(0xFF94A3B8),
+            color: sel ? inkWhite : const Color(0xFF94A3B8),
           );
         }),
         iconTheme: WidgetStateProperty.resolveWith((states) {
           final sel = states.contains(WidgetState.selected);
           return IconThemeData(
             size: 22,
-            color: sel ? amber : const Color(0xFF94A3B8),
+            color: sel ? inkWhite : const Color(0xFF94A3B8),
           );
         }),
       ),
@@ -168,7 +169,7 @@ class QalamixApp extends StatelessWidget {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: amber, width: 1.5),
+          borderSide: const BorderSide(color: inkWhite, width: 1.5),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
