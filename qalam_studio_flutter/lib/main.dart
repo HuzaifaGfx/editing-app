@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'ui/studio_screen.dart';
 
-final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.dark);
+final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.light);
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();

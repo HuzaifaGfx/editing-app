@@ -598,7 +598,13 @@ class _LayerCanvasState extends State<LayerCanvas> {
       Widget? imgWidget;
       final fit = layer.aspectLocked ? layer.objectFit : BoxFit.fill;
 
-      if (layer.processedWhiteRemovedBytes != null) {
+      if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
+        imgWidget = Image.memory(
+          layer.processedGuillocheBytes!,
+          fit: fit,
+          gaplessPlayback: true,
+        );
+      } else if (layer.processedWhiteRemovedBytes != null) {
         imgWidget = Image.memory(
           layer.processedWhiteRemovedBytes!,
           fit: fit,
@@ -619,7 +625,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
         );
       }
 
-      final hasCustomFilter = !_filtersAreNeutral(layer.filters);
+      final hasCustomFilter = !_filtersAreNeutral(layer.filters) &&
+          !(layer.filters.guilloche && layer.processedGuillocheBytes != null);
       final Widget filteredImg = hasCustomFilter
           ? _LayerColorFilter(
               colorFilter: buildLayerColorFilter(layer.filters),

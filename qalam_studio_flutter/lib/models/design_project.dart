@@ -12,6 +12,11 @@ class FilterSettings {
   double grayscale;
   double removeWhite; // 0 = off, 1..100 tolerance
   bool blackAndWhite;
+  bool guilloche;
+  double guillocheContrast; // 0..25 (% contrast boost, default 13)
+  double guillocheBend;     // 0..6 (px contour bend, default 3)
+  double guillocheOpacity;  // 75..100 (% skin opacity over paper, default 88)
+  String guillochePattern;  // 'banknote' | 'rosette' | 'mesh'
 
   FilterSettings({
     this.brightness = 1.0,
@@ -21,6 +26,11 @@ class FilterSettings {
     this.grayscale = 0.0,
     this.removeWhite = 0.0,
     this.blackAndWhite = false,
+    this.guilloche = false,
+    this.guillocheContrast = 13.0,
+    this.guillocheBend = 3.0,
+    this.guillocheOpacity = 88.0,
+    this.guillochePattern = 'banknote',
   });
 
   FilterSettings copy() => FilterSettings(
@@ -31,6 +41,11 @@ class FilterSettings {
         grayscale: grayscale,
         removeWhite: removeWhite,
         blackAndWhite: blackAndWhite,
+        guilloche: guilloche,
+        guillocheContrast: guillocheContrast,
+        guillocheBend: guillocheBend,
+        guillocheOpacity: guillocheOpacity,
+        guillochePattern: guillochePattern,
       );
 
   Map<String, dynamic> toJson() => {
@@ -41,6 +56,11 @@ class FilterSettings {
         'grayscale': grayscale,
         'removeWhite': removeWhite,
         'blackAndWhite': blackAndWhite,
+        'guilloche': guilloche,
+        'guillocheContrast': guillocheContrast,
+        'guillocheBend': guillocheBend,
+        'guillocheOpacity': guillocheOpacity,
+        'guillochePattern': guillochePattern,
       };
 
   factory FilterSettings.fromJson(Map<String, dynamic> json) => FilterSettings(
@@ -51,6 +71,11 @@ class FilterSettings {
         grayscale: (json['grayscale'] ?? 0.0).toDouble(),
         removeWhite: (json['removeWhite'] ?? 0.0).toDouble(),
         blackAndWhite: json['blackAndWhite'] ?? false,
+        guilloche: json['guilloche'] ?? false,
+        guillocheContrast: (json['guillocheContrast'] ?? 13.0).toDouble(),
+        guillocheBend: (json['guillocheBend'] ?? 3.0).toDouble(),
+        guillocheOpacity: (json['guillocheOpacity'] ?? 88.0).toDouble(),
+        guillochePattern: (json['guillochePattern'] ?? 'banknote').toString(),
       );
 }
 
@@ -92,8 +117,9 @@ class DesignLayer {
   bool flipY;
   FilterSettings filters;
 
-  // Runtime cache for white-removed PNG bytes
+  // Runtime caches for processed PNG bytes
   Uint8List? processedWhiteRemovedBytes;
+  Uint8List? processedGuillocheBytes;
 
   DesignLayer({
     required this.id,
@@ -115,7 +141,7 @@ class DesignLayer {
     this.fontSize = 32,
     this.fontWeight = 400,
     this.lineHeight = 1.4,
-    this.textColor = const Color(0xFFFFFFFF),
+    this.textColor = const Color(0xFF0F172A),
     this.textAlign,
     this.textBgColor = const Color(0x00000000),
     this.localImagePath,
@@ -129,6 +155,7 @@ class DesignLayer {
     this.flipY = false,
     FilterSettings? filters,
     this.processedWhiteRemovedBytes,
+    this.processedGuillocheBytes,
   }) : filters = filters ?? FilterSettings();
 
   DesignLayer cloneWithNewId(String newId) => DesignLayer(
@@ -165,6 +192,7 @@ class DesignLayer {
         flipY: flipY,
         filters: filters.copy(),
         processedWhiteRemovedBytes: processedWhiteRemovedBytes,
+        processedGuillocheBytes: processedGuillocheBytes,
       );
 
   Map<String, dynamic> toJson() => {
@@ -222,7 +250,7 @@ class DesignLayer {
         fontSize: (json['fontSize'] ?? 32).toDouble(),
         fontWeight: (json['fontWeight'] ?? 400).toInt(),
         lineHeight: (json['lineHeight'] ?? 1.4).toDouble(),
-        textColor: Color(json['textColor'] ?? 0xFFFFFFFF),
+        textColor: Color(json['textColor'] ?? 0xFF0F172A),
         textAlign: json['textAlign'] != null
             ? TextAlign.values.firstWhere(
                 (t) => t.name == json['textAlign'],
@@ -256,7 +284,7 @@ class DocumentPage {
     required this.title,
     this.width = 900,
     this.height = 1200,
-    this.backgroundColor = const Color(0xFF191C22),
+    this.backgroundColor = const Color(0xFFFAF9F6),
     required this.layers,
   });
 
@@ -274,7 +302,7 @@ class DocumentPage {
         title: json['title'],
         width: (json['width'] ?? 900).toDouble(),
         height: (json['height'] ?? 1200).toDouble(),
-        backgroundColor: Color(json['backgroundColor'] ?? 0xFF191C22),
+        backgroundColor: Color(json['backgroundColor'] ?? 0xFFFAF9F6),
         layers: (json['layers'] as List? ?? [])
             .map((e) => DesignLayer.fromJson(e))
             .toList(),

@@ -52,6 +52,7 @@ class _StudioScreenState extends State<StudioScreen> {
   final List<_ScannedDocPage> _scannedPages = [];
   int _activeScanIdx = 0;
   int _whiteRemovalSeq = 0;
+  int _guillocheSeq = 0;
   final List<(int, String)> _undoStack = [];
   final List<(int, String)> _redoStack = [];
   final List<_CustomInstalledFont> _customFonts = [];
@@ -103,6 +104,8 @@ class _StudioScreenState extends State<StudioScreen> {
   List<String> _batchOutputs = [];
   bool _batchProcessing = false;
   bool _batchBw = false;
+  bool _batchGuilloche = false;
+  String _batchGuillochePattern = 'banknote';
   double _batchRemoveWhite = 0.0;
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
@@ -309,9 +312,8 @@ class _StudioScreenState extends State<StudioScreen> {
     try {
       final docsDir = await getApplicationDocumentsDirectory();
       final flag = File(p.join(docsDir.path, 'qalamix_tour_seen_v1.flag'));
-      if (!flag.existsSync() && mounted) {
+      if (!flag.existsSync()) {
         await flag.writeAsString('1');
-        if (mounted) _showQuickTourSheet();
       }
     } catch (_) {}
   }
@@ -487,14 +489,14 @@ class _StudioScreenState extends State<StudioScreen> {
             title: 'Page 1',
             width: 900,
             height: 1200,
-            backgroundColor: const Color(0xFF191C22),
+            backgroundColor: const Color(0xFFFAF9F6),
             layers: [
               DesignLayer(
                 id: 't1',
                 name: 'Urdu Headline',
                 type: LayerType.text,
                 x: 80,
-                y: 160,
+                y: 180,
                 width: 740,
                 height: 220,
                 text: 'ہر لفظ ایک تصویر ہے',
@@ -502,14 +504,14 @@ class _StudioScreenState extends State<StudioScreen> {
                 fontFamily: 'NotoNastaliqUrdu',
                 fontSize: 48,
                 lineHeight: 2.3,
-                textColor: const Color(0xFFFFFFFF),
+                textColor: const Color(0xFF0F172A),
               ),
               DesignLayer(
                 id: 't2',
                 name: 'English Subtitle',
                 type: LayerType.text,
                 x: 80,
-                y: 420,
+                y: 430,
                 width: 740,
                 height: 120,
                 text: 'QALAMIX — OFFLINE DESIGN & DOCS',
@@ -517,7 +519,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 fontFamily: 'PlusJakartaSans',
                 fontSize: 24,
                 lineHeight: 1.4,
-                textColor: _amber,
+                textColor: const Color(0xFFB45309),
               ),
             ],
           ),
@@ -543,14 +545,28 @@ class _StudioScreenState extends State<StudioScreen> {
     for (final pg in proj.pages) {
       for (final l in pg.layers) {
         if (l.type == LayerType.image &&
-            l.filters.removeWhite > 0 &&
             l.localImagePath != null &&
-            File(l.localImagePath!).existsSync() &&
-            l.processedWhiteRemovedBytes == null) {
-          final bytes = await removeWhiteBackgroundOffline(l.localImagePath!, l.filters.removeWhite);
-          if (bytes != null) {
-            l.processedWhiteRemovedBytes = bytes;
-            changed = true;
+            File(l.localImagePath!).existsSync()) {
+          if (l.filters.removeWhite > 0 && l.processedWhiteRemovedBytes == null) {
+            final bytes = await removeWhiteBackgroundOffline(l.localImagePath!, l.filters.removeWhite);
+            if (bytes != null) {
+              l.processedWhiteRemovedBytes = bytes;
+              changed = true;
+            }
+          }
+          if (l.filters.guilloche && l.processedGuillocheBytes == null) {
+            final gBytes = await applyGuillocheBlendOffline(GuillocheRequest(
+              filePath: l.localImagePath!,
+              contrastPct: l.filters.guillocheContrast,
+              bendPx: l.filters.guillocheBend,
+              opacityPct: l.filters.guillocheOpacity,
+              pattern: l.filters.guillochePattern,
+              removeWhiteTolerance: l.filters.removeWhite,
+            ));
+            if (gBytes != null) {
+              l.processedGuillocheBytes = gBytes;
+              changed = true;
+            }
           }
         }
       }
@@ -603,10 +619,15 @@ class _StudioScreenState extends State<StudioScreen> {
 
   void _restoreEncodedSnapshot((int, String) snap) {
     final cache = <String, Uint8List>{};
+    final gCache = <String, Uint8List>{};
     for (final pg in _project.pages) {
       for (final l in pg.layers) {
         if (l.processedWhiteRemovedBytes != null) {
           cache['${l.id}_${l.filters.removeWhite.round()}'] = l.processedWhiteRemovedBytes!;
+        }
+        if (l.processedGuillocheBytes != null && l.filters.guilloche) {
+          final gKey = '${l.id}_${l.filters.guillochePattern}_${l.filters.guillocheContrast.round()}_${l.filters.guillocheBend.toStringAsFixed(1)}_${l.filters.guillocheOpacity.round()}_${l.filters.removeWhite.round()}';
+          gCache[gKey] = l.processedGuillocheBytes!;
         }
       }
     }
@@ -616,6 +637,12 @@ class _StudioScreenState extends State<StudioScreen> {
         final key = '${l.id}_${l.filters.removeWhite.round()}';
         if (cache.containsKey(key)) {
           l.processedWhiteRemovedBytes = cache[key];
+        }
+        if (l.filters.guilloche) {
+          final gKey = '${l.id}_${l.filters.guillochePattern}_${l.filters.guillocheContrast.round()}_${l.filters.guillocheBend.toStringAsFixed(1)}_${l.filters.guillocheOpacity.round()}_${l.filters.removeWhite.round()}';
+          if (gCache.containsKey(gKey)) {
+            l.processedGuillocheBytes = gCache[gKey];
+          }
         }
       }
     }
@@ -776,9 +803,13 @@ class _StudioScreenState extends State<StudioScreen> {
         setState(() {
           layer.localImagePath = permanentPath;
           layer.processedWhiteRemovedBytes = null;
+          layer.processedGuillocheBytes = null;
         });
         if (layer.filters.removeWhite > 0) {
           await _applyWhiteRemoval(layer, layer.filters.removeWhite);
+        }
+        if (layer.filters.guilloche) {
+          await _applyGuillocheBlend(layer);
         }
         await _saveCurrentProject(showToast: false);
       },
@@ -1259,6 +1290,7 @@ class _StudioScreenState extends State<StudioScreen> {
   }
 
   void _addTextLayer() {
+    final lightBg = _page.backgroundColor.alpha == 0 || _page.backgroundColor.computeLuminance() > 0.45;
     final layer = DesignLayer(
       id: 'txt_${DateTime.now().microsecondsSinceEpoch}',
       name: 'Urdu / English Text',
@@ -1272,7 +1304,7 @@ class _StudioScreenState extends State<StudioScreen> {
       fontFamily: 'NotoNastaliqUrdu',
       fontSize: 44,
       lineHeight: 2.3,
-      textColor: const Color(0xFFFFFFFF),
+      textColor: lightBg ? const Color(0xFF0F172A) : const Color(0xFFFFFFFF),
     );
     _clampLayerInPage(layer);
     _pushUndoSnapshot();
@@ -1521,23 +1553,51 @@ class _StudioScreenState extends State<StudioScreen> {
         layer.filters.removeWhite = 0;
         layer.processedWhiteRemovedBytes = null;
       });
+      if (layer.filters.guilloche) {
+        await _applyGuillocheBlend(layer);
+      }
       return;
     }
     setState(() => layer.filters.removeWhite = tolerance);
     final pngBytes = await removeWhiteBackgroundOffline(layer.localImagePath!, tolerance);
     if (!mounted || seq != _whiteRemovalSeq) return;
     setState(() => layer.processedWhiteRemovedBytes = pngBytes);
+    if (layer.filters.guilloche) {
+      await _applyGuillocheBlend(layer);
+    } else {
+      await _saveCurrentProject(showToast: false);
+    }
+  }
+
+  Future<void> _applyGuillocheBlend(DesignLayer layer) async {
+    if (layer.localImagePath == null) return;
+    final seq = ++_guillocheSeq;
+    if (!layer.filters.guilloche) {
+      setState(() => layer.processedGuillocheBytes = null);
+      await _saveCurrentProject(showToast: false);
+      return;
+    }
+    final pngBytes = await applyGuillocheBlendOffline(GuillocheRequest(
+      filePath: layer.localImagePath!,
+      contrastPct: layer.filters.guillocheContrast,
+      bendPx: layer.filters.guillocheBend,
+      opacityPct: layer.filters.guillocheOpacity,
+      pattern: layer.filters.guillochePattern,
+      removeWhiteTolerance: layer.filters.removeWhite,
+    ));
+    if (!mounted || seq != _guillocheSeq) return;
+    setState(() => layer.processedGuillocheBytes = pngBytes);
     await _saveCurrentProject(showToast: false);
   }
 
   @override
   Widget build(BuildContext context) {
-    final stageBg = _isDark ? const Color(0xFF0A0C0F) : const Color(0xFFE5E7EB);
+    final stageBg = _isDark ? const Color(0xFF0A0C0F) : const Color(0xFFEAECEF);
 
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 58,
-        titleSpacing: 14,
+        toolbarHeight: 56,
+        titleSpacing: 12,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: _borderColor),
@@ -1548,7 +1608,7 @@ class _StudioScreenState extends State<StudioScreen> {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: _isDark ? const Color(0xFF111317) : Colors.white,
                 borderRadius: BorderRadius.circular(9),
                 border: Border.all(color: _borderColor),
               ),
@@ -1598,36 +1658,11 @@ class _StudioScreenState extends State<StudioScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Fonts Library',
-            icon: Icon(Icons.font_download_outlined, size: 21, color: _accentText),
-            onPressed: _openFontsLibrarySheet,
-          ),
-          IconButton(
-            tooltip: 'Document Scanner',
-            icon: Icon(Icons.document_scanner_outlined, size: 21, color: _accentText),
-            onPressed: _openDocumentScannerSheet,
-          ),
-          if (_navIndex == 0)
-            IconButton(
-              tooltip: _showGuides ? 'Guides: ON (Tap to Hide)' : 'Guides: OFF (Tap to Show)',
-              icon: Icon(
-                _showGuides ? Icons.grid_on_rounded : Icons.grid_off_rounded,
-                size: 20,
-                color: _showGuides ? _accentText : _mutedColor,
-              ),
-              onPressed: () => setState(() => _showGuides = !_showGuides),
-            ),
-          IconButton(
-            tooltip: 'Quick Guide & Help',
-            icon: const Icon(Icons.help_outline_rounded, size: 21),
-            onPressed: _showQuickTourSheet,
-          ),
-          IconButton(
             tooltip: _isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
             icon: Icon(
               _isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
               color: _accentText,
-              size: 21,
+              size: 20,
             ),
             onPressed: () {
               appThemeMode.value = _isDark ? ThemeMode.light : ThemeMode.dark;
@@ -1635,8 +1670,56 @@ class _StudioScreenState extends State<StudioScreen> {
           ),
           IconButton(
             tooltip: 'Save Offline',
-            icon: const Icon(Icons.save_outlined, size: 21),
+            icon: const Icon(Icons.save_outlined, size: 20),
             onPressed: _saveCurrentProject,
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Studio Tools',
+            icon: const Icon(Icons.more_vert_rounded, size: 21),
+            onSelected: (val) {
+              if (val == 'fonts') _openFontsLibrarySheet();
+              if (val == 'scanner') _openDocumentScannerSheet();
+              if (val == 'guides') setState(() => _showGuides = !_showGuides);
+              if (val == 'guide') _showQuickTourSheet();
+            },
+            itemBuilder: (ctx) => [
+              const PopupMenuItem(
+                value: 'fonts',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.font_download_outlined, size: 20),
+                  title: Text('Fonts Library'),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'scanner',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.document_scanner_outlined, size: 20),
+                  title: Text('Document Scanner'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'guides',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(_showGuides ? Icons.grid_on_rounded : Icons.grid_off_rounded, size: 20),
+                  title: Text(_showGuides ? 'Hide Margin Guides' : 'Show Margin Guides'),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'guide',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.help_outline_rounded, size: 20),
+                  title: Text('Quick Guide & Help'),
+                ),
+              ),
+            ],
           ),
           Padding(
             padding: const EdgeInsets.only(right: 10, left: 2),
@@ -2094,8 +2177,22 @@ class _StudioScreenState extends State<StudioScreen> {
             removeWhite: targetImg.filters.removeWhite,
           ),
         ),
+        (
+          'Guilloche Blend',
+          FilterSettings(
+            brightness: 1.0,
+            contrast: 1.0,
+            saturate: 1.0,
+            guilloche: true,
+            guillocheContrast: 13.0,
+            guillocheBend: 3.0,
+            guillocheOpacity: 88.0,
+            guillochePattern: targetImg.filters.guillochePattern,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
       ];
-
+      final isGuilloche = targetImg.filters.guilloche;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2126,6 +2223,7 @@ class _StudioScreenState extends State<StudioScreen> {
                       setState(() {
                         targetImg.filters = FilterSettings();
                         targetImg.processedWhiteRemovedBytes = null;
+                        targetImg.processedGuillocheBytes = null;
                       });
                       await _saveCurrentProject(showToast: false);
                     },
@@ -2136,22 +2234,57 @@ class _StudioScreenState extends State<StudioScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: isWhiteRemoved ? const Color(0xFF10B981) : _chipBg,
-                foregroundColor: isWhiteRemoved ? Colors.black : _textColor,
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: isWhiteRemoved ? const Color(0xFF10B981) : _chipBg,
+                    foregroundColor: isWhiteRemoved ? Colors.black : _textColor,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => _applyWhiteRemoval(targetImg, isWhiteRemoved ? 0.0 : 35.0),
+                  icon: const Icon(Icons.cleaning_services_outlined, size: 15),
+                  label: Text(
+                    isWhiteRemoved ? 'White BG Off ✓' : 'Remove White BG',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                  ),
+                ),
               ),
-              onPressed: () => _applyWhiteRemoval(targetImg, isWhiteRemoved ? 0.0 : 35.0),
-              icon: const Icon(Icons.cleaning_services_outlined, size: 16),
-              label: Text(
-                isWhiteRemoved ? 'White BG Removed ✓' : 'Remove White BG',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: isGuilloche ? _amber : _chipBg,
+                    foregroundColor: isGuilloche ? Colors.black : _textColor,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () async {
+                    _pushUndoSnapshot();
+                    setState(() {
+                      targetImg.filters.guilloche = !isGuilloche;
+                      if (targetImg.filters.guilloche) {
+                        targetImg.filters.brightness = 1.0;
+                        targetImg.filters.contrast = 1.0;
+                        targetImg.filters.saturate = 1.0;
+                        targetImg.filters.sepia = 0.0;
+                        targetImg.filters.blackAndWhite = false;
+                      } else {
+                        targetImg.processedGuillocheBytes = null;
+                      }
+                    });
+                    await _applyGuillocheBlend(targetImg);
+                  },
+                  icon: const Icon(Icons.fingerprint_rounded, size: 16),
+                  label: Text(
+                    isGuilloche ? 'Guilloche ON ✓' : 'Guilloche Blend',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
           if (isWhiteRemoved) ...[
             const SizedBox(height: 6),
@@ -2164,6 +2297,59 @@ class _StudioScreenState extends State<StudioScreen> {
               onChangeEnd: (v) => _applyWhiteRemoval(targetImg, v),
             ),
           ],
+          if (isGuilloche) ...[
+            const SizedBox(height: 8),
+            Text('Security Texture', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _subColor)),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                ('banknote', 'Banknote'),
+                ('rosette', 'Rosette'),
+                ('mesh', 'Mesh'),
+              ].map((pat) {
+                final sel = targetImg.filters.guillochePattern == pat.$1;
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: _choicePill(
+                      label: pat.$2,
+                      selected: sel,
+                      onTap: () {
+                        _pushUndoSnapshot();
+                        setState(() => targetImg.filters.guillochePattern = pat.$1);
+                        _applyGuillocheBlend(targetImg);
+                      },
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 6),
+            _sliderRow(
+              'Contrast +%',
+              targetImg.filters.guillocheContrast,
+              0,
+              25,
+              (v) => setState(() => targetImg.filters.guillocheContrast = v),
+              onChangeEnd: (_) => _applyGuillocheBlend(targetImg),
+            ),
+            _sliderRow(
+              'Contour Bend',
+              targetImg.filters.guillocheBend,
+              0,
+              6,
+              (v) => setState(() => targetImg.filters.guillocheBend = v),
+              onChangeEnd: (_) => _applyGuillocheBlend(targetImg),
+            ),
+            _sliderRow(
+              'Skin Opacity',
+              targetImg.filters.guillocheOpacity,
+              75,
+              100,
+              (v) => setState(() => targetImg.filters.guillocheOpacity = v),
+              onChangeEnd: (_) => _applyGuillocheBlend(targetImg),
+            ),
+          ],
           const SizedBox(height: 10),
           Text('Studio Effects', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _subColor)),
           const SizedBox(height: 6),
@@ -2173,10 +2359,13 @@ class _StudioScreenState extends State<StudioScreen> {
               children: effectPresets.map((entry) {
                 final label = entry.$1;
                 final preset = entry.$2;
-                final active = (targetImg.filters.brightness - preset.brightness).abs() < 0.02 &&
-                    (targetImg.filters.contrast - preset.contrast).abs() < 0.02 &&
-                    (targetImg.filters.sepia - preset.sepia).abs() < 0.02 &&
-                    targetImg.filters.blackAndWhite == preset.blackAndWhite;
+                final active = preset.guilloche
+                    ? targetImg.filters.guilloche
+                    : (!targetImg.filters.guilloche &&
+                        (targetImg.filters.brightness - preset.brightness).abs() < 0.02 &&
+                        (targetImg.filters.contrast - preset.contrast).abs() < 0.02 &&
+                        (targetImg.filters.sepia - preset.sepia).abs() < 0.02 &&
+                        targetImg.filters.blackAndWhite == preset.blackAndWhite);
                 return Padding(
                   padding: const EdgeInsets.only(right: 6),
                   child: ChoiceChip(
@@ -2188,7 +2377,13 @@ class _StudioScreenState extends State<StudioScreen> {
                       _pushUndoSnapshot();
                       setState(() {
                         targetImg.filters = preset.copy();
+                        if (!preset.guilloche) {
+                          targetImg.processedGuillocheBytes = null;
+                        }
                       });
+                      if (preset.guilloche) {
+                        _applyGuillocheBlend(targetImg);
+                      }
                     },
                   ),
                 );
@@ -3298,10 +3493,13 @@ class _StudioScreenState extends State<StudioScreen> {
             }
 
             final filterTags = <String>[
+              if (l.filters.guilloche) 'Guilloche Blend (${l.filters.guillochePattern})',
               if (l.filters.removeWhite > 0) 'White BG Removed (${l.filters.removeWhite.round()}%)',
             ];
             Widget? thumb;
-            if (l.processedWhiteRemovedBytes != null) {
+            if (l.filters.guilloche && l.processedGuillocheBytes != null) {
+              thumb = Image.memory(l.processedGuillocheBytes!, fit: BoxFit.contain);
+            } else if (l.processedWhiteRemovedBytes != null) {
               thumb = Image.memory(l.processedWhiteRemovedBytes!, fit: BoxFit.contain);
             } else if (l.localImagePath != null && File(l.localImagePath!).existsSync()) {
               thumb = Image.file(File(l.localImagePath!), fit: BoxFit.contain);
@@ -4093,8 +4291,44 @@ class _StudioScreenState extends State<StudioScreen> {
                   subtitle: Text('Crisp monochrome contrast', style: TextStyle(fontSize: 11.5, color: _subColor)),
                   activeColor: _amber,
                   value: _batchBw,
-                  onChanged: (v) => setState(() => _batchBw = v),
+                  onChanged: (v) => setState(() {
+                    _batchBw = v;
+                    if (v) _batchGuilloche = false;
+                  }),
                 ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Guilloche Blend (Security Portrait)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  subtitle: Text('Grayscale + contour bend + banknote texture + cream tint', style: TextStyle(fontSize: 11.5, color: _subColor)),
+                  activeColor: _amber,
+                  value: _batchGuilloche,
+                  onChanged: (v) => setState(() {
+                    _batchGuilloche = v;
+                    if (v) _batchBw = false;
+                  }),
+                ),
+                if (_batchGuilloche) ...[
+                  Row(
+                    children: [
+                      ('banknote', 'Banknote'),
+                      ('rosette', 'Rosette'),
+                      ('mesh', 'Mesh'),
+                    ].map((pat) {
+                      final sel = _batchGuillochePattern == pat.$1;
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: _choicePill(
+                            label: pat.$2,
+                            selected: sel,
+                            onTap: () => setState(() => _batchGuillochePattern = pat.$1),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 6),
+                ],
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Remove White Background (PNG)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
@@ -4136,6 +4370,8 @@ class _StudioScreenState extends State<StudioScreen> {
                             brightness: _batchBw ? 1.03 : 1.0,
                             contrast: _batchBw ? 1.22 : 1.0,
                             blackAndWhite: _batchBw,
+                            guilloche: _batchGuilloche,
+                            guillochePattern: _batchGuillochePattern,
                             removeWhiteTolerance: _batchRemoveWhite,
                           ));
                           if (mounted) {
@@ -4567,7 +4803,7 @@ class _StudioScreenState extends State<StudioScreen> {
             lineHeight: (lRaw['lineHeight'] ?? 1.4).toDouble(),
             textColor: _parseColorAny(
               lRaw['textColor'] ?? lRaw['color'] ?? lRaw['fillColor'],
-              const Color(0xFFFFFFFF),
+              const Color(0xFF0F172A),
             ),
             textAlign: lRaw['textAlign'] is String
                 ? TextAlign.values.firstWhere(
@@ -4598,7 +4834,7 @@ class _StudioScreenState extends State<StudioScreen> {
           title: (pgRaw['title'] ?? 'Page ${pi + 1}').toString(),
           width: (pgRaw['width'] ?? 900).toDouble(),
           height: (pgRaw['height'] ?? 1200).toDouble(),
-          backgroundColor: _parseColorAny(pgRaw['backgroundColor'], const Color(0xFF191C22)),
+          backgroundColor: _parseColorAny(pgRaw['backgroundColor'], const Color(0xFFFAF9F6)),
           layers: layers,
         ));
       }
