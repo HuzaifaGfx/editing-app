@@ -128,10 +128,10 @@ class _StudioScreenState extends State<StudioScreen> {
     _loadSavedProjects();
     _loadInstalledCustomFonts();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkQuickTourOnFirstLaunch());
-    Future<void>.delayed(const Duration(milliseconds: 520), () {
+    Future<void>.delayed(const Duration(milliseconds: 1400), () {
       if (!mounted) return;
       setState(() => _launchSplashOpacity = 0.0);
-      Future<void>.delayed(const Duration(milliseconds: 280), () {
+      Future<void>.delayed(const Duration(milliseconds: 420), () {
         if (mounted) setState(() => _showLaunchSplash = false);
       });
     });
@@ -1630,6 +1630,8 @@ class _StudioScreenState extends State<StudioScreen> {
                     ? 'assets/images/qalamix_logo_dark.png'
                     : 'assets/images/qalamix_mark.png',
                 fit: _isDark ? BoxFit.cover : BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                isAntiAlias: true,
               ),
             ),
             const SizedBox(width: 10),
@@ -1795,7 +1797,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 }),
                 child: AnimatedOpacity(
                   opacity: _launchSplashOpacity,
-                  duration: const Duration(milliseconds: 280),
+                  duration: const Duration(milliseconds: 420),
                   curve: Curves.easeOutCubic,
                   child: Material(
                     color: Colors.white,
@@ -1803,15 +1805,25 @@ class _StudioScreenState extends State<StudioScreen> {
                       child: Stack(
                         children: [
                           Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Image.asset(
-                                  'assets/images/qalamix_mark.png',
-                                  width: 108,
-                                  height: 108,
-                                  fit: BoxFit.contain,
-                                ),
+                            child: TweenAnimationBuilder<double>(
+                              tween: Tween(begin: 0.92, end: 1.0),
+                              duration: const Duration(milliseconds: 480),
+                              curve: Curves.easeOutCubic,
+                              builder: (context, scale, child) => Transform.scale(
+                                scale: scale,
+                                child: child,
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Image.asset(
+                                    'assets/images/qalamix_mark.png',
+                                    width: 112,
+                                    height: 112,
+                                    fit: BoxFit.contain,
+                                    filterQuality: FilterQuality.high,
+                                    isAntiAlias: true,
+                                  ),
                                 const SizedBox(height: 16),
                                 const Text(
                                   'Qalamix',
@@ -1834,7 +1846,8 @@ class _StudioScreenState extends State<StudioScreen> {
                                     color: Color(0xFF64748B),
                                   ),
                                 ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                           Positioned(
