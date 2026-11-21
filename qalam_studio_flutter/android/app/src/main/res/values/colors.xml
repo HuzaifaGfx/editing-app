@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="qalamix_window_light">#F3F5F8</color>
+    <color name="qalamix_splash_bg">#FFFFFF</color>
+    <color name="qalamix_window_light">#FFFFFF</color>
     <color name="qalamix_window_dark">#111317</color>
 </resources>

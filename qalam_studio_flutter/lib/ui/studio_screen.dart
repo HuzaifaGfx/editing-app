@@ -53,6 +53,8 @@ class _StudioScreenState extends State<StudioScreen> {
   int _activeScanIdx = 0;
   int _whiteRemovalSeq = 0;
   int _guillocheSeq = 0;
+  bool _showLaunchSplash = true;
+  double _launchSplashOpacity = 1.0;
   final List<(int, String)> _undoStack = [];
   final List<(int, String)> _redoStack = [];
   final List<_CustomInstalledFont> _customFonts = [];
@@ -126,6 +128,13 @@ class _StudioScreenState extends State<StudioScreen> {
     _loadSavedProjects();
     _loadInstalledCustomFonts();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkQuickTourOnFirstLaunch());
+    Future<void>.delayed(const Duration(milliseconds: 520), () {
+      if (!mounted) return;
+      setState(() => _launchSplashOpacity = 0.0);
+      Future<void>.delayed(const Duration(milliseconds: 280), () {
+        if (mounted) setState(() => _showLaunchSplash = false);
+      });
+    });
   }
 
   @override
@@ -1594,7 +1603,9 @@ class _StudioScreenState extends State<StudioScreen> {
   Widget build(BuildContext context) {
     final stageBg = _isDark ? const Color(0xFF0A0C0F) : const Color(0xFFEAECEF);
 
-    return Scaffold(
+    return Stack(
+      children: [
+        Scaffold(
       appBar: AppBar(
         toolbarHeight: 56,
         titleSpacing: 12,
@@ -1605,19 +1616,20 @@ class _StudioScreenState extends State<StudioScreen> {
         title: Row(
           children: [
             Container(
-              width: 32,
-              height: 32,
+              width: 34,
+              height: 34,
+              padding: _isDark ? EdgeInsets.zero : const EdgeInsets.all(3),
               decoration: BoxDecoration(
-                color: _isDark ? const Color(0xFF111317) : Colors.white,
-                borderRadius: BorderRadius.circular(9),
+                color: _isDark ? const Color(0xFF111317) : const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: _borderColor),
               ),
               clipBehavior: Clip.antiAlias,
               child: Image.asset(
                 _isDark
                     ? 'assets/images/qalamix_logo_dark.png'
-                    : 'assets/images/qalamix_logo.jpg',
-                fit: BoxFit.cover,
+                    : 'assets/images/qalamix_mark.png',
+                fit: _isDark ? BoxFit.cover : BoxFit.contain,
               ),
             ),
             const SizedBox(width: 10),
@@ -1771,6 +1783,87 @@ class _StudioScreenState extends State<StudioScreen> {
           ],
         ),
       ),
+        ),
+        if (_showLaunchSplash)
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: _launchSplashOpacity == 0.0,
+              child: GestureDetector(
+                onTap: () => setState(() {
+                  _launchSplashOpacity = 0.0;
+                  _showLaunchSplash = false;
+                }),
+                child: AnimatedOpacity(
+                  opacity: _launchSplashOpacity,
+                  duration: const Duration(milliseconds: 280),
+                  curve: Curves.easeOutCubic,
+                  child: Material(
+                    color: Colors.white,
+                    child: SafeArea(
+                      child: Stack(
+                        children: [
+                          Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Image.asset(
+                                  'assets/images/qalamix_mark.png',
+                                  width: 108,
+                                  height: 108,
+                                  fit: BoxFit.contain,
+                                ),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Qalamix',
+                                  style: TextStyle(
+                                    fontFamily: 'PlusJakartaSans',
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.4,
+                                    color: Color(0xFF0F172A),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Design · Docs · Security Blend',
+                                  style: TextStyle(
+                                    fontFamily: 'PlusJakartaSans',
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w500,
+                                    letterSpacing: 0.2,
+                                    color: Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 36,
+                            child: Center(
+                              child: SizedBox(
+                                width: 42,
+                                height: 3,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(2),
+                                  child: const LinearProgressIndicator(
+                                    backgroundColor: Color(0xFFE2E8F0),
+                                    color: Color(0xFFD97706),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
