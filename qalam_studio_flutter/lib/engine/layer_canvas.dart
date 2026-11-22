@@ -596,44 +596,47 @@ class _LayerCanvasState extends State<LayerCanvas> {
 
   Widget _buildLayerContent(DesignLayer layer) {
     if (layer.type == LayerType.image) {
-      Widget? imgWidget;
       final fit = layer.aspectLocked ? layer.objectFit : BoxFit.fill;
-
-      if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
-        imgWidget = Image.memory(
-          layer.processedGuillocheBytes!,
-          fit: fit,
-          gaplessPlayback: true,
-        );
-      } else if (layer.processedWhiteRemovedBytes != null) {
-        imgWidget = Image.memory(
-          layer.processedWhiteRemovedBytes!,
-          fit: fit,
-          gaplessPlayback: true,
-        );
-      } else if (layer.localImagePath != null && File(layer.localImagePath!).existsSync()) {
-        imgWidget = Image.file(
-          File(layer.localImagePath!),
-          fit: fit,
-          gaplessPlayback: true,
-        );
+      Widget? buildRawImg() {
+        if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
+          return Image.memory(
+            layer.processedGuillocheBytes!,
+            fit: fit,
+            gaplessPlayback: true,
+          );
+        }
+        if (layer.processedWhiteRemovedBytes != null) {
+          return Image.memory(
+            layer.processedWhiteRemovedBytes!,
+            fit: fit,
+            gaplessPlayback: true,
+          );
+        }
+        if (layer.localImagePath != null && File(layer.localImagePath!).existsSync()) {
+          return Image.file(
+            File(layer.localImagePath!),
+            fit: fit,
+            gaplessPlayback: true,
+          );
+        }
+        return null;
       }
 
-      if (imgWidget == null) {
+      final firstImg = buildRawImg();
+      if (firstImg == null) {
         return Container(
           color: const Color(0xFF262B35),
           child: const Center(child: Icon(Icons.image_outlined, size: 48, color: Colors.white54)),
         );
       }
-
-      final hasCustomFilter = !_filtersAreNeutral(layer.filters) &&
+      final hasOptical = filtersHaveVisualEffect(layer.filters) &&
           !(layer.filters.guilloche && layer.processedGuillocheBytes != null);
-      final Widget filteredImg = hasCustomFilter
-          ? _LayerColorFilter(
-              colorFilter: buildLayerColorFilter(layer.filters),
-              child: imgWidget,
+      final Widget filteredImg = hasOptical
+          ? buildOpticalFilteredImageWidget(
+              filters: layer.filters,
+              childBuilder: () => buildRawImg() ?? firstImg,
             )
-          : imgWidget;
+          : firstImg;
       final Widget flippedImg = (layer.flipX || layer.flipY)
           ? Transform.flip(
               flipX: layer.flipX,
@@ -1001,51 +1004,7 @@ class _RenderLayerBlend extends RenderProxyBox {
   }
 }
 
-bool _filtersAreNeutral(FilterSettings f) {
-  return (f.brightness - 1.0).abs() < 0.005 &&
-      (f.contrast - 1.0).abs() < 0.005 &&
-      (f.saturate - 1.0).abs() < 0.005 &&
-      f.sepia < 0.005 &&
-      f.grayscale < 0.005 &&
-      !f.blackAndWhite;
-}
 
-class _LayerColorFilter extends SingleChildRenderObjectWidget {
-  final ColorFilter colorFilter;
-  const _LayerColorFilter({
-    required this.colorFilter,
-    super.child,
-  });
-
-  @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _RenderLayerColorFilter(colorFilter);
-
-  @override
-  void updateRenderObject(
-      BuildContext context, covariant _RenderLayerColorFilter renderObject) {
-    renderObject.colorFilter = colorFilter;
-  }
-}
-
-class _RenderLayerColorFilter extends RenderProxyBox {
-  ColorFilter _colorFilter;
-  _RenderLayerColorFilter(this._colorFilter);
-
-  set colorFilter(ColorFilter value) {
-    if (_colorFilter == value) return;
-    _colorFilter = value;
-    markNeedsPaint();
-  }
-
-  @override
-  void paint(PaintingContext context, Offset offset) {
-    if (child == null) return;
-    context.canvas.saveLayer(offset & size, Paint()..colorFilter = _colorFilter);
-    context.paintChild(child!, offset);
-    context.canvas.restore();
-  }
-}
 
 
 class _StudioStageDotGridPainter extends CustomPainter {

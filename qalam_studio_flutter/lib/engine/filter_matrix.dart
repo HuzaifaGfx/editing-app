@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:ui';
+import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import '../models/design_project.dart';
@@ -42,6 +43,149 @@ ColorFilter buildLayerColorFilter(FilterSettings f) {
     0, 0, 0, 1, 0,
   ];
   return ColorFilter.matrix(matrix);
+}
+
+
+bool filtersHaveVisualEffect(FilterSettings f) {
+  return (f.brightness - 1.0).abs() >= 0.005 ||
+      (f.contrast - 1.0).abs() >= 0.005 ||
+      (f.saturate - 1.0).abs() >= 0.005 ||
+      f.sepia >= 0.005 ||
+      f.grayscale >= 0.005 ||
+      f.blackAndWhite ||
+      f.softGlow > 0.5 ||
+      f.rosyTint > 0.5 ||
+      f.skinSmooth > 0.5 ||
+      f.portraitBlur > 0.5;
+}
+
+Widget buildOpticalFilteredImageWidget({
+  required FilterSettings filters,
+  required Widget Function() childBuilder,
+}) {
+  final hasColorGrade = (filters.brightness - 1.0).abs() >= 0.005 ||
+      (filters.contrast - 1.0).abs() >= 0.005 ||
+      (filters.saturate - 1.0).abs() >= 0.005 ||
+      filters.sepia >= 0.005 ||
+      filters.grayscale >= 0.005 ||
+      filters.blackAndWhite;
+
+  Widget gradedChild() {
+    final base = childBuilder();
+    return hasColorGrade
+        ? ColorFiltered(
+            colorFilter: buildLayerColorFilter(filters),
+            child: base,
+          )
+        : base;
+  }
+
+  final pBlur = filters.guilloche ? 0.0 : filters.portraitBlur.clamp(0.0, 100.0);
+  final skinSmooth = filters.guilloche ? 0.0 : filters.skinSmooth.clamp(0.0, 100.0);
+  final softGlow = filters.guilloche ? 0.0 : filters.softGlow.clamp(0.0, 100.0);
+  final rosyTint = filters.guilloche ? 0.0 : filters.rosyTint.clamp(0.0, 100.0);
+
+  if (pBlur <= 0.5 && skinSmooth <= 0.5 && softGlow <= 0.5 && rosyTint <= 0.5) {
+    return gradedChild();
+  }
+
+  return ClipRect(
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        gradedChild(),
+        if (pBlur > 0.5)
+          IgnorePointer(
+            child: ShaderMask(
+              blendMode: ui.BlendMode.dstOut,
+              shaderCallback: (Rect bounds) => RadialGradient(
+                center: const Alignment(0.0, -0.16),
+                radius: 0.72,
+                colors: [
+                  Colors.black,
+                  Colors.black.withOpacity(0.86),
+                  Colors.transparent,
+                ],
+                stops: const [0.0, 0.44, 0.94],
+              ).createShader(bounds),
+              child: ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(
+                  sigmaX: (pBlur / 100.0) * 12.0,
+                  sigmaY: (pBlur / 100.0) * 12.0,
+                  tileMode: TileMode.clamp,
+                ),
+                child: gradedChild(),
+              ),
+            ),
+          ),
+        if (skinSmooth > 0.5)
+          IgnorePointer(
+            child: Opacity(
+              opacity: (skinSmooth / 100.0) * 0.36,
+              child: ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(
+                  sigmaX: (skinSmooth / 100.0) * 3.8,
+                  sigmaY: (skinSmooth / 100.0) * 3.8,
+                  tileMode: TileMode.clamp,
+                ),
+                child: gradedChild(),
+              ),
+            ),
+          ),
+        if (softGlow > 0.5)
+          IgnorePointer(
+            child: Opacity(
+              opacity: (softGlow / 100.0) * 0.32,
+              child: ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(
+                  sigmaX: 3.0 + (softGlow / 100.0) * 9.0,
+                  sigmaY: 3.0 + (softGlow / 100.0) * 9.0,
+                  tileMode: TileMode.clamp,
+                ),
+                child: ColorFiltered(
+                  colorFilter: ColorFilter.mode(
+                    Colors.white.withOpacity(0.24),
+                    ui.BlendMode.plus,
+                  ),
+                  child: gradedChild(),
+                ),
+              ),
+            ),
+          ),
+        if (rosyTint > 0.5)
+          IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    const Color(0xFFFFB6CE).withOpacity((rosyTint / 100.0) * 0.24),
+                    const Color(0xFFFCA5C0).withOpacity((rosyTint / 100.0) * 0.18),
+                    const Color(0xFFFED7AA).withOpacity((rosyTint / 100.0) * 0.16),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        if (rosyTint > 0.5)
+          IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0.0, -0.10),
+                  radius: 0.65,
+                  colors: [
+                    const Color(0xFFF47298).withOpacity((rosyTint / 100.0) * 0.14),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
 }
 
 class WhiteRemovalRequest {

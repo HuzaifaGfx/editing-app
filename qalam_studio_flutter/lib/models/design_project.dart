@@ -17,6 +17,10 @@ class FilterSettings {
   double guillocheBend;     // 0..6 (px contour bend, default 3)
   double guillocheOpacity;  // 75..100 (% skin opacity over paper, default 88)
   String guillochePattern;  // 'banknote' | 'rosette' | 'mesh'
+  double softGlow;
+  double rosyTint;
+  double skinSmooth;
+  double portraitBlur;
 
   FilterSettings({
     this.brightness = 1.0,
@@ -31,6 +35,10 @@ class FilterSettings {
     this.guillocheBend = 3.0,
     this.guillocheOpacity = 88.0,
     this.guillochePattern = 'banknote',
+    this.softGlow = 0.0,
+    this.rosyTint = 0.0,
+    this.skinSmooth = 0.0,
+    this.portraitBlur = 0.0,
   });
 
   FilterSettings copy() => FilterSettings(
@@ -46,6 +54,10 @@ class FilterSettings {
         guillocheBend: guillocheBend,
         guillocheOpacity: guillocheOpacity,
         guillochePattern: guillochePattern,
+        softGlow: softGlow,
+        rosyTint: rosyTint,
+        skinSmooth: skinSmooth,
+        portraitBlur: portraitBlur,
       );
 
   Map<String, dynamic> toJson() => {
@@ -61,6 +73,10 @@ class FilterSettings {
         'guillocheBend': guillocheBend,
         'guillocheOpacity': guillocheOpacity,
         'guillochePattern': guillochePattern,
+        'softGlow': softGlow,
+        'rosyTint': rosyTint,
+        'skinSmooth': skinSmooth,
+        'portraitBlur': portraitBlur,
       };
 
   factory FilterSettings.fromJson(Map<String, dynamic> json) => FilterSettings(
@@ -76,6 +92,10 @@ class FilterSettings {
         guillocheBend: (json['guillocheBend'] ?? 3.0).toDouble(),
         guillocheOpacity: (json['guillocheOpacity'] ?? 88.0).toDouble(),
         guillochePattern: (json['guillochePattern'] ?? 'banknote').toString(),
+        softGlow: (json['softGlow'] ?? 0.0).toDouble(),
+        rosyTint: (json['rosyTint'] ?? 0.0).toDouble(),
+        skinSmooth: (json['skinSmooth'] ?? 0.0).toDouble(),
+        portraitBlur: (json['portraitBlur'] ?? 0.0).toDouble(),
       );
 }
 

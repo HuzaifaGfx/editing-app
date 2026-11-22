@@ -95,9 +95,12 @@ class _StudioScreenState extends State<StudioScreen> {
   bool _sigTransparentBg = true;
   double _sigPenWidth = 4.0;
   Size _sigCanvasSize = const Size(1100, 520);
-  final List<(List<Offset>, Color, double)> _sigStrokes = [];
-  final List<(List<Offset>, Color, double)> _sigRedoStrokes = [];
-  List<Offset>? _sigCurrentStroke;
+  String _sigPenType = 'fountain';
+  bool _sigAutoSmooth = true;
+  final List<_SigStroke> _sigStrokes = [];
+  final List<_SigStroke> _sigRedoStrokes = [];
+  List<_SigPoint>? _sigCurrentStroke;
+  String? _customEffectPreviewPath;
 
   // Rubber Stamp / مہر Maker state
   String _stampShape = 'round'; // 'round', 'oval', 'box'
@@ -2518,6 +2521,107 @@ class _StudioScreenState extends State<StudioScreen> {
           ),
         ),
         (
+          'Vivid Tone & PinkHaze Warm Silk',
+          FilterSettings(
+            brightness: 1.06,
+            contrast: 1.14,
+            saturate: 1.38,
+            sepia: 0.12,
+            softGlow: 36,
+            rosyTint: 50,
+            skinSmooth: 18,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Rosy Haze & Freckles Out',
+          FilterSettings(
+            brightness: 1.08,
+            contrast: 1.02,
+            saturate: 1.14,
+            sepia: 0.06,
+            softGlow: 30,
+            rosyTint: 66,
+            skinSmooth: 64,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Glow Effect with Makeup',
+          FilterSettings(
+            brightness: 1.09,
+            contrast: 1.11,
+            saturate: 1.24,
+            sepia: 0.06,
+            softGlow: 68,
+            rosyTint: 40,
+            skinSmooth: 56,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Portrait Blur V3',
+          FilterSettings(
+            brightness: 1.04,
+            contrast: 1.12,
+            saturate: 1.14,
+            sepia: 0.04,
+            softGlow: 18,
+            rosyTint: 12,
+            skinSmooth: 14,
+            portraitBlur: 78,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Golden Hour Silk',
+          FilterSettings(
+            brightness: 1.07,
+            contrast: 1.11,
+            saturate: 1.26,
+            sepia: 0.24,
+            softGlow: 42,
+            portraitBlur: 26,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Soft Peach Cream',
+          FilterSettings(
+            brightness: 1.10,
+            contrast: 0.98,
+            saturate: 1.12,
+            sepia: 0.14,
+            softGlow: 38,
+            rosyTint: 34,
+            skinSmooth: 48,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Editorial Teal & Amber',
+          FilterSettings(
+            brightness: 1.01,
+            contrast: 1.20,
+            saturate: 1.18,
+            sepia: 0.14,
+            portraitBlur: 24,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
+          'Velvet Studio Noir',
+          FilterSettings(
+            brightness: 1.05,
+            contrast: 1.32,
+            saturate: 0.0,
+            blackAndWhite: true,
+            grayscale: 1.0,
+            portraitBlur: 36,
+            removeWhite: targetImg.filters.removeWhite,
+          ),
+        ),
+        (
           'Crisp Clarity',
           FilterSettings(
             brightness: 1.03,
@@ -2714,6 +2818,9 @@ class _StudioScreenState extends State<StudioScreen> {
                         (targetImg.filters.brightness - preset.brightness).abs() < 0.02 &&
                         (targetImg.filters.contrast - preset.contrast).abs() < 0.02 &&
                         (targetImg.filters.sepia - preset.sepia).abs() < 0.02 &&
+                        (targetImg.filters.portraitBlur - preset.portraitBlur).abs() < 2.0 &&
+                        (targetImg.filters.softGlow - preset.softGlow).abs() < 2.0 &&
+                        (targetImg.filters.rosyTint - preset.rosyTint).abs() < 2.0 &&
                         targetImg.filters.blackAndWhite == preset.blackAndWhite);
                 return Padding(
                   padding: const EdgeInsets.only(right: 6),
@@ -2770,6 +2877,34 @@ class _StudioScreenState extends State<StudioScreen> {
             0,
             100,
             (v) => setState(() => targetImg.filters.sepia = v / 100.0),
+          ),
+          _sliderRow(
+            'Portrait Blur V3',
+            targetImg.filters.portraitBlur,
+            0,
+            100,
+            (v) => setState(() => targetImg.filters.portraitBlur = v),
+          ),
+          _sliderRow(
+            'Soft Glow',
+            targetImg.filters.softGlow,
+            0,
+            100,
+            (v) => setState(() => targetImg.filters.softGlow = v),
+          ),
+          _sliderRow(
+            'PinkHaze Silk',
+            targetImg.filters.rosyTint,
+            0,
+            100,
+            (v) => setState(() => targetImg.filters.rosyTint = v),
+          ),
+          _sliderRow(
+            'Skin Smooth',
+            targetImg.filters.skinSmooth,
+            0,
+            100,
+            (v) => setState(() => targetImg.filters.skinSmooth = v),
           ),
         ],
       );
@@ -5227,6 +5362,347 @@ class _StudioScreenState extends State<StudioScreen> {
     }
   }
 
+  static final List<_PhotoEffectSpec> _photoEffectSpecs = [
+    _PhotoEffectSpec(
+      id: 'vivid-pinkhaze-silk',
+      name: 'Vivid Tone & PinkHaze Warm Silk',
+      subtitle: 'Boosts color depth, warmth, and soft lighting.',
+      assetPath: 'assets/images/scenic_botanical_sample.jpg',
+      filters: FilterSettings(
+        brightness: 1.06,
+        contrast: 1.14,
+        saturate: 1.38,
+        sepia: 0.12,
+        softGlow: 36,
+        rosyTint: 50,
+        skinSmooth: 18,
+      ),
+    ),
+    _PhotoEffectSpec(
+      id: 'rosy-haze-freckles',
+      name: 'Rosy Haze & Freckles Out',
+      subtitle: 'Soft rosy tint paired with natural skin clarity.',
+      assetPath: 'assets/images/portrait_male_sample.jpg',
+      filters: FilterSettings(
+        brightness: 1.08,
+        contrast: 1.02,
+        saturate: 1.14,
+        sepia: 0.06,
+        softGlow: 30,
+        rosyTint: 66,
+        skinSmooth: 64,
+      ),
+    ),
+    _PhotoEffectSpec(
+      id: 'glow-makeup',
+      name: 'Glow Effect with Makeup',
+      subtitle: 'Radiant skin smoothing with light styling glow.',
+      assetPath: 'assets/images/portrait_male_sample.jpg',
+      filters: FilterSettings(
+        brightness: 1.09,
+        contrast: 1.11,
+        saturate: 1.24,
+        sepia: 0.06,
+        softGlow: 68,
+        rosyTint: 40,
+        skinSmooth: 56,
+      ),
+    ),
+    _PhotoEffectSpec(
+      id: 'portrait-blur-v3',
+      name: 'Portrait Blur V3',
+      subtitle: 'Softens backgrounds while keeping portraits sharp.',
+      assetPath: 'assets/images/portrait_male_sample.jpg',
+      filters: FilterSettings(
+        brightness: 1.04,
+        contrast: 1.12,
+        saturate: 1.14,
+        sepia: 0.04,
+        softGlow: 18,
+        rosyTint: 12,
+        skinSmooth: 14,
+        portraitBlur: 78,
+      ),
+    ),
+    _PhotoEffectSpec(
+      id: 'golden-hour-silk',
+      name: 'Golden Hour Silk',
+      subtitle: 'Sunlit amber highlights & soft nature depth.',
+      assetPath: 'assets/images/scenic_botanical_sample.jpg',
+      filters: FilterSettings(
+        brightness: 1.07,
+        contrast: 1.11,
+        saturate: 1.26,
+        sepia: 0.24,
+        softGlow: 42,
+        portraitBlur: 26,
+      ),
+    ),
+    _PhotoEffectSpec(
+      id: 'soft-peach-cream',
+      name: 'Soft Peach Cream',
+      subtitle: 'Airy pastel tones with gentle silk softness.',
+      assetPath: 'assets/images/scenic_botanical_sample.jpg',
+      filters: FilterSettings(
+        brightness: 1.10,
+        contrast: 0.98,
+        saturate: 1.12,
+        sepia: 0.14,
+        softGlow: 38,
+        rosyTint: 34,
+        skinSmooth: 48,
+      ),
+    ),
+    _PhotoEffectSpec(
+      id: 'editorial-teal-amber',
+      name: 'Editorial Teal & Amber',
+      subtitle: 'Rich botanical contrast with balanced warm tones.',
+      assetPath: 'assets/images/scenic_botanical_sample.jpg',
+      filters: FilterSettings(
+        brightness: 1.01,
+        contrast: 1.20,
+        saturate: 1.18,
+        sepia: 0.14,
+        portraitBlur: 24,
+      ),
+    ),
+    _PhotoEffectSpec(
+      id: 'velvet-studio-noir',
+      name: 'Velvet Studio Noir',
+      subtitle: 'Crisp high-contrast monochrome portrait bokeh.',
+      assetPath: 'assets/images/portrait_male_sample.jpg',
+      filters: FilterSettings(
+        brightness: 1.05,
+        contrast: 1.32,
+        saturate: 0.0,
+        blackAndWhite: true,
+        grayscale: 1.0,
+        portraitBlur: 36,
+      ),
+    ),
+  ];
+
+  Future<void> _pickCustomPreviewPhotoForEffects() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 92);
+    if (picked == null || !mounted) return;
+    setState(() => _customEffectPreviewPath = picked.path);
+  }
+
+  Future<void> _openProjectWithPhotoEffect(_PhotoEffectSpec spec) async {
+    await _runWithSavingHud(
+      savingTitle: 'Applying ${spec.name}...',
+      savedTitle: 'Studio Ready',
+      savedSubtitle: spec.name,
+      action: () async {
+        final docsDir = await getApplicationDocumentsDirectory();
+        final assetsDir = Directory(p.join(docsDir.path, 'qalamix_assets'));
+        if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
+
+        late final String targetPath;
+        if (_customEffectPreviewPath != null && File(_customEffectPreviewPath!).existsSync()) {
+          final ext = p.extension(_customEffectPreviewPath!).isEmpty
+              ? '.jpg'
+              : p.extension(_customEffectPreviewPath!);
+          targetPath = p.join(assetsDir.path, 'fx_${DateTime.now().microsecondsSinceEpoch}$ext');
+          await File(_customEffectPreviewPath!).copy(targetPath);
+        } else {
+          final data = await rootBundle.load(spec.assetPath);
+          final bytes = data.buffer.asUint8List();
+          targetPath = p.join(assetsDir.path, 'fx_${spec.id}_${DateTime.now().microsecondsSinceEpoch}.jpg');
+          await File(targetPath).writeAsBytes(bytes);
+        }
+
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final layerId = 'img_${DateTime.now().microsecondsSinceEpoch}';
+        final fresh = DesignProject(
+          id: 'proj_fx_$now',
+          name: spec.name,
+          updatedAt: now,
+          pages: [
+            DocumentPage(
+              id: 'page_1',
+              title: 'Photo 1',
+              width: 900,
+              height: 1200,
+              backgroundColor: const Color(0xFF111317),
+              layers: [
+                DesignLayer(
+                  id: layerId,
+                  name: 'Photo Layer',
+                  type: LayerType.image,
+                  x: 0,
+                  y: 0,
+                  width: 900,
+                  height: 1200,
+                  isCanvasBackground: true,
+                  aspectLocked: false,
+                  objectFit: BoxFit.cover,
+                  localImagePath: targetPath,
+                  filters: spec.filters.copy(),
+                ),
+              ],
+            ),
+          ],
+        );
+
+        await LocalProjectStore.instance.saveProject(fresh);
+        final list = await LocalProjectStore.instance.loadAllProjects();
+        if (!mounted) return;
+        setState(() {
+          _projects = list;
+          _project = fresh;
+          _pageIndex = 0;
+          _selectedLayerId = layerId;
+          _inspectorTab = 2;
+          _undoStack.clear();
+          _redoStack.clear();
+          _studioEntrySnapshot = (0, fresh.encode());
+          _inStudio = true;
+        });
+      },
+    );
+  }
+
+  Widget _buildProjectsPhotoEffectsSection() {
+    final hasCustom = _customEffectPreviewPath != null && File(_customEffectPreviewPath!).existsSync();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.auto_awesome_rounded, size: 17, color: _brandNib),
+            const SizedBox(width: 6),
+            const Expanded(
+              child: Text(
+                'Photo & Portrait Effects',
+                style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
+              ),
+            ),
+            if (hasCustom)
+              TextButton(
+                onPressed: () => setState(() => _customEffectPreviewPath = null),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: Text('Samples', style: TextStyle(fontSize: 12, color: _subColor)),
+              ),
+            OutlinedButton.icon(
+              onPressed: _pickCustomPreviewPhotoForEffects,
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: _borderColor),
+                foregroundColor: _textColor,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                minimumSize: const Size(0, 32),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+              ),
+              icon: Icon(Icons.photo_camera_outlined, size: 14, color: _brandNib),
+              label: Text(
+                hasCustom ? 'Change Photo' : 'My Photo',
+                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 3),
+        Text(
+          'Tap any effect card to open Studio with that look ready to adjust & export.',
+          style: TextStyle(fontSize: 11.5, color: _subColor),
+        ),
+        const SizedBox(height: 10),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _photoEffectSpecs.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 0.75,
+          ),
+          itemBuilder: (context, idx) {
+            final spec = _photoEffectSpecs[idx];
+            return InkWell(
+              onTap: () => _openProjectWithPhotoEffect(spec),
+              borderRadius: BorderRadius.circular(14),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    buildOpticalFilteredImageWidget(
+                      filters: spec.filters,
+                      childBuilder: () => hasCustom
+                          ? Image.file(
+                              File(_customEffectPreviewPath!),
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                            )
+                          : Image.asset(
+                              spec.assetPath,
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                            ),
+                    ),
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: _borderColor.withOpacity(0.5)),
+                        borderRadius: BorderRadius.circular(14),
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withOpacity(0.28),
+                            Colors.black.withOpacity(0.88),
+                          ],
+                          stops: const [0.42, 0.68, 1.0],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 10,
+                      right: 10,
+                      bottom: 10,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            spec.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            spec.subtitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.82),
+                              fontSize: 10,
+                              height: 1.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   Widget _buildProjectsView() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -5315,7 +5791,14 @@ class _StudioScreenState extends State<StudioScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
+        _buildProjectsPhotoEffectsSection(),
+        const SizedBox(height: 18),
+        Text(
+          'Saved Projects (${_projects.length})',
+          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: _textColor),
+        ),
+        const SizedBox(height: 10),
         ..._projects.map((proj) {
           final isCurrent = proj.id == _project.id;
           return Padding(
@@ -5501,6 +5984,58 @@ class _StudioScreenState extends State<StudioScreen> {
     });
   }
 
+  Widget _buildSignaturePenSelector({VoidCallback? onChanged}) {
+    const pens = [
+      ('fountain', 'Fountain Nib'),
+      ('brush', 'Brush Pen'),
+      ('calligraphy', 'Chisel 45°'),
+      ('ballpoint', 'Ballpoint'),
+      ('fineliner', 'Fine Liner'),
+      ('marker', 'Soft Marker'),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              ...pens.map((p) {
+                final selected = _sigPenType == p.$1;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: ChoiceChip(
+                    label: Text(p.$2, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                    selected: selected,
+                    selectedColor: _inkPrimary,
+                    labelStyle: TextStyle(color: selected ? _onInkPrimary : _textColor),
+                    onSelected: (_) {
+                      setState(() => _sigPenType = p.$1);
+                      onChanged?.call();
+                    },
+                  ),
+                );
+              }),
+              ChoiceChip(
+                label: Text(
+                  _sigAutoSmooth ? 'Auto Smooth: On' : 'Auto Smooth: Off',
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                ),
+                selected: _sigAutoSmooth,
+                selectedColor: _amber.withOpacity(0.24),
+                labelStyle: TextStyle(color: _sigAutoSmooth ? _accentText : _subColor),
+                onSelected: (_) {
+                  setState(() => _sigAutoSmooth = !_sigAutoSmooth);
+                  onChanged?.call();
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _openFullScreenSignaturePad() async {
     const inkSwatches = [
       Color(0xFF0F172A),
@@ -5619,19 +6154,35 @@ class _StudioScreenState extends State<StudioScreen> {
                                             _sigCanvasSize = padSize;
                                           }
                                           final pt = _toCanonicalPadPoint(d.localPosition, padSize);
-                                          _sigCurrentStroke = [pt];
+                                          _sigCurrentStroke = [_SigPoint(pt, DateTime.now().millisecondsSinceEpoch)];
                                           _sigRedoStrokes.clear();
-                                          _sigStrokes.add((_sigCurrentStroke!, _sigInkColor, _sigPenWidth));
+                                          _sigStrokes.add(_SigStroke(
+                                            points: _sigCurrentStroke!,
+                                            color: _sigInkColor,
+                                            width: _sigPenWidth,
+                                            penType: _sigPenType,
+                                          ));
                                           setModalState(() {});
                                           setState(() {});
                                         },
                                         onPanUpdate: (d) {
                                           if (_sigCurrentStroke == null) return;
-                                          _sigCurrentStroke!.add(_toCanonicalPadPoint(d.localPosition, padSize));
+                                          final pt = _toCanonicalPadPoint(d.localPosition, padSize);
+                                          final prev = _sigCurrentStroke!.last.pos;
+                                          if ((pt - prev).distance < 2.0) return;
+                                          _sigCurrentStroke!.add(_SigPoint(pt, DateTime.now().millisecondsSinceEpoch));
                                           setModalState(() {});
                                           setState(() {});
                                         },
-                                        onPanEnd: (_) => _sigCurrentStroke = null,
+                                        onPanEnd: (_) {
+                                          if (_sigAutoSmooth && _sigStrokes.isNotEmpty) {
+                                            final last = _sigStrokes.last;
+                                            last.points = _smoothSigPoints(last.points);
+                                            setModalState(() {});
+                                            setState(() {});
+                                          }
+                                          _sigCurrentStroke = null;
+                                        },
                                         child: CustomPaint(
                                           painter: _SignaturePadPainter(_sigStrokes, _sigCanvasSize),
                                           size: padSize,
@@ -5654,6 +6205,8 @@ class _StudioScreenState extends State<StudioScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            _buildSignaturePenSelector(onChanged: () => setModalState(() {})),
+                            const SizedBox(height: 8),
                             Row(
                               children: [
                                 Text('Ink:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
@@ -5766,11 +6319,11 @@ class _StudioScreenState extends State<StudioScreen> {
       double minX = double.infinity, minY = double.infinity;
       double maxX = -double.infinity, maxY = -double.infinity;
       for (final s in _sigStrokes) {
-        for (final pt in s.$1) {
-          if (pt.dx < minX) minX = pt.dx;
-          if (pt.dy < minY) minY = pt.dy;
-          if (pt.dx > maxX) maxX = pt.dx;
-          if (pt.dy > maxY) maxY = pt.dy;
+        for (final pt in s.points) {
+          if (pt.pos.dx < minX) minX = pt.pos.dx;
+          if (pt.pos.dy < minY) minY = pt.pos.dy;
+          if (pt.pos.dx > maxX) maxX = pt.pos.dx;
+          if (pt.pos.dy > maxY) maxY = pt.pos.dy;
         }
       }
       final bw = math.max(20.0, maxX - minX);
@@ -5780,30 +6333,14 @@ class _StudioScreenState extends State<StudioScreen> {
       final offX = (w - bw * scale) / 2.0 - minX * scale;
       final offY = (h - bh * scale) / 2.0 - minY * scale;
 
-      for (final stroke in _sigStrokes) {
-        final pts = stroke.$1;
-        if (pts.isEmpty) continue;
-        final strokeW = (stroke.$3 * math.min(2.6, math.max(1.2, scale * 0.85))).clamp(2.5, 22.0);
-        final paint = Paint()
-          ..color = stroke.$2
-          ..strokeWidth = strokeW
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round
-          ..style = PaintingStyle.stroke;
-        if (pts.length == 1) {
-          canvas.drawCircle(
-            Offset(pts[0].dx * scale + offX, pts[0].dy * scale + offY),
-            strokeW / 2,
-            Paint()..color = stroke.$2,
-          );
-          continue;
-        }
-        final path = Path()..moveTo(pts[0].dx * scale + offX, pts[0].dy * scale + offY);
-        for (int i = 1; i < pts.length; i++) {
-          path.lineTo(pts[i].dx * scale + offX, pts[i].dy * scale + offY);
-        }
-        canvas.drawPath(path, paint);
-      }
+      _paintSignatureStrokeList(
+        canvas,
+        _sigStrokes,
+        scale: scale,
+        offsetX: offX,
+        offsetY: offY,
+        widthMultiplier: math.min(2.6, math.max(1.2, scale * 0.85)),
+      );
     }
     final uiImg = await recorder.endRecording().toImage(w.toInt(), h.toInt());
     final byteData = await uiImg.toByteData(format: ui.ImageByteFormat.png);
@@ -6166,6 +6703,8 @@ class _StudioScreenState extends State<StudioScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  _buildSignaturePenSelector(),
                   _sliderRow('Pen Size', _sigPenWidth, 2, 14, (v) => setState(() => _sigPenWidth = v)),
                   LayoutBuilder(
                     builder: (context, padConstraints) {
@@ -6197,15 +6736,31 @@ class _StudioScreenState extends State<StudioScreen> {
                               GestureDetector(
                                 onPanStart: (d) => setState(() {
                                   if (_sigStrokes.isEmpty) _sigCanvasSize = padSize;
-                                  _sigCurrentStroke = [_toCanonicalPadPoint(d.localPosition, padSize)];
+                                  final pt = _toCanonicalPadPoint(d.localPosition, padSize);
+                                  _sigCurrentStroke = [_SigPoint(pt, DateTime.now().millisecondsSinceEpoch)];
                                   _sigRedoStrokes.clear();
-                                  _sigStrokes.add((_sigCurrentStroke!, _sigInkColor, _sigPenWidth));
+                                  _sigStrokes.add(_SigStroke(
+                                    points: _sigCurrentStroke!,
+                                    color: _sigInkColor,
+                                    width: _sigPenWidth,
+                                    penType: _sigPenType,
+                                  ));
                                 }),
                                 onPanUpdate: (d) {
                                   if (_sigCurrentStroke == null) return;
-                                  setState(() => _sigCurrentStroke!.add(_toCanonicalPadPoint(d.localPosition, padSize)));
+                                  final pt = _toCanonicalPadPoint(d.localPosition, padSize);
+                                  final prev = _sigCurrentStroke!.last.pos;
+                                  if ((pt - prev).distance < 2.0) return;
+                                  setState(() => _sigCurrentStroke!.add(_SigPoint(pt, DateTime.now().millisecondsSinceEpoch)));
                                 },
-                                onPanEnd: (_) => _sigCurrentStroke = null,
+                                onPanEnd: (_) {
+                                  if (_sigAutoSmooth && _sigStrokes.isNotEmpty) {
+                                    setState(() {
+                                      _sigStrokes.last.points = _smoothSigPoints(_sigStrokes.last.points);
+                                    });
+                                  }
+                                  _sigCurrentStroke = null;
+                                },
                                 child: CustomPaint(
                                   painter: _SignaturePadPainter(_sigStrokes, _sigCanvasSize),
                                   size: padSize,
@@ -8139,8 +8694,220 @@ class _ExactNumberBoxState extends State<_ExactNumberBox> {
   }
 }
 
+class _PhotoEffectSpec {
+  final String id;
+  final String name;
+  final String subtitle;
+  final String assetPath;
+  final FilterSettings filters;
+
+  const _PhotoEffectSpec({
+    required this.id,
+    required this.name,
+    required this.subtitle,
+    required this.assetPath,
+    required this.filters,
+  });
+}
+
+class _SigPoint {
+  final Offset pos;
+  final int timestampMs;
+  const _SigPoint(this.pos, this.timestampMs);
+}
+
+class _SigStroke {
+  List<_SigPoint> points;
+  final Color color;
+  final double width;
+  final String penType;
+
+  _SigStroke({
+    required this.points,
+    required this.color,
+    required this.width,
+    this.penType = 'fountain',
+  });
+}
+
+/// Decimates hand-tremor jitter and runs pinned-endpoint Chaikin curve smoothing.
+List<_SigPoint> _smoothSigPoints(List<_SigPoint> raw, {int passes = 3}) {
+  if (raw.length < 3) return raw;
+  final decimated = <_SigPoint>[raw.first];
+  const minDist = 3.2;
+  for (int i = 1; i < raw.length - 1; i++) {
+    if ((raw[i].pos - decimated.last.pos).distance >= minDist) {
+      decimated.add(raw[i]);
+    }
+  }
+  decimated.add(raw.last);
+  if (decimated.length < 3) return decimated;
+
+  var pts = decimated;
+  for (int pass = 0; pass < passes; pass++) {
+    final next = <_SigPoint>[pts.first];
+    for (int i = 0; i < pts.length - 1; i++) {
+      final a = pts[i];
+      final b = pts[i + 1];
+      next.add(_SigPoint(
+        Offset(a.pos.dx * 0.75 + b.pos.dx * 0.25, a.pos.dy * 0.75 + b.pos.dy * 0.25),
+        (a.timestampMs * 0.75 + b.timestampMs * 0.25).round(),
+      ));
+      next.add(_SigPoint(
+        Offset(a.pos.dx * 0.25 + b.pos.dx * 0.75, a.pos.dy * 0.25 + b.pos.dy * 0.75),
+        (a.timestampMs * 0.25 + b.timestampMs * 0.75).round(),
+      ));
+    }
+    next.add(pts.last);
+    pts = next;
+  }
+  return pts;
+}
+
+void _paintSignatureStrokeList(
+  Canvas canvas,
+  List<_SigStroke> strokes, {
+  required double scale,
+  required double offsetX,
+  required double offsetY,
+  double widthMultiplier = 1.0,
+}) {
+  Offset mapPt(Offset p) => Offset(p.dx * scale + offsetX, p.dy * scale + offsetY);
+
+  void drawUniformSmooth(_SigStroke stroke, double wFactor, double opacity) {
+    final pts = stroke.points;
+    final w = (stroke.width * widthMultiplier * wFactor).clamp(1.2, 28.0);
+    final paint = Paint()
+      ..color = opacity < 0.99 ? stroke.color.withOpacity(opacity) : stroke.color
+      ..strokeWidth = w
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+
+    if (pts.length == 1) {
+      canvas.drawCircle(
+        mapPt(pts.first.pos),
+        w / 2,
+        Paint()..color = paint.color,
+      );
+      return;
+    }
+
+    final path = Path();
+    final p0 = mapPt(pts.first.pos);
+    path.moveTo(p0.dx, p0.dy);
+    for (int i = 1; i < pts.length - 1; i++) {
+      final curr = mapPt(pts[i].pos);
+      final next = mapPt(pts[i + 1].pos);
+      final mid = Offset((curr.dx + next.dx) / 2.0, (curr.dy + next.dy) / 2.0);
+      path.quadraticBezierTo(curr.dx, curr.dy, mid.dx, mid.dy);
+    }
+    final last = mapPt(pts.last.pos);
+    path.lineTo(last.dx, last.dy);
+    canvas.drawPath(path, paint);
+  }
+
+  for (final stroke in strokes) {
+    final pts = stroke.points;
+    if (pts.isEmpty) continue;
+    final pen = stroke.penType;
+
+    if (pen == 'ballpoint') {
+      drawUniformSmooth(stroke, 1.0, 1.0);
+      continue;
+    }
+    if (pen == 'fineliner') {
+      drawUniformSmooth(stroke, 0.52, 1.0);
+      continue;
+    }
+    if (pen == 'marker') {
+      drawUniformSmooth(stroke, 1.85, 0.9);
+      continue;
+    }
+
+    final baseWidth = (stroke.width * widthMultiplier).clamp(1.5, 26.0);
+    if (pts.length == 1) {
+      canvas.drawCircle(
+        mapPt(pts.first.pos),
+        baseWidth / 2,
+        Paint()..color = stroke.color,
+      );
+      continue;
+    }
+
+    final fillPaint = Paint()
+      ..color = stroke.color
+      ..style = PaintingStyle.fill;
+
+    if (pen == 'calligraphy') {
+      final nibHalfLen = baseWidth * 0.78;
+      final nibHalfThick = math.max(1.0, baseWidth * 0.16);
+      const nibAngle = -math.pi / 4.0;
+      for (int i = 0; i < pts.length - 1; i++) {
+        final p0 = mapPt(pts[i].pos);
+        final p1 = mapPt(pts[i + 1].pos);
+        final dist = (p1 - p0).distance;
+        final steps = math.max(1, (dist / 2.0).ceil());
+        for (int st = 0; st <= steps; st++) {
+          final f = st / steps;
+          final px = p0.dx + (p1.dx - p0.dx) * f;
+          final py = p0.dy + (p1.dy - p0.dy) * f;
+          canvas.save();
+          canvas.translate(px, py);
+          canvas.rotate(nibAngle);
+          canvas.drawRect(
+            Rect.fromCenter(center: Offset.zero, width: nibHalfLen * 2, height: nibHalfThick * 2),
+            fillPaint,
+          );
+          canvas.restore();
+        }
+      }
+      continue;
+    }
+
+    // Fountain Nib or Brush Pen
+    double smoothedR = baseWidth * 0.52;
+    final total = pts.length;
+    for (int i = 0; i < total - 1; i++) {
+      final p0 = mapPt(pts[i].pos);
+      final p1 = mapPt(pts[i + 1].pos);
+      final delta = p1 - p0;
+      final segLen = delta.distance;
+      if (segLen < 0.05) continue;
+
+      final progress = i / math.max(1, total - 1);
+      final edgeTaper = (progress / 0.1).clamp(0.0, 1.0) * 0.28 +
+          ((1.0 - progress) / 0.14).clamp(0.0, 1.0) * 0.38 +
+          0.34;
+
+      double targetR = baseWidth * 0.5;
+      if (pen == 'fountain') {
+        final angle = math.atan2(delta.dy, delta.dx);
+        final nibMod = 0.44 + 0.68 * math.sin(angle - math.pi * 0.22).abs();
+        targetR = (baseWidth * 0.62) * nibMod * edgeTaper;
+      } else {
+        final dt = math.max(6, pts[i + 1].timestampMs - pts[i].timestampMs);
+        final speed = segLen / dt;
+        final pressure = (1.38 - speed * 0.42).clamp(0.32, 1.55);
+        targetR = (baseWidth * 0.60) * pressure * edgeTaper;
+      }
+
+      final prevR = smoothedR;
+      smoothedR = prevR * 0.68 + targetR * 0.32;
+      final steps = math.max(1, (segLen / 1.8).ceil());
+      for (int st = 0; st <= steps; st++) {
+        final f = st / steps;
+        final cx = p0.dx + delta.dx * f;
+        final cy = p0.dy + delta.dy * f;
+        final r = math.max(0.75, prevR + (smoothedR - prevR) * f);
+        canvas.drawCircle(Offset(cx, cy), r, fillPaint);
+      }
+    }
+  }
+}
+
 class _SignaturePadPainter extends CustomPainter {
-  final List<(List<Offset>, Color, double)> strokes;
+  final List<_SigStroke> strokes;
   final Size sourceSize;
   _SignaturePadPainter(this.strokes, this.sourceSize);
 
@@ -8152,29 +8919,14 @@ class _SignaturePadPainter extends CustomPainter {
     final ox = (size.width - sw * scale) / 2.0;
     final oy = (size.height - sh * scale) / 2.0;
 
-    for (final stroke in strokes) {
-      final pts = stroke.$1;
-      if (pts.isEmpty) continue;
-      final paint = Paint()
-        ..color = stroke.$2
-        ..strokeWidth = (stroke.$3 * scale).clamp(1.5, 24.0)
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = PaintingStyle.stroke;
-      if (pts.length == 1) {
-        canvas.drawCircle(
-          Offset(pts[0].dx * scale + ox, pts[0].dy * scale + oy),
-          (stroke.$3 * scale) / 2,
-          Paint()..color = stroke.$2,
-        );
-        continue;
-      }
-      final path = Path()..moveTo(pts[0].dx * scale + ox, pts[0].dy * scale + oy);
-      for (int i = 1; i < pts.length; i++) {
-        path.lineTo(pts[i].dx * scale + ox, pts[i].dy * scale + oy);
-      }
-      canvas.drawPath(path, paint);
-    }
+    _paintSignatureStrokeList(
+      canvas,
+      strokes,
+      scale: scale,
+      offsetX: ox,
+      offsetY: oy,
+      widthMultiplier: scale,
+    );
   }
 
   @override
