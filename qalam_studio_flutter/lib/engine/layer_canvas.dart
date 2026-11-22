@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import '../models/design_project.dart';
 import 'filter_matrix.dart';
 
@@ -1027,7 +1026,7 @@ class _ArtboardPainter extends CustomPainter {
               fontFamily: layer.fontFamily,
               fontSize: layer.fontSize,
               fontWeight: FontWeight.values[weightIndex],
-              fontVariations: [FontVariation('wght', layer.fontWeight.toDouble())],
+              fontVariations: [ui.FontVariation('wght', layer.fontWeight.toDouble())],
               height: layer.lineHeight,
               color: layer.textColor,
             ),
@@ -1140,7 +1139,11 @@ class _ArtboardPainter extends CustomPainter {
     void drawGraded({ColorFilter? extraFilter}) {
       final p = Paint()..filterQuality = FilterQuality.medium;
       if (extraFilter != null && gradeFilter != null) {
-        p.colorFilter = ColorFilter.compose(extraFilter, gradeFilter);
+        canvas.saveLayer(rect, Paint()..colorFilter = extraFilter);
+        p.colorFilter = gradeFilter;
+        canvas.drawImageRect(uiImg, srcRect, dstRect, p);
+        canvas.restore();
+        return;
       } else if (extraFilter != null) {
         p.colorFilter = extraFilter;
       } else if (gradeFilter != null) {
