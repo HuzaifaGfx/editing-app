@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import '../models/design_project.dart';
@@ -39,6 +42,10 @@ class _LayerCanvasState extends State<LayerCanvas> {
   final TransformationController _transformController = TransformationController();
   final GlobalKey _canvasStackKey = GlobalKey();
 
+  final Map<String, ui.Image> _decodedImages = {};
+  final Set<String> _loadingImageKeys = {};
+  final Map<String, String> _fileMtimeCache = {};
+
   final Map<int, Offset> _activePointers = {};
   bool _isPinching = false;
   double _currentZoom = 1.0;
@@ -62,6 +69,127 @@ class _LayerCanvasState extends State<LayerCanvas> {
   Offset _panStartCanvas = Offset.zero;
   bool _snapX = false;
   bool _snapY = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncDecodedImages();
+  }
+
+  @override
+  void didUpdateWidget(covariant LayerCanvas oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncDecodedImages();
+  }
+
+  @override
+  void dispose() {
+    _transformController.dispose();
+    for (final img in _decodedImages.values) {
+      img.dispose();
+    }
+    _decodedImages.clear();
+    super.dispose();
+  }
+
+  String _imageSourceKey(DesignLayer layer) {
+    if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
+      final b = layer.processedGuillocheBytes!;
+      return 'g:${layer.id}:${identityHashCode(b)}:${b.length}';
+    }
+    if (layer.processedWhiteRemovedBytes != null) {
+      final b = layer.processedWhiteRemovedBytes!;
+      return 'w:${layer.id}:${identityHashCode(b)}:${b.length}';
+    }
+    if (layer.localImagePath != null) {
+      final path = layer.localImagePath!;
+      var stamp = _fileMtimeCache[path];
+      if (stamp == null) {
+        try {
+          final f = File(path);
+          if (f.existsSync()) {
+            stamp = '${f.lengthSync()}_${f.lastModifiedSync().millisecondsSinceEpoch}';
+          } else {
+            stamp = 'missing';
+          }
+        } catch (_) {
+          stamp = 'err';
+        }
+        _fileMtimeCache[path] = stamp;
+      }
+      return 'f:$path:$stamp';
+    }
+    return '';
+  }
+
+  void _syncDecodedImages() {
+    final activeKeys = <String>{};
+    for (final layer in widget.page.layers) {
+      if (!layer.visible || layer.type != LayerType.image) continue;
+      final key = _imageSourceKey(layer);
+      if (key.isEmpty) continue;
+      activeKeys.add(key);
+      if (!_decodedImages.containsKey(key) && !_loadingImageKeys.contains(key)) {
+        _loadingImageKeys.add(key);
+        unawaited(_decodeLayerImage(layer, key));
+      }
+    }
+
+    final staleKeys = _decodedImages.keys.where((k) => !activeKeys.contains(k)).toList();
+    if (staleKeys.isNotEmpty) {
+      final toDispose = <ui.Image>[];
+      for (final k in staleKeys) {
+        final removed = _decodedImages.remove(k);
+        if (removed != null) toDispose.add(removed);
+      }
+      if (toDispose.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          for (final img in toDispose) {
+            img.dispose();
+          }
+        });
+      }
+    }
+  }
+
+  Future<void> _decodeLayerImage(DesignLayer layer, String key) async {
+    try {
+      Uint8List? bytes;
+      if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
+        bytes = layer.processedGuillocheBytes;
+      } else if (layer.processedWhiteRemovedBytes != null) {
+        bytes = layer.processedWhiteRemovedBytes;
+      } else if (layer.localImagePath != null) {
+        final file = File(layer.localImagePath!);
+        if (await file.exists()) {
+          bytes = await file.readAsBytes();
+        }
+      }
+      if (bytes == null || bytes.isEmpty) {
+        _loadingImageKeys.remove(key);
+        return;
+      }
+      final completer = Completer<ui.Image>();
+      ui.decodeImageFromList(bytes, (ui.Image result) {
+        if (!completer.isCompleted) completer.complete(result);
+      });
+      final decoded = await completer.future;
+      if (!mounted) {
+        decoded.dispose();
+        return;
+      }
+      setState(() {
+        _loadingImageKeys.remove(key);
+        final prev = _decodedImages[key];
+        _decodedImages[key] = decoded;
+        if (prev != null && !identical(prev, decoded)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => prev.dispose());
+        }
+      });
+    } catch (_) {
+      _loadingImageKeys.remove(key);
+    }
+  }
 
   Offset _globalToCanvas(Offset globalPos) {
     final box = _canvasStackKey.currentContext?.findRenderObject() as RenderBox?;
@@ -99,12 +227,6 @@ class _LayerCanvasState extends State<LayerCanvas> {
     _preDragLayer = null;
   }
 
-  @override
-  void dispose() {
-    _transformController.dispose();
-    super.dispose();
-  }
-
   void _setZoomAroundCenter(double nextZoom, double vw, double vh) {
     final clamped = nextZoom.clamp(0.4, 4.0).toDouble();
     final cur = _transformController.value.clone();
@@ -138,8 +260,19 @@ class _LayerCanvasState extends State<LayerCanvas> {
 
   @override
   Widget build(BuildContext context) {
+    _syncDecodedImages();
     final page = widget.page;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final layerImages = <String, ui.Image>{};
+    for (final layer in page.layers) {
+      if (!layer.visible || layer.type != LayerType.image) continue;
+      final key = _imageSourceKey(layer);
+      final img = _decodedImages[key];
+      if (img != null) {
+        layerImages[layer.id] = img;
+      }
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -285,169 +418,172 @@ class _LayerCanvasState extends State<LayerCanvas> {
                             child: SizedBox(
                               width: page.width,
                               height: page.height,
-                              child: Container(
-                                color: widget.forceTransparentBackground
-                                    ? Colors.transparent
-                                    : page.backgroundColor,
-                                child: Stack(
-                                  key: _canvasStackKey,
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    // Strictly clipped artboard surface — zero layer artwork ever escapes canvas bounds
-                                    Positioned.fill(
-                                      child: ClipRect(
-                                        clipBehavior: Clip.hardEdge,
-                                        child: Stack(
-                                          clipBehavior: Clip.hardEdge,
-                                          children: [
-                                            Positioned.fill(
-                                              child: GestureDetector(
-                                                behavior: HitTestBehavior.translucent,
-                                                onTap: () {
-                                                  if (_blockLayerInteraction) return;
-                                                  widget.onSelectLayer(null);
-                                                },
-                                              ),
-                                            ),
-                                            ...page.layers.where((l) => l.visible).map((layer) {
-                                              final selected = !widget.hideOverlaysForExport &&
-                                                  widget.showSelectionHandles &&
-                                                  !layer.isCanvasBackground &&
-                                                  layer.id == widget.selectedLayerId;
-
-                                              final layerChild = Transform.rotate(
-                                                angle: layer.rotation * math.pi / 180.0,
-                                                child: Stack(
-                                                  clipBehavior: Clip.none,
-                                                  children: [
-                                                    Positioned.fill(
-                                                      child: _LayerBlendWrapper(
-                                                        blendMode: layer.blendMode,
-                                                        opacity: layer.opacity.clamp(0.0, 1.0),
-                                                        child: _buildLayerContent(layer),
-                                                      ),
-                                                    ),
-                                                    if (selected)
-                                                      IgnorePointer(
-                                                        child: Container(
-                                                          decoration: BoxDecoration(
-                                                            border: Border.all(
-                                                              color: const Color(0xFF111317),
-                                                              width: (2.5 * invScale).clamp(2.0, 20.0),
-                                                            ),
-                                                            boxShadow: [BoxShadow(color: Colors.white.withOpacity(0.55), blurRadius: 0, spreadRadius: (1.0 * invScale).clamp(0.8, 4.0))],
-                                                          ),
-                                                        ),
-                                                      ),
-                                                  ],
-                                                ),
-                                              );
-
-                                              return Positioned(
-                                                left: layer.x,
-                                                top: layer.y,
-                                                width: layer.width,
-                                                height: layer.height,
-                                                child: layer.isCanvasBackground
-                                                    ? IgnorePointer(ignoring: true, child: layerChild)
-                                                    : GestureDetector(
-                                                        behavior: HitTestBehavior.opaque,
-                                                        onTap: () {
-                                                          if (_blockLayerInteraction) return;
-                                                          widget.onSelectLayer(layer.id);
-                                                        },
-                                                        onPanStart: (d) {
-                                                          if (_blockLayerInteraction) return;
-                                                          _capturePreDrag(layer);
-                                                          _panStartCanvas = _globalToCanvas(d.globalPosition);
-                                                          widget.onSelectLayer(layer.id);
-                                                          if (!layer.locked) widget.onInteractionStart?.call();
-                                                        },
-                                                        onPanUpdate: layer.locked
-                                                            ? null
-                                                            : (d) {
-                                                                if (_blockLayerInteraction) return;
-                                                                final curCanvas = _globalToCanvas(d.globalPosition);
-                                                                final totalDelta = curCanvas - _panStartCanvas;
-                                                                const minOverlap = 24.0;
-                                                                final minX = -(layer.width - minOverlap);
-                                                                final maxX = page.width - minOverlap;
-                                                                final minY = -(layer.height - minOverlap);
-                                                                final maxY = page.height - minOverlap;
-                                                                var nextX = (_preDragX + totalDelta.dx).clamp(minX, maxX).toDouble();
-                                                                var nextY = (_preDragY + totalDelta.dy).clamp(minY, maxY).toDouble();
-                                                                final cx = nextX + layer.width / 2;
-                                                                final cy = nextY + layer.height / 2;
-                                                                const snapTol = 10.0;
-                                                                final hitX = (cx - page.width / 2).abs() <= snapTol;
-                                                                final hitY = (cy - page.height / 2).abs() <= snapTol;
-                                                                if (hitX) nextX = (page.width / 2 - layer.width / 2).clamp(minX, maxX).toDouble();
-                                                                if (hitY) nextY = (page.height / 2 - layer.height / 2).clamp(minY, maxY).toDouble();
-                                                                setState(() {
-                                                                  layer.x = nextX;
-                                                                  layer.y = nextY;
-                                                                  _snapX = hitX;
-                                                                  _snapY = hitY;
-                                                                });
-                                                              },
-                                                        onPanEnd: (_) {
-                                                          if (_snapX || _snapY) {
-                                                            setState(() {
-                                                              _snapX = false;
-                                                              _snapY = false;
-                                                            });
-                                                          }
-                                                          widget.onUpdateLayer(layer);
-                                                        },
-                                                        onPanCancel: () {
-                                                          if (_snapX || _snapY) {
-                                                            setState(() {
-                                                              _snapX = false;
-                                                              _snapY = false;
-                                                            });
-                                                          }
-                                                          widget.onUpdateLayer(layer);
-                                                        },
-                                                        child: layerChild,
-                                                      ),
-                                              );
-                                            }),
-                                            if (widget.showGuides && !widget.hideOverlaysForExport)
-                                              Positioned.fill(
-                                                child: IgnorePointer(
-                                                  child: CustomPaint(
-                                                    painter: _MarginGuidesPainter(invScale: invScale),
-                                                  ),
-                                                ),
-                                              ),
-                                          ],
-                                        ),
+                              child: Stack(
+                                key: _canvasStackKey,
+                                clipBehavior: Clip.none,
+                                children: [
+                                  // Single unified Canvas Picture: guarantees all 12 BlendModes and 0..100% Opacity
+                                  // composite accurately against page background & lower layers in both Impeller & Skia.
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      isComplex: true,
+                                      willChange: true,
+                                      painter: _ArtboardPainter(
+                                        page: page,
+                                        layerImages: layerImages,
+                                        forceTransparentBackground: widget.forceTransparentBackground,
                                       ),
                                     ),
-                                    if (_snapX && !widget.hideOverlaysForExport)
-                                      Positioned(
-                                        left: page.width / 2 - (1.0 * invScale),
-                                        top: 0,
-                                        bottom: 0,
-                                        width: 2.0 * invScale,
-                                        child: IgnorePointer(
-                                          child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
-                                        ),
+                                  ),
+                                  // Interactive gesture hit-targets & clipped selection box (pure hit layer, zero artwork)
+                                  Positioned.fill(
+                                    child: ClipRect(
+                                      clipBehavior: Clip.hardEdge,
+                                      child: Stack(
+                                        clipBehavior: Clip.hardEdge,
+                                        children: [
+                                          Positioned.fill(
+                                            child: GestureDetector(
+                                              behavior: HitTestBehavior.translucent,
+                                              onTap: () {
+                                                if (_blockLayerInteraction) return;
+                                                widget.onSelectLayer(null);
+                                              },
+                                            ),
+                                          ),
+                                          ...page.layers.where((l) => l.visible).map((layer) {
+                                            final selected = !widget.hideOverlaysForExport &&
+                                                widget.showSelectionHandles &&
+                                                !layer.isCanvasBackground &&
+                                                layer.id == widget.selectedLayerId;
+
+                                            final hitChild = Transform.rotate(
+                                              angle: layer.rotation * math.pi / 180.0,
+                                              child: selected
+                                                  ? IgnorePointer(
+                                                      child: Container(
+                                                        decoration: BoxDecoration(
+                                                          border: Border.all(
+                                                            color: const Color(0xFF111317),
+                                                            width: (2.5 * invScale).clamp(2.0, 20.0),
+                                                          ),
+                                                          boxShadow: [
+                                                            BoxShadow(
+                                                              color: Colors.white.withOpacity(0.55),
+                                                              blurRadius: 0,
+                                                              spreadRadius: (1.0 * invScale).clamp(0.8, 4.0),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    )
+                                                  : const SizedBox.expand(),
+                                            );
+
+                                            return Positioned(
+                                              left: layer.x,
+                                              top: layer.y,
+                                              width: layer.width,
+                                              height: layer.height,
+                                              child: layer.isCanvasBackground
+                                                  ? IgnorePointer(ignoring: true, child: hitChild)
+                                                  : GestureDetector(
+                                                      behavior: HitTestBehavior.opaque,
+                                                      onTap: () {
+                                                        if (_blockLayerInteraction) return;
+                                                        widget.onSelectLayer(layer.id);
+                                                      },
+                                                      onPanStart: (d) {
+                                                        if (_blockLayerInteraction) return;
+                                                        _capturePreDrag(layer);
+                                                        _panStartCanvas = _globalToCanvas(d.globalPosition);
+                                                        widget.onSelectLayer(layer.id);
+                                                        if (!layer.locked) widget.onInteractionStart?.call();
+                                                      },
+                                                      onPanUpdate: layer.locked
+                                                          ? null
+                                                          : (d) {
+                                                              if (_blockLayerInteraction) return;
+                                                              final curCanvas = _globalToCanvas(d.globalPosition);
+                                                              final totalDelta = curCanvas - _panStartCanvas;
+                                                              const minOverlap = 24.0;
+                                                              final minX = -(layer.width - minOverlap);
+                                                              final maxX = page.width - minOverlap;
+                                                              final minY = -(layer.height - minOverlap);
+                                                              final maxY = page.height - minOverlap;
+                                                              var nextX = (_preDragX + totalDelta.dx).clamp(minX, maxX).toDouble();
+                                                              var nextY = (_preDragY + totalDelta.dy).clamp(minY, maxY).toDouble();
+                                                              final cx = nextX + layer.width / 2;
+                                                              final cy = nextY + layer.height / 2;
+                                                              const snapTol = 10.0;
+                                                              final hitX = (cx - page.width / 2).abs() <= snapTol;
+                                                              final hitY = (cy - page.height / 2).abs() <= snapTol;
+                                                              if (hitX) nextX = (page.width / 2 - layer.width / 2).clamp(minX, maxX).toDouble();
+                                                              if (hitY) nextY = (page.height / 2 - layer.height / 2).clamp(minY, maxY).toDouble();
+                                                              setState(() {
+                                                                layer.x = nextX;
+                                                                layer.y = nextY;
+                                                                _snapX = hitX;
+                                                                _snapY = hitY;
+                                                              });
+                                                            },
+                                                      onPanEnd: (_) {
+                                                        if (_snapX || _snapY) {
+                                                          setState(() {
+                                                            _snapX = false;
+                                                            _snapY = false;
+                                                          });
+                                                        }
+                                                        widget.onUpdateLayer(layer);
+                                                      },
+                                                      onPanCancel: () {
+                                                        if (_snapX || _snapY) {
+                                                          setState(() {
+                                                            _snapX = false;
+                                                            _snapY = false;
+                                                          });
+                                                        }
+                                                        widget.onUpdateLayer(layer);
+                                                      },
+                                                      child: hitChild,
+                                                    ),
+                                            );
+                                          }),
+                                          if (widget.showGuides && !widget.hideOverlaysForExport)
+                                            Positioned.fill(
+                                              child: IgnorePointer(
+                                                child: CustomPaint(
+                                                  painter: _MarginGuidesPainter(invScale: invScale),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
                                       ),
-                                    if (_snapY && !widget.hideOverlaysForExport)
-                                      Positioned(
-                                        top: page.height / 2 - (1.0 * invScale),
-                                        left: 0,
-                                        right: 0,
-                                        height: 2.0 * invScale,
-                                        child: IgnorePointer(
-                                          child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
-                                        ),
+                                    ),
+                                  ),
+                                  if (_snapX && !widget.hideOverlaysForExport)
+                                    Positioned(
+                                      left: page.width / 2 - (1.0 * invScale),
+                                      top: 0,
+                                      bottom: 0,
+                                      width: 2.0 * invScale,
+                                      child: IgnorePointer(
+                                        child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
                                       ),
-                                    if (!widget.hideOverlaysForExport && selectedLayer != null && !selectedLayer.locked)
-                                      _buildSelectionHandlesOverlay(selectedLayer, invScale),
-                                  ],
-                                ),
+                                    ),
+                                  if (_snapY && !widget.hideOverlaysForExport)
+                                    Positioned(
+                                      top: page.height / 2 - (1.0 * invScale),
+                                      left: 0,
+                                      right: 0,
+                                      height: 2.0 * invScale,
+                                      child: IgnorePointer(
+                                        child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
+                                      ),
+                                    ),
+                                  if (!widget.hideOverlaysForExport && selectedLayer != null && !selectedLayer.locked)
+                                    _buildSelectionHandlesOverlay(selectedLayer, invScale),
+                                ],
                               ),
                             ),
                           ),
@@ -527,26 +663,26 @@ class _LayerCanvasState extends State<LayerCanvas> {
                       ),
                       Container(
                         width: 1,
-                        height: 18,
+                        height: 20,
                         color: isDark ? Colors.white12 : Colors.black12,
                       ),
                       InkWell(
                         onTap: _resetZoom,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           child: Text(
                             '${(_currentZoom * 100).round()}%',
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w700,
-                              color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                              color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
                             ),
                           ),
                         ),
                       ),
                       Container(
                         width: 1,
-                        height: 18,
+                        height: 20,
                         color: isDark ? Colors.white12 : Colors.black12,
                       ),
                       _zoomStepBtn(
@@ -594,136 +730,22 @@ class _LayerCanvasState extends State<LayerCanvas> {
     );
   }
 
-  Widget _buildLayerContent(DesignLayer layer) {
-    if (layer.type == LayerType.image) {
-      final fit = layer.aspectLocked ? layer.objectFit : BoxFit.fill;
-      Widget? buildRawImg() {
-        if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
-          return Image.memory(
-            layer.processedGuillocheBytes!,
-            fit: fit,
-            gaplessPlayback: true,
-          );
-        }
-        if (layer.processedWhiteRemovedBytes != null) {
-          return Image.memory(
-            layer.processedWhiteRemovedBytes!,
-            fit: fit,
-            gaplessPlayback: true,
-          );
-        }
-        if (layer.localImagePath != null && File(layer.localImagePath!).existsSync()) {
-          return Image.file(
-            File(layer.localImagePath!),
-            fit: fit,
-            gaplessPlayback: true,
-          );
-        }
-        return null;
-      }
-
-      final firstImg = buildRawImg();
-      if (firstImg == null) {
-        return Container(
-          color: const Color(0xFF262B35),
-          child: const Center(child: Icon(Icons.image_outlined, size: 48, color: Colors.white54)),
-        );
-      }
-      final hasOptical = filtersHaveVisualEffect(layer.filters) &&
-          !(layer.filters.guilloche && layer.processedGuillocheBytes != null);
-      final Widget filteredImg = hasOptical
-          ? buildOpticalFilteredImageWidget(
-              filters: layer.filters,
-              childBuilder: () => buildRawImg() ?? firstImg,
-            )
-          : firstImg;
-      final Widget flippedImg = (layer.flipX || layer.flipY)
-          ? Transform.flip(
-              flipX: layer.flipX,
-              flipY: layer.flipY,
-              child: filteredImg,
-            )
-          : filteredImg;
-      return layer.borderRadius > 0
-          ? ClipRRect(
-              borderRadius: BorderRadius.circular(layer.borderRadius),
-              child: flippedImg,
-            )
-          : flippedImg;
-    }
-
-    if (layer.type == LayerType.text) {
-      final weightIndex = ((layer.fontWeight / 100).round() - 1).clamp(0, 8);
-      final effectiveAlign =
-          layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left);
-      final alignBox = effectiveAlign == TextAlign.center
-          ? Alignment.topCenter
-          : (effectiveAlign == TextAlign.right ||
-                  (effectiveAlign == TextAlign.justify && layer.isRtl)
-              ? Alignment.topRight
-              : Alignment.topLeft);
-      final hasBg = layer.textBgColor.alpha > 0;
-      return Directionality(
-        textDirection: layer.isRtl ? TextDirection.rtl : TextDirection.ltr,
-        child: Container(
-          padding: hasBg ? const EdgeInsets.symmetric(horizontal: 14, vertical: 8) : EdgeInsets.zero,
-          decoration: hasBg
-              ? BoxDecoration(
-                  color: layer.textBgColor,
-                  borderRadius: BorderRadius.circular(layer.borderRadius > 0 ? layer.borderRadius : 12),
-                )
-              : null,
-          child: Align(
-            alignment: alignBox,
-            child: SizedBox(
-              width: double.infinity,
-              child: Text(
-                layer.text,
-                textAlign: effectiveAlign,
-                style: TextStyle(
-                  fontFamily: layer.fontFamily,
-                  fontSize: layer.fontSize,
-                  fontWeight: FontWeight.values[weightIndex],
-                  fontVariations: [FontVariation('wght', layer.fontWeight.toDouble())],
-                  height: layer.lineHeight,
-                  color: layer.textColor,
-                  shadows: const [],
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return CustomPaint(
-      size: Size(layer.width, layer.height),
-      painter: _ShapeLayerPainter(
-        shapeKind: layer.shapeKind,
-        fillColor: layer.textColor,
-        strokeColor: layer.shapeStrokeColor,
-        strokeWidth: layer.shapeStrokeWidth,
-        borderRadius: layer.borderRadius,
-      ),
-    );
-  }
-
   Widget _buildSelectionHandlesOverlay(DesignLayer layer, double invScale) {
     final page = widget.page;
-    final hitSize = 58.0 * invScale;
-    final badgeSize = 40.0 * invScale;
-    final iconSize = 22.0 * invScale;
-    final ringWidth = 2.8 * invScale;
-    final pad = hitSize * 0.52;
+    final badgeSize = (28.0 * invScale).clamp(24.0, 200.0);
+    final hitSize = (46.0 * invScale).clamp(40.0, 280.0);
+    final iconSize = (15.0 * invScale).clamp(13.0, 110.0);
+    final ringWidth = (2.2 * invScale).clamp(1.8, 12.0);
+    final pad = hitSize * 0.5;
 
-    final isUnrotated = (layer.rotation % 360).abs() < 0.01;
-    const minVis = 24.0;
+    final minVis = math.max(16.0, 16.0 * invScale);
+    final isUnrotated = layer.rotation.abs() < 0.5;
     final visLeft = isUnrotated
         ? layer.x.clamp(0.0, math.max(0.0, page.width - minVis)).toDouble()
-        : layer.x.clamp(-page.width * 0.35, page.width - minVis).toDouble();
+        : layer.x.clamp(-page.width * 0.35, math.max(0.0, page.width - minVis)).toDouble();
     final visTop = isUnrotated
         ? layer.y.clamp(0.0, math.max(0.0, page.height - minVis)).toDouble()
-        : layer.y.clamp(-page.height * 0.35, page.height - minVis).toDouble();
+        : layer.y.clamp(-page.height * 0.35, math.max(0.0, page.height - minVis)).toDouble();
     final visRight = isUnrotated
         ? (layer.x + layer.width).clamp(visLeft + minVis, page.width).toDouble()
         : (layer.x + layer.width).clamp(visLeft + minVis, page.width * 1.35).toDouble();
@@ -948,64 +970,337 @@ class _LayerCanvasState extends State<LayerCanvas> {
   }
 }
 
-class _LayerBlendWrapper extends SingleChildRenderObjectWidget {
-  final BlendMode blendMode;
-  final double opacity;
-  const _LayerBlendWrapper({
-    required this.blendMode,
-    this.opacity = 1.0,
-    super.child,
+/// Unified single-Picture artboard painter.
+/// Paints page background and all layers sequentially into the same Canvas pass
+/// so every BlendMode (Multiply, Screen, Overlay, Soft Light, etc.) and Opacity (0..100%)
+/// blends reliably across Images (with Filters/Blur/Glow/Rounded/Flip), Text, and Shapes
+/// on both Impeller and Skia as well as PNG/PDF exports.
+class _ArtboardPainter extends CustomPainter {
+  final DocumentPage page;
+  final Map<String, ui.Image> layerImages;
+  final bool forceTransparentBackground;
+
+  const _ArtboardPainter({
+    required this.page,
+    required this.layerImages,
+    required this.forceTransparentBackground,
   });
 
   @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _RenderLayerBlend(blendMode, opacity);
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
 
-  @override
-  void updateRenderObject(BuildContext context, covariant _RenderLayerBlend renderObject) {
-    renderObject
-      ..blendMode = blendMode
-      ..opacity = opacity;
+    if (!forceTransparentBackground && page.backgroundColor.alpha > 0) {
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()..color = page.backgroundColor,
+      );
+    }
+
+    for (final layer in page.layers) {
+      if (!layer.visible) continue;
+      final layerOpacity = layer.opacity.clamp(0.0, 1.0);
+      if (layerOpacity <= 0.001) continue;
+
+      final needsBlend = layer.blendMode != BlendMode.srcOver;
+      final needsAlpha = layerOpacity < 0.999;
+
+      TextPainter? preparedTextPainter;
+      double textPadX = 0.0;
+      double textPadY = 0.0;
+      Rect localBounds;
+
+      if (layer.type == LayerType.text) {
+        final weightIndex = ((layer.fontWeight / 100).round() - 1).clamp(0, 8);
+        final effectiveAlign =
+            layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left);
+        final hasBg = layer.textBgColor.alpha > 0;
+        textPadX = hasBg ? 14.0 : 0.0;
+        textPadY = hasBg ? 8.0 : 0.0;
+        final innerW = math.max(1.0, layer.width - textPadX * 2);
+
+        preparedTextPainter = TextPainter(
+          text: TextSpan(
+            text: layer.text,
+            style: TextStyle(
+              fontFamily: layer.fontFamily,
+              fontSize: layer.fontSize,
+              fontWeight: FontWeight.values[weightIndex],
+              fontVariations: [FontVariation('wght', layer.fontWeight.toDouble())],
+              height: layer.lineHeight,
+              color: layer.textColor,
+            ),
+          ),
+          textDirection: layer.isRtl ? TextDirection.rtl : TextDirection.ltr,
+          textAlign: effectiveAlign,
+        )..layout(minWidth: innerW, maxWidth: innerW);
+
+        final maxH = math.max(layer.height, preparedTextPainter.height + textPadY * 2);
+        localBounds = Rect.fromLTWH(
+          -layer.width / 2 - 16.0,
+          -layer.height / 2 - 16.0,
+          layer.width + 32.0,
+          maxH + 32.0,
+        );
+      } else if (layer.type == LayerType.shape) {
+        final strokePad = math.max(4.0, layer.shapeStrokeWidth / 2 + 4.0);
+        localBounds = Rect.fromLTWH(
+          -layer.width / 2 - strokePad,
+          -layer.height / 2 - strokePad,
+          layer.width + strokePad * 2,
+          layer.height + strokePad * 2,
+        );
+      } else {
+        localBounds = Rect.fromLTWH(
+          -layer.width / 2 - 2.0,
+          -layer.height / 2 - 2.0,
+          layer.width + 4.0,
+          layer.height + 4.0,
+        );
+      }
+
+      canvas.save();
+      canvas.translate(layer.x + layer.width / 2.0, layer.y + layer.height / 2.0);
+      if (layer.rotation.abs() > 0.0001) {
+        canvas.rotate(layer.rotation * math.pi / 180.0);
+      }
+
+      if (needsBlend) {
+        canvas.saveLayer(
+          localBounds,
+          Paint()..blendMode = layer.blendMode,
+        );
+      }
+      if (needsAlpha) {
+        final alpha = (layerOpacity * 255).round().clamp(0, 255);
+        canvas.saveLayer(
+          localBounds,
+          Paint()..color = Color.fromARGB(alpha, 255, 255, 255),
+        );
+      }
+
+      if (layer.type == LayerType.image) {
+        _paintImageLayer(canvas, layer, layerImages[layer.id]);
+      } else if (layer.type == LayerType.text) {
+        _paintTextLayer(canvas, layer, preparedTextPainter!, textPadX, textPadY);
+      } else {
+        _paintShapeLayer(canvas, layer);
+      }
+
+      if (needsAlpha) {
+        canvas.restore();
+      }
+      if (needsBlend) {
+        canvas.restore();
+      }
+      canvas.restore();
+    }
+
+    canvas.restore();
   }
-}
 
-class _RenderLayerBlend extends RenderProxyBox {
-  BlendMode _blendMode;
-  double _opacity;
-  _RenderLayerBlend(this._blendMode, this._opacity);
+  void _paintImageLayer(Canvas canvas, DesignLayer layer, ui.Image? uiImg) {
+    final rect = Rect.fromLTWH(-layer.width / 2.0, -layer.height / 2.0, layer.width, layer.height);
+    canvas.save();
+    if (layer.borderRadius > 0) {
+      canvas.clipRRect(RRect.fromRectAndRadius(rect, Radius.circular(layer.borderRadius)));
+    } else {
+      canvas.clipRect(rect);
+    }
 
-  set blendMode(BlendMode value) {
-    if (_blendMode == value) return;
-    _blendMode = value;
-    markNeedsPaint();
-  }
-
-  set opacity(double value) {
-    final clamped = value.clamp(0.0, 1.0).toDouble();
-    if ((_opacity - clamped).abs() < 0.001) return;
-    _opacity = clamped;
-    markNeedsPaint();
-  }
-
-  @override
-  void paint(PaintingContext context, Offset offset) {
-    if (child == null || _opacity <= 0.001) return;
-    if (_blendMode == BlendMode.srcOver && _opacity >= 0.999) {
-      context.paintChild(child!, offset);
+    if (uiImg == null) {
+      canvas.drawRect(rect, Paint()..color = const Color(0xFF262B35));
+      canvas.restore();
       return;
     }
-    final alpha = (_opacity * 255).round().clamp(0, 255);
-    final paint = Paint()
-      ..blendMode = _blendMode
-      ..color = Color.fromARGB(alpha, 255, 255, 255);
-    context.canvas.saveLayer(offset & size, paint);
-    context.paintChild(child!, offset);
-    context.canvas.restore();
+
+    if (layer.flipX || layer.flipY) {
+      canvas.scale(layer.flipX ? -1.0 : 1.0, layer.flipY ? -1.0 : 1.0);
+    }
+
+    final fit = layer.aspectLocked ? layer.objectFit : BoxFit.fill;
+    final imgW = math.max(1.0, uiImg.width.toDouble());
+    final imgH = math.max(1.0, uiImg.height.toDouble());
+    final fitted = applyBoxFit(fit, Size(imgW, imgH), Size(layer.width, layer.height));
+    final srcRect = Alignment.center.inscribe(fitted.source, Rect.fromLTWH(0, 0, imgW, imgH));
+    final dstRect = Alignment.center.inscribe(fitted.destination, rect);
+
+    final f = layer.filters;
+    final useRawGuilloche = f.guilloche && layer.processedGuillocheBytes != null;
+    final hasColorGrade = !useRawGuilloche &&
+        ((f.brightness - 1.0).abs() >= 0.005 ||
+            (f.contrast - 1.0).abs() >= 0.005 ||
+            (f.saturate - 1.0).abs() >= 0.005 ||
+            f.sepia >= 0.005 ||
+            f.grayscale >= 0.005 ||
+            f.blackAndWhite);
+    final ColorFilter? gradeFilter = hasColorGrade ? buildLayerColorFilter(f) : null;
+
+    void drawGraded({ColorFilter? extraFilter}) {
+      final p = Paint()..filterQuality = FilterQuality.medium;
+      if (extraFilter != null && gradeFilter != null) {
+        p.colorFilter = ColorFilter.compose(extraFilter, gradeFilter);
+      } else if (extraFilter != null) {
+        p.colorFilter = extraFilter;
+      } else if (gradeFilter != null) {
+        p.colorFilter = gradeFilter;
+      }
+      canvas.drawImageRect(uiImg, srcRect, dstRect, p);
+    }
+
+    // 1. Sharp graded base image
+    drawGraded();
+
+    if (!useRawGuilloche) {
+      final pBlur = f.guilloche ? 0.0 : f.portraitBlur.clamp(0.0, 100.0);
+      final skinSmooth = f.guilloche ? 0.0 : f.skinSmooth.clamp(0.0, 100.0);
+      final softGlow = f.guilloche ? 0.0 : f.softGlow.clamp(0.0, 100.0);
+      final rosyTint = f.guilloche ? 0.0 : f.rosyTint.clamp(0.0, 100.0);
+
+      // 2. Portrait Blur V3 (peripheral bokeh with sharp center cutout)
+      if (pBlur > 0.5) {
+        canvas.saveLayer(rect, Paint());
+        canvas.saveLayer(
+          rect,
+          Paint()
+            ..imageFilter = ui.ImageFilter.blur(
+              sigmaX: (pBlur / 100.0) * 12.0,
+              sigmaY: (pBlur / 100.0) * 12.0,
+              tileMode: TileMode.clamp,
+            ),
+        );
+        drawGraded();
+        canvas.restore();
+
+        final maskShader = RadialGradient(
+          center: const Alignment(0.0, -0.16),
+          radius: 0.72,
+          colors: [
+            Colors.black,
+            Colors.black.withOpacity(0.86),
+            Colors.transparent,
+          ],
+          stops: const [0.0, 0.44, 0.94],
+        ).createShader(rect);
+        canvas.drawRect(
+          rect,
+          Paint()
+            ..blendMode = ui.BlendMode.dstOut
+            ..shader = maskShader,
+        );
+        canvas.restore();
+      }
+
+      // 3. Skin & Freckle Clarity Smoothing
+      if (skinSmooth > 0.5) {
+        final alpha = ((skinSmooth / 100.0) * 0.36 * 255).round().clamp(0, 255);
+        canvas.saveLayer(
+          rect,
+          Paint()
+            ..color = Color.fromARGB(alpha, 255, 255, 255)
+            ..imageFilter = ui.ImageFilter.blur(
+              sigmaX: (skinSmooth / 100.0) * 3.8,
+              sigmaY: (skinSmooth / 100.0) * 3.8,
+              tileMode: TileMode.clamp,
+            ),
+        );
+        drawGraded();
+        canvas.restore();
+      }
+
+      // 4. Radiant Soft Glow Bloom
+      if (softGlow > 0.5) {
+        final alpha = ((softGlow / 100.0) * 0.32 * 255).round().clamp(0, 255);
+        final plusFilter = ColorFilter.mode(
+          Colors.white.withOpacity(0.24),
+          ui.BlendMode.plus,
+        );
+        canvas.saveLayer(
+          rect,
+          Paint()
+            ..color = Color.fromARGB(alpha, 255, 255, 255)
+            ..imageFilter = ui.ImageFilter.blur(
+              sigmaX: 3.0 + (softGlow / 100.0) * 9.0,
+              sigmaY: 3.0 + (softGlow / 100.0) * 9.0,
+              tileMode: TileMode.clamp,
+            ),
+        );
+        drawGraded(extraFilter: plusFilter);
+        canvas.restore();
+      }
+
+      // 5. PinkHaze / Rosy Silk Veil
+      if (rosyTint > 0.5) {
+        canvas.drawRect(
+          rect,
+          Paint()
+            ..shader = LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                const Color(0xFFFFB6CE).withOpacity((rosyTint / 100.0) * 0.24),
+                const Color(0xFFFCA5C0).withOpacity((rosyTint / 100.0) * 0.18),
+                const Color(0xFFFED7AA).withOpacity((rosyTint / 100.0) * 0.16),
+              ],
+            ).createShader(rect),
+        );
+        canvas.drawRect(
+          rect,
+          Paint()
+            ..shader = RadialGradient(
+              center: const Alignment(0.0, -0.10),
+              radius: 0.65,
+              colors: [
+                const Color(0xFFF47298).withOpacity((rosyTint / 100.0) * 0.14),
+                Colors.transparent,
+              ],
+            ).createShader(rect),
+        );
+      }
+    }
+
+    canvas.restore();
   }
+
+  void _paintTextLayer(
+    Canvas canvas,
+    DesignLayer layer,
+    TextPainter tp,
+    double padX,
+    double padY,
+  ) {
+    final left = -layer.width / 2.0;
+    final top = -layer.height / 2.0;
+    if (layer.textBgColor.alpha > 0) {
+      final bgR = layer.borderRadius > 0 ? layer.borderRadius : 12.0;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(left, top, layer.width, layer.height),
+          Radius.circular(bgR),
+        ),
+        Paint()..color = layer.textBgColor,
+      );
+    }
+    tp.paint(canvas, Offset(left + padX, top + padY));
+  }
+
+  void _paintShapeLayer(Canvas canvas, DesignLayer layer) {
+    canvas.save();
+    canvas.translate(-layer.width / 2.0, -layer.height / 2.0);
+    _ShapeLayerPainter(
+      shapeKind: layer.shapeKind,
+      fillColor: layer.textColor,
+      strokeColor: layer.shapeStrokeColor,
+      strokeWidth: layer.shapeStrokeWidth,
+      borderRadius: layer.borderRadius,
+    ).paint(canvas, Size(layer.width, layer.height));
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _ArtboardPainter oldDelegate) => true;
 }
-
-
-
 
 class _StudioStageDotGridPainter extends CustomPainter {
   final bool isDark;
@@ -1029,7 +1324,6 @@ class _StudioStageDotGridPainter extends CustomPainter {
   bool shouldRepaint(covariant _StudioStageDotGridPainter oldDelegate) =>
       oldDelegate.isDark != isDark;
 }
-
 
 class _MarginGuidesPainter extends CustomPainter {
   final double invScale;
@@ -1095,7 +1389,6 @@ class _MarginGuidesPainter extends CustomPainter {
   bool shouldRepaint(covariant _MarginGuidesPainter oldDelegate) =>
       oldDelegate.invScale != invScale;
 }
-
 
 class _ShapeLayerPainter extends CustomPainter {
   final String shapeKind;

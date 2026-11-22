@@ -1037,7 +1037,7 @@ class _StudioScreenState extends State<StudioScreen> {
       _hideOverlaysForExport = true;
       _exportTransparentCanvas = format == 'png' && transparent;
     });
-    await Future.delayed(const Duration(milliseconds: 90));
+    await Future.delayed(const Duration(milliseconds: 120));
     try {
       final boundary =
           _canvasExportKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
@@ -1085,7 +1085,7 @@ class _StudioScreenState extends State<StudioScreen> {
             for (int i = 0; i < _project.pages.length; i++) {
               if (_pageIndex != i) {
                 setState(() => _pageIndex = i);
-                await Future.delayed(const Duration(milliseconds: 70));
+                await Future.delayed(const Duration(milliseconds: 110));
               }
               final pgBytes = await _captureCanvasBytes(
                 pixelRatio: scale,
@@ -2365,12 +2365,7 @@ class _StudioScreenState extends State<StudioScreen> {
             child: Column(
               children: [
                 InkWell(
-                  onTap: l.isCanvasBackground
-                      ? () => setState(() {
-                            _selectedLayerId = null;
-                            _inspectorTab = 2;
-                          })
-                      : () => _selectLayer(l.id),
+                  onTap: () => _selectLayer(l.id),
                   child: Row(
                     children: [
                       if (!l.isCanvasBackground)
