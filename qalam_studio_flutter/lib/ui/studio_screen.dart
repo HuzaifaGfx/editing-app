@@ -37,6 +37,14 @@ class _StudioScreenState extends State<StudioScreen> {
   Color get _brandNibInk => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
   Color get _brandNibOnInk => _isDark ? const Color(0xFFD97706) : const Color(0xFFF59E0B);
   Color get _amber => _inkPrimary;
+  Color get _amberTintBg => _isDark ? const Color(0xFFF59E0B).withOpacity(0.14) : const Color(0xFFFFFBEB);
+  Color get _amberTintBorder => _isDark ? const Color(0xFFFBBF24).withOpacity(0.42) : const Color(0xFFFCD34D);
+  Color get _scannerTeal => _isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
+  Color get _scannerTealBg => _isDark ? const Color(0xFF0D9488).withOpacity(0.18) : const Color(0xFFF0FDFA);
+  Color get _scannerTealBorder => _isDark ? const Color(0xFF2DD4BF).withOpacity(0.36) : const Color(0xFF99F6E4);
+  Color get _shareSky => _isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
+  Color get _shareSkyBg => _isDark ? const Color(0xFF0284C7).withOpacity(0.18) : const Color(0xFFE0F2FE);
+  Color get _shareSkyBorder => _isDark ? const Color(0xFF38BDF8).withOpacity(0.36) : const Color(0xFFBAE6FD);
   static const MethodChannel _mediaChannel = MethodChannel('com.qalam.studio/media');
 
   final ImagePicker _picker = ImagePicker();
@@ -53,6 +61,7 @@ class _StudioScreenState extends State<StudioScreen> {
   (int, String)? _studioEntrySnapshot;
   int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Effects, 3=Layers
   bool _sheetExpanded = true;
+  bool _sheetTall = false;
   bool _exportTransparentCanvas = false;
   bool _showGuides = true;
   bool _hideOverlaysForExport = false;
@@ -2136,7 +2145,10 @@ class _StudioScreenState extends State<StudioScreen> {
   Widget _buildStudioView(Color stageBg) {
     final layer = _activeLayer;
     final screenH = MediaQuery.of(context).size.height;
-    final expandedH = math.min(248.0, math.max(190.0, screenH * 0.29));
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    final standardH = math.min(395.0, math.max(290.0, screenH * 0.41));
+    final tallH = math.min(540.0, math.max(375.0, screenH * 0.56));
+    final expandedH = (_sheetTall ? tallH : standardH) + bottomInset * 0.5;
 
     return Column(
       children: [
@@ -2158,7 +2170,7 @@ class _StudioScreenState extends State<StudioScreen> {
           ),
         ),
         Container(
-          height: 48,
+          height: 50,
           decoration: BoxDecoration(
             color: _panelBg,
             border: Border(top: BorderSide(color: _borderColor)),
@@ -2168,7 +2180,7 @@ class _StudioScreenState extends State<StudioScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             children: [
               _quickBtn(Icons.photo_size_select_large, 'Canvas Pic', _importCanvasImage, highlight: true),
-              _quickBtn(Icons.document_scanner_outlined, 'Scanner', _openDocumentScannerSheet),
+              _quickBtn(Icons.document_scanner_outlined, 'Scanner', _openDocumentScannerSheet, tealAccent: true),
               if (_undoStack.isNotEmpty) _quickBtn(Icons.undo_rounded, 'Undo', _undoCanvas),
               if (_redoStack.isNotEmpty) _quickBtn(Icons.redo_rounded, 'Redo', _redoCanvas),
               _quickBtn(Icons.title_rounded, 'Add Text', _addTextLayer),
@@ -2183,55 +2195,123 @@ class _StudioScreenState extends State<StudioScreen> {
             ],
           ),
         ),
-        Container(
-          height: _sheetExpanded ? expandedH : 44,
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          height: _sheetExpanded ? expandedH : (52 + bottomInset * 0.5),
           decoration: BoxDecoration(
             color: _panelBg,
             border: Border(top: BorderSide(color: _borderColor)),
           ),
-          child: Column(
-            children: [
-              Container(
-                height: 43,
-                padding: const EdgeInsets.only(left: 8, right: 4),
-                decoration: BoxDecoration(
-                  border: _sheetExpanded ? Border(bottom: BorderSide(color: _borderColor)) : null,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
+          child: SafeArea(
+            top: false,
+            child: Column(
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onVerticalDragEnd: (details) {
+                    final v = details.primaryVelocity ?? 0.0;
+                    if (v < -180) {
+                      setState(() {
+                        if (!_sheetExpanded) {
+                          _sheetExpanded = true;
+                          _sheetTall = false;
+                        } else {
+                          _sheetTall = true;
+                        }
+                      });
+                    } else if (v > 180) {
+                      setState(() {
+                        if (_sheetTall) {
+                          _sheetTall = false;
+                        } else {
+                          _sheetExpanded = false;
+                        }
+                      });
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(10, 5, 6, 6),
+                    decoration: BoxDecoration(
+                      border: _sheetExpanded ? Border(bottom: BorderSide(color: _borderColor)) : null,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 3.5,
+                          margin: const EdgeInsets.only(bottom: 5),
+                          decoration: BoxDecoration(
+                            color: _mutedColor.withOpacity(0.35),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        Row(
                           children: [
-                            _tabChip(0, 'Design', Icons.tune_rounded),
-                            _tabChip(1, 'Overlay', Icons.layers_outlined),
-                            _tabChip(2, 'Effects', Icons.auto_fix_high_rounded),
-                            _tabChip(3, 'Layers (${_page.layers.length})', Icons.format_list_bulleted_rounded),
+                            Expanded(
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    _tabChip(0, 'Design', Icons.tune_rounded),
+                                    _tabChip(1, 'Overlay', Icons.layers_outlined),
+                                    _tabChip(2, 'Effects', Icons.auto_fix_high_rounded),
+                                    _tabChip(3, 'Layers (${_page.layers.length})', Icons.format_list_bulleted_rounded),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (_sheetExpanded)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 4),
+                                child: InkWell(
+                                  onTap: () => setState(() => _sheetTall = !_sheetTall),
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                    decoration: BoxDecoration(
+                                      color: _sheetTall ? _amberTintBg : _chipBg,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: _sheetTall ? _amberTintBorder : _borderColor,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      _sheetTall ? 'Half' : 'Tall',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: _sheetTall ? _brandNibInk : _textColor,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              tooltip: _sheetExpanded ? 'Collapse Panel' : 'Expand Panel',
+                              icon: Icon(
+                                _sheetExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
+                                color: _subColor,
+                              ),
+                              onPressed: () => setState(() => _sheetExpanded = !_sheetExpanded),
+                            ),
                           ],
                         ),
-                      ),
+                      ],
                     ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      tooltip: _sheetExpanded ? 'Collapse Panel' : 'Expand Panel',
-                      icon: Icon(
-                        _sheetExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
-                        color: _subColor,
-                      ),
-                      onPressed: () => setState(() => _sheetExpanded = !_sheetExpanded),
-                    ),
-                  ],
-                ),
-              ),
-              if (_sheetExpanded)
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(12),
-                    child: _buildInspectorBody(layer),
                   ),
                 ),
-            ],
+                if (_sheetExpanded)
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
+                      child: _buildInspectorBody(layer),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ],
@@ -2244,13 +2324,17 @@ class _StudioScreenState extends State<StudioScreen> {
     VoidCallback onTap, {
     bool highlight = false,
     bool danger = false,
+    bool tealAccent = false,
   }) {
     final bg = highlight
-        ? _amber
-        : (danger ? Colors.redAccent.withOpacity(0.12) : _chipBg);
+        ? _inkPrimary
+        : (danger
+            ? Colors.redAccent.withOpacity(0.12)
+            : (tealAccent ? _scannerTealBg : _chipBg));
     final fg = highlight
         ? _onInkPrimary
-        : (danger ? Colors.redAccent : _textColor);
+        : (danger ? Colors.redAccent : (tealAccent ? _scannerTeal : _textColor));
+    final iconColor = highlight ? _brandNibOnInk : fg;
     return Padding(
       padding: const EdgeInsets.only(right: 6),
       child: InkWell(
@@ -2261,12 +2345,18 @@ class _StudioScreenState extends State<StudioScreen> {
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(9),
-            border: highlight ? null : Border.all(color: danger ? Colors.redAccent.withOpacity(0.3) : _borderColor),
+            border: highlight
+                ? null
+                : Border.all(
+                    color: danger
+                        ? Colors.redAccent.withOpacity(0.32)
+                        : (tealAccent ? _scannerTealBorder : _borderColor),
+                  ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 15, color: fg),
+              Icon(icon, size: 15, color: iconColor),
               const SizedBox(width: 5),
               Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg)),
             ],
@@ -2289,14 +2379,14 @@ class _StudioScreenState extends State<StudioScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: active ? _amber : _chipBg,
+            color: active ? _inkPrimary : _chipBg,
             borderRadius: BorderRadius.circular(8),
             border: active ? null : Border.all(color: _borderColor),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: active ? _onInkPrimary : _subColor),
+              Icon(icon, size: 14, color: active ? _brandNibOnInk : _subColor),
               const SizedBox(width: 5),
               Text(
                 label,
@@ -2358,9 +2448,9 @@ class _StudioScreenState extends State<StudioScreen> {
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.fromLTRB(10, 8, 8, 6),
             decoration: BoxDecoration(
-              color: isSel ? _amber.withOpacity(0.12) : _inputBg,
+              color: isSel ? _amberTintBg : _cardBg,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: isSel ? _amber : _borderColor, width: isSel ? 1.4 : 1),
+              border: Border.all(color: isSel ? _brandNib : _borderColor, width: isSel ? 1.5 : 1),
             ),
             child: Column(
               children: [
@@ -2377,13 +2467,13 @@ class _StudioScreenState extends State<StudioScreen> {
                           ),
                         ),
                       Container(
-                        width: 30,
-                        height: 30,
+                        width: 32,
+                        height: 32,
                         decoration: BoxDecoration(
-                          color: isSel ? _amber.withOpacity(0.22) : _chipBg,
+                          color: isSel ? _inkPrimary : _chipBg,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: Icon(typeIcon, size: 16, color: isSel ? _accentText : _subColor),
+                        child: Icon(typeIcon, size: 16, color: isSel ? _brandNibOnInk : _subColor),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -4510,41 +4600,51 @@ class _StudioScreenState extends State<StudioScreen> {
       children: [
         Container(
           margin: const EdgeInsets.only(bottom: 18),
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(15),
           decoration: BoxDecoration(
-            color: _amber.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _amber.withOpacity(0.45)),
+            color: _cardBg,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _scannerTealBorder, width: 1.2),
           ),
           child: Row(
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  color: _amber,
-                  borderRadius: BorderRadius.circular(11),
+                  color: _scannerTealBg,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _scannerTealBorder),
                 ),
-                child: Icon(Icons.document_scanner_rounded, color: _onInkPrimary, size: 22),
+                child: Icon(Icons.document_scanner_rounded, color: _scannerTeal, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Document Scanner', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
                     Text(
-                      'Scan or upload pages · Live Preview · Save PDF / JPEG',
+                      'Document Scanner',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textColor),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Scan or upload pages · Live Preview · PDF / JPEG',
                       style: TextStyle(fontSize: 11.5, color: _subColor),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _scannerTeal,
+                  foregroundColor: _isDark ? const Color(0xFF0A0C0F) : Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                ),
                 onPressed: _openDocumentScannerSheet,
-                child: const Text('Scan', style: TextStyle(fontWeight: FontWeight.w700)),
+                child: const Text('Scan', style: TextStyle(fontWeight: FontWeight.w800)),
               ),
             ],
           ),
@@ -4635,9 +4735,9 @@ class _StudioScreenState extends State<StudioScreen> {
               child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: active ? _amber.withOpacity(0.12) : _cardBg,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: active ? _amber : _borderColor, width: active ? 1.5 : 1),
+                  color: _cardBg,
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: active ? _brandNib : _borderColor, width: active ? 1.5 : 1),
                 ),
                 child: Row(
                   children: [
@@ -5822,9 +5922,12 @@ class _StudioScreenState extends State<StudioScreen> {
               child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: isCurrent ? _amber.withOpacity(0.12) : _cardBg,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: isCurrent ? _amber : _borderColor, width: isCurrent ? 1.5 : 1),
+                  color: _cardBg,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isCurrent ? _brandNib : _borderColor,
+                    width: isCurrent ? 1.5 : 1,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -5832,81 +5935,62 @@ class _StudioScreenState extends State<StudioScreen> {
                     Row(
                       children: [
                         Container(
-                          width: 40,
-                          height: 40,
+                          width: 44,
+                          height: 44,
                           decoration: BoxDecoration(
-                            color: isCurrent ? _amber : _chipBg,
-                            borderRadius: BorderRadius.circular(10),
+                            color: isCurrent ? _inkPrimary : _amberTintBg,
+                            borderRadius: BorderRadius.circular(12),
+                            border: isCurrent ? null : Border.all(color: _amberTintBorder),
                           ),
-                          child: Icon(Icons.folder_open_rounded, color: isCurrent ? _onInkPrimary : _subColor, size: 20),
+                          child: Icon(
+                            isCurrent ? Icons.layers_rounded : Icons.folder_open_rounded,
+                            color: isCurrent ? _brandNibOnInk : _brandNibInk,
+                            size: 21,
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              Text(
+                                proj.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: _textColor),
+                              ),
+                              const SizedBox(height: 3),
                               Row(
                                 children: [
-                                  Flexible(
-                                    child: Text(
-                                      proj.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                                    ),
-                                  ),
                                   if (isCurrent) ...[
-                                    const SizedBox(width: 8),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: _brandNib.withOpacity(0.15),
-                                        border: Border.all(color: _brandNib.withOpacity(0.45)),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text('OPEN', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: _brandNibInk)),
+                                      width: 6,
+                                      height: 6,
+                                      margin: const EdgeInsets.only(right: 5),
+                                      decoration: BoxDecoration(color: _brandNibInk, shape: BoxShape.circle),
+                                    ),
+                                    Text(
+                                      'Active · ',
+                                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _brandNibInk),
                                     ),
                                   ],
+                                  Flexible(
+                                    child: Text(
+                                      '${proj.pages.length} ${proj.pages.length == 1 ? 'page' : 'pages'} · Offline',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 11.5, color: _subColor),
+                                    ),
+                                  ),
                                 ],
                               ),
-                              const SizedBox(height: 2),
-                              Text('${proj.pages.length} page(s) · Stored offline', style: TextStyle(fontSize: 12, color: _subColor)),
                             ],
                           ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
                         _compactLayerIcon(Icons.edit_outlined, 'Rename Project', () => _renameProjectDialog(proj)),
-                        _compactLayerIcon(Icons.copy_rounded, 'Duplicate Project', () async {
-                          final dup = DesignProject.decode(proj.encode());
-                          dup.id = 'proj_dup_${DateTime.now().millisecondsSinceEpoch}';
-                          dup.name = '${proj.name} (Copy)';
-                          dup.updatedAt = DateTime.now().millisecondsSinceEpoch;
-                          await _runWithSavingHud(
-                            savingTitle: 'Duplicating Project...',
-                            savingSubtitle: dup.name,
-                            savedTitle: 'Project Duplicated',
-                            savedSubtitle: dup.name,
-                            action: () async {
-                              await LocalProjectStore.instance.saveProject(dup);
-                              final list = await LocalProjectStore.instance.loadAllProjects();
-                              if (mounted) setState(() => _projects = list);
-                            },
-                          );
-                        }),
-                        _compactLayerIcon(
-                          Icons.share_outlined,
-                          'Share Project (.qalamix.json)',
-                          () => _shareProjectFile(proj),
-                          color: _accentText,
-                        ),
                         if (_projects.length > 1)
                           _compactLayerIcon(
-                            Icons.delete_outline,
+                            Icons.delete_outline_rounded,
                             'Delete Project',
                             () async {
                               final deletingCurrent = proj.id == _project.id;
@@ -5922,6 +6006,105 @@ class _StudioScreenState extends State<StudioScreen> {
                             },
                             color: Colors.redAccent,
                           ),
+                      ],
+                    ),
+                    const SizedBox(height: 11),
+                    Divider(height: 1, thickness: 1, color: _borderColor),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () async {
+                              setState(() {
+                                _project = proj;
+                                _pageIndex = 0;
+                                _selectedLayerId = null;
+                                _undoStack.clear();
+                                _redoStack.clear();
+                                _studioEntrySnapshot = (0, proj.encode());
+                                _inStudio = true;
+                              });
+                              await _rehydrateProjectFilters(proj);
+                            },
+                            borderRadius: BorderRadius.circular(10),
+                            child: Container(
+                              height: 36,
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: _inkPrimary,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.brush_outlined, size: 15, color: _brandNibOnInk),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    isCurrent ? 'Open Studio' : 'Open',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _onInkPrimary),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        InkWell(
+                          onTap: () => _shareProjectFile(proj),
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            height: 36,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: _shareSkyBg,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: _shareSkyBorder),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.share_outlined, size: 15, color: _shareSky),
+                                const SizedBox(width: 5),
+                                Text(
+                                  'Share',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _shareSky),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        InkWell(
+                          onTap: () async {
+                            final dup = DesignProject.decode(proj.encode());
+                            dup.id = 'proj_dup_${DateTime.now().millisecondsSinceEpoch}';
+                            dup.name = '${proj.name} (Copy)';
+                            dup.updatedAt = DateTime.now().millisecondsSinceEpoch;
+                            await _runWithSavingHud(
+                              savingTitle: 'Duplicating Project...',
+                              savingSubtitle: dup.name,
+                              savedTitle: 'Project Duplicated',
+                              savedSubtitle: dup.name,
+                              action: () async {
+                                await LocalProjectStore.instance.saveProject(dup);
+                                final list = await LocalProjectStore.instance.loadAllProjects();
+                                if (mounted) setState(() => _projects = list);
+                              },
+                            );
+                          },
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            height: 36,
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            decoration: BoxDecoration(
+                              color: _chipBg,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: _borderColor),
+                            ),
+                            child: Icon(Icons.copy_rounded, size: 15, color: _subColor),
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -7064,25 +7247,26 @@ class _StudioScreenState extends State<StudioScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 22),
                       decoration: BoxDecoration(
-                        color: _inputBg,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: _borderColor, width: 1.3),
+                        color: _cardBg,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _scannerTealBorder, width: 1.3),
                       ),
                       child: Column(
                         children: [
                           Container(
-                            width: 50,
-                            height: 50,
+                            width: 54,
+                            height: 54,
                             decoration: BoxDecoration(
-                              color: _inkPrimary,
-                              borderRadius: BorderRadius.circular(14),
+                              color: _scannerTealBg,
+                              borderRadius: BorderRadius.circular(15),
+                              border: Border.all(color: _scannerTealBorder),
                             ),
-                            child: const Icon(Icons.document_scanner_rounded, color: _brandNib, size: 26),
+                            child: Icon(Icons.document_scanner_rounded, color: _scannerTeal, size: 26),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 11),
                           Text(
                             'Scan Handwritten Signature',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _textColor),
+                            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: _textColor),
                           ),
                           const SizedBox(height: 4),
                           Text(
@@ -7090,7 +7274,7 @@ class _StudioScreenState extends State<StudioScreen> {
                             textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 11.5, color: _subColor),
                           ),
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 15),
                           SizedBox(
                             width: double.infinity,
                             height: 44,
@@ -7101,34 +7285,38 @@ class _StudioScreenState extends State<StudioScreen> {
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                               ),
                               onPressed: _scanSignatureWithDocScanner,
-                              icon: const Icon(Icons.document_scanner_outlined, size: 18, color: _brandNib),
+                              icon: Icon(Icons.document_scanner_outlined, size: 18, color: _brandNibOnInk),
                               label: const Text('Scan with Document Scanner', style: TextStyle(fontWeight: FontWeight.w700)),
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 9),
                           Row(
                             children: [
                               Expanded(
                                 child: OutlinedButton.icon(
                                   style: OutlinedButton.styleFrom(
-                                    side: BorderSide(color: _borderColor),
+                                    backgroundColor: _amberTintBg,
+                                    foregroundColor: _brandNibInk,
+                                    side: BorderSide(color: _amberTintBorder),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                   ),
                                   onPressed: () => _pickScannedSignatureImage(ImageSource.camera),
-                                  icon: const Icon(Icons.camera_alt_outlined, size: 16),
-                                  label: const Text('Camera'),
+                                  icon: Icon(Icons.camera_alt_outlined, size: 16, color: _brandNibInk),
+                                  label: const Text('Camera', style: TextStyle(fontWeight: FontWeight.w700)),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: OutlinedButton.icon(
                                   style: OutlinedButton.styleFrom(
-                                    side: BorderSide(color: _borderColor),
+                                    backgroundColor: _scannerTealBg,
+                                    foregroundColor: _scannerTeal,
+                                    side: BorderSide(color: _scannerTealBorder),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                   ),
                                   onPressed: () => _pickScannedSignatureImage(ImageSource.gallery),
-                                  icon: const Icon(Icons.photo_library_outlined, size: 16),
-                                  label: const Text('Gallery'),
+                                  icon: Icon(Icons.photo_library_outlined, size: 16, color: _scannerTeal),
+                                  label: const Text('Gallery', style: TextStyle(fontWeight: FontWeight.w700)),
                                 ),
                               ),
                             ],
@@ -8787,20 +8975,21 @@ class _StudioScreenState extends State<StudioScreen> {
                       Row(
                         children: [
                           Container(
-                            width: 38,
-                            height: 38,
+                            width: 40,
+                            height: 40,
                             decoration: BoxDecoration(
-                              color: _amber.withOpacity(0.16),
-                              borderRadius: BorderRadius.circular(10),
+                              color: _scannerTealBg,
+                              borderRadius: BorderRadius.circular(11),
+                              border: Border.all(color: _scannerTealBorder),
                             ),
-                            child: Icon(Icons.document_scanner_rounded, color: _accentText, size: 20),
+                            child: Icon(Icons.document_scanner_rounded, color: _scannerTeal, size: 20),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Document Scanner', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                                Text('Document Scanner', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _textColor)),
                                 Text('Scan or Import Photos · Preview · PDF / JPEG', style: TextStyle(fontSize: 11, color: _subColor)),
                               ],
                             ),
@@ -8822,7 +9011,7 @@ class _StudioScreenState extends State<StudioScreen> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                           ),
                           onPressed: localBusy ? null : runDocumentScanner,
-                          icon: const Icon(Icons.document_scanner_outlined, size: 19),
+                          icon: Icon(Icons.document_scanner_outlined, size: 19, color: _brandNibOnInk),
                           label: const Text('Scan / Upload Document', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
                         ),
                       ),
@@ -8834,23 +9023,32 @@ class _StudioScreenState extends State<StudioScreen> {
                         ),
                       if (activePage == null)
                         Container(
-                          padding: const EdgeInsets.symmetric(vertical: 42, horizontal: 20),
+                          padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 20),
                           decoration: BoxDecoration(
-                            color: _inputBg,
+                            color: _cardBg,
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: _borderColor),
+                            border: Border.all(color: _scannerTealBorder, width: 1.2),
                           ),
                           child: Column(
                             children: [
-                              Icon(Icons.insert_drive_file_outlined, size: 44, color: _accentText),
-                              const SizedBox(height: 10),
-                              const Text(
+                              Container(
+                                width: 58,
+                                height: 58,
+                                decoration: BoxDecoration(
+                                  color: _scannerTealBg,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: _scannerTealBorder),
+                                ),
+                                child: Icon(Icons.insert_drive_file_outlined, size: 30, color: _scannerTeal),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
                                 'No Scanned Pages Yet',
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textColor),
                               ),
                               const SizedBox(height: 5),
                               Text(
-                                'Tap Scan / Upload Document to scan pages or import photos using Document Scanner tools, preview them cleanly, and save as PDF or JPEG.',
+                                'Tap Scan / Upload Document to scan pages or import photos, preview them cleanly, and save as PDF or JPEG.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(fontSize: 12, color: _subColor, height: 1.4),
                               ),
@@ -8987,7 +9185,7 @@ class _StudioScreenState extends State<StudioScreen> {
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                                 ),
                                 onPressed: localBusy ? null : downloadScannerPdf,
-                                icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                                icon: Icon(Icons.picture_as_pdf_rounded, size: 18, color: _brandNibOnInk),
                                 label: Text(
                                   _scannedPages.length > 1 ? 'Download PDF (${_scannedPages.length}p)' : 'Download PDF',
                                   style: const TextStyle(fontWeight: FontWeight.w800),
@@ -8998,16 +9196,16 @@ class _StudioScreenState extends State<StudioScreen> {
                             Expanded(
                               child: FilledButton.icon(
                                 style: FilledButton.styleFrom(
-                                  backgroundColor: _isDark ? Colors.white12 : const Color(0xFF0F172A),
-                                  foregroundColor: Colors.white,
+                                  backgroundColor: _scannerTeal,
+                                  foregroundColor: _isDark ? const Color(0xFF0A0C0F) : Colors.white,
                                   padding: const EdgeInsets.symmetric(vertical: 13),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                                 ),
                                 onPressed: localBusy ? null : saveScannerJpeg,
-                                icon: const Icon(Icons.download_rounded, size: 18, color: Colors.white),
+                                icon: const Icon(Icons.download_rounded, size: 18),
                                 label: Text(
                                   _scannedPages.length > 1 ? 'Save JPEGs (${_scannedPages.length})' : 'Save JPEG',
-                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                  style: const TextStyle(fontWeight: FontWeight.w800),
                                 ),
                               ),
                             ),
@@ -9044,12 +9242,13 @@ class _StudioScreenState extends State<StudioScreen> {
                               child: OutlinedButton.icon(
                                 style: OutlinedButton.styleFrom(
                                   padding: const EdgeInsets.symmetric(vertical: 11),
-                                  side: BorderSide(color: _amber.withOpacity(0.75)),
-                                  foregroundColor: _accentText,
+                                  backgroundColor: _amberTintBg,
+                                  side: BorderSide(color: _amberTintBorder),
+                                  foregroundColor: _brandNibInk,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                                 ),
                                 onPressed: localBusy ? null : sendScannedToStudio,
-                                icon: const Icon(Icons.brush_outlined, size: 17),
+                                icon: Icon(Icons.brush_outlined, size: 17, color: _brandNibInk),
                                 label: const Text('Open in Studio', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                               ),
                             ),
