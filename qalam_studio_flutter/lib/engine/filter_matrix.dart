@@ -424,3 +424,214 @@ Uint8List? _guillocheIsolate(GuillocheRequest req) {
   );
   return Uint8List.fromList(img.encodePng(result));
 }
+
+class ScanSignatureRequest {
+  final String filePath;
+  final double sensitivity; // 15..95
+  final int? recolorArgb; // null = preserve original ink hue
+  final bool autoTrim;
+  final bool transparentBg;
+
+  const ScanSignatureRequest({
+    required this.filePath,
+    this.sensitivity = 56.0,
+    this.recolorArgb,
+    this.autoTrim = true,
+    this.transparentBg = true,
+  });
+}
+
+Future<Uint8List?> extractScannedSignatureOffline(ScanSignatureRequest req) {
+  return compute(_scanSignatureIsolate, req);
+}
+
+Uint8List? _scanSignatureIsolate(ScanSignatureRequest req) {
+  final file = File(req.filePath);
+  if (!file.existsSync()) return null;
+  final bytes = file.readAsBytesSync();
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return null;
+
+  var work = decoded;
+  if (work.width > 1500 || work.height > 1500) {
+    work = work.width >= work.height
+        ? img.copyResize(work, width: 1500)
+        : img.copyResize(work, height: 1500);
+  }
+  final rgba = work.numChannels == 4 ? work.clone() : work.convert(numChannels: 4);
+  final w = rgba.width;
+  final h = rgba.height;
+  if (w == 0 || h == 0) return null;
+
+  // Stage 1: Coarse 18x18 block background illumination field (shadows removed cleanly)
+  const gx = 18;
+  const gy = 18;
+  final blockMax = Float64List(gx * gy);
+  final blockW = w / gx;
+  final blockH = h / gy;
+
+  for (int by = 0; by < gy; by++) {
+    final y0 = (by * blockH).floor();
+    final y1 = math.min(h, ((by + 1) * blockH).floor());
+    for (int bx = 0; bx < gx; bx++) {
+      final x0 = (bx * blockW).floor();
+      final x1 = math.min(w, ((bx + 1) * blockW).floor());
+      final stepY = math.max(1, (y1 - y0) ~/ 6);
+      final stepX = math.max(1, (x1 - x0) ~/ 6);
+      final samples = <double>[];
+      for (int py = y0; py < y1; py += stepY) {
+        for (int px = x0; px < x1; px += stepX) {
+          final p = rgba.getPixel(px, py);
+          samples.add(0.299 * p.r + 0.587 * p.g + 0.114 * p.b);
+        }
+      }
+      double topLum = 235.0;
+      if (samples.isNotEmpty) {
+        samples.sort();
+        final idx = math.min(samples.length - 1, (samples.length * 0.85).floor());
+        topLum = samples[idx];
+      }
+      blockMax[by * gx + bx] = math.max(115.0, topLum);
+    }
+  }
+
+  final smoothField = Float64List(gx * gy);
+  double globalSum = 0.0;
+  for (int by = 0; by < gy; by++) {
+    for (int bx = 0; bx < gx; bx++) {
+      double acc = 0.0;
+      int cnt = 0;
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          final ny = (by + dy).clamp(0, gy - 1);
+          final nx = (bx + dx).clamp(0, gx - 1);
+          acc += blockMax[ny * gx + nx];
+          cnt++;
+        }
+      }
+      final val = acc / cnt;
+      smoothField[by * gx + bx] = val;
+      globalSum += val;
+    }
+  }
+  final minSafePaper = math.max(110.0, (globalSum / (gx * gy)) * 0.72);
+  for (int i = 0; i < smoothField.length; i++) {
+    if (smoothField[i] < minSafePaper) smoothField[i] = minSafePaper;
+  }
+
+  // Stage 2: Adaptive paper removal + optional recolor + bounding-box scan
+  final sensNorm = req.sensitivity.clamp(15.0, 95.0) / 100.0;
+  final paperThreshold = 0.91 - sensNorm * 0.28;
+  final softWidth = 0.16 + sensNorm * 0.08;
+  final tintArgb = req.recolorArgb;
+  final tintR = tintArgb != null ? ((tintArgb >> 16) & 0xFF) : 0;
+  final tintG = tintArgb != null ? ((tintArgb >> 8) & 0xFF) : 0;
+  final tintB = tintArgb != null ? (tintArgb & 0xFF) : 0;
+
+  int minX = w;
+  int minY = h;
+  int maxX = -1;
+  int maxY = -1;
+
+  for (int py = 0; py < h; py++) {
+    final fy = (py / math.max(1, h)) * (gy - 1);
+    final yA = fy.floor();
+    final yB = math.min(gy - 1, yA + 1);
+    final ty = fy - yA;
+
+    for (int px = 0; px < w; px++) {
+      final fx = (px / math.max(1, w)) * (gx - 1);
+      final xA = fx.floor();
+      final xB = math.min(gx - 1, xA + 1);
+      final tx = fx - xA;
+
+      final p00 = smoothField[yA * gx + xA];
+      final p10 = smoothField[yA * gx + xB];
+      final p01 = smoothField[yB * gx + xA];
+      final p11 = smoothField[yB * gx + xB];
+      final localPaper =
+          (p00 * (1.0 - tx) + p10 * tx) * (1.0 - ty) +
+          (p01 * (1.0 - tx) + p11 * tx) * ty;
+
+      final p = rgba.getPixel(px, py);
+      final r = p.r.toDouble();
+      final g = p.g.toDouble();
+      final b = p.b.toDouble();
+      final lum = 0.299 * r + 0.587 * g + 0.114 * b;
+
+      final maxC = math.max(r, math.max(g, b));
+      final minC = math.min(r, math.min(g, b));
+      final chroma = maxC - minC;
+      final relLum = lum / math.max(90.0, localPaper) -
+          (chroma > 28.0 ? (chroma - 28.0) / 280.0 : 0.0);
+
+      int alpha = 0;
+      if (relLum >= paperThreshold) {
+        alpha = 0;
+      } else if (relLum > paperThreshold - softWidth) {
+        final u = ((paperThreshold - relLum) / softWidth).clamp(0.0, 1.0);
+        final smooth = u * u * (3.0 - 2.0 * u);
+        alpha = (smooth * 255.0).round();
+      } else {
+        alpha = 255;
+      }
+
+      if (alpha < 10) {
+        p.a = 0;
+      } else {
+        p.a = alpha;
+        if (tintArgb != null) {
+          p.r = tintR;
+          p.g = tintG;
+          p.b = tintB;
+        } else {
+          final normScale = 250.0 / math.max(120.0, localPaper);
+          p.r = (r * normScale * 0.9).clamp(0.0, 255.0).round();
+          p.g = (g * normScale * 0.9).clamp(0.0, 255.0).round();
+          p.b = (b * normScale * 0.9).clamp(0.0, 255.0).round();
+        }
+        if (alpha > 22) {
+          if (px < minX) minX = px;
+          if (px > maxX) maxX = px;
+          if (py < minY) minY = py;
+          if (py > maxY) maxY = py;
+        }
+      }
+    }
+  }
+
+  // Stage 3: Auto-Trim crop + optional white-paper flattening
+  final hasInk = maxX > minX && maxY > minY;
+  final pad = math.max(20, (math.min(w, h) * 0.04).round());
+  img.Image out = rgba;
+  if (req.autoTrim && hasInk) {
+    final sx = math.max(0, minX - pad);
+    final sy = math.max(0, minY - pad);
+    final sw = math.min(w - sx, (maxX - minX) + pad * 2);
+    final sh = math.min(h - sy, (maxY - minY) + pad * 2);
+    if (sw > 0 && sh > 0) {
+      out = img.copyCrop(rgba, x: sx, y: sy, width: sw, height: sh);
+    }
+  }
+
+  if (!req.transparentBg) {
+    for (final px in out) {
+      final a = px.a.toInt();
+      if (a == 0) {
+        px.r = 255;
+        px.g = 255;
+        px.b = 255;
+        px.a = 255;
+      } else if (a < 255) {
+        final af = a / 255.0;
+        final inv = 1.0 - af;
+        px.r = (px.r * af + 255.0 * inv).round().clamp(0, 255);
+        px.g = (px.g * af + 255.0 * inv).round().clamp(0, 255);
+        px.b = (px.b * af + 255.0 * inv).round().clamp(0, 255);
+        px.a = 255;
+      }
+    }
+  }
+
+  return Uint8List.fromList(img.encodePng(out));
+}

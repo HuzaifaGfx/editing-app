@@ -100,6 +100,13 @@ class _StudioScreenState extends State<StudioScreen> {
   final List<_SigStroke> _sigStrokes = [];
   final List<_SigStroke> _sigRedoStrokes = [];
   List<_SigPoint>? _sigCurrentStroke;
+  String? _sigScanRawPath;
+  Uint8List? _sigScanProcessedBytes;
+  bool _sigScanProcessing = false;
+  double _sigScanSensitivity = 56.0;
+  Color? _sigScanRecolor;
+  bool _sigScanAutoTrim = true;
+  bool _sigScanShowOriginal = false;
   String? _customEffectPreviewPath;
 
   // Rubber Stamp / مہر Maker state
@@ -416,7 +423,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     setState(() {
                       _inStudio = false;
                       _navIndex = 2;
-                      _sigMode = 2;
+                      _sigMode = 3;
                     });
                   },
                 ),
@@ -6347,25 +6354,141 @@ class _StudioScreenState extends State<StudioScreen> {
     return byteData?.buffer.asUint8List();
   }
 
+  Future<void> _reprocessScannedSignature() async {
+    final rawPath = _sigScanRawPath;
+    if (rawPath == null) return;
+    if (mounted) setState(() => _sigScanProcessing = true);
+    try {
+      final png = await extractScannedSignatureOffline(
+        ScanSignatureRequest(
+          filePath: rawPath,
+          sensitivity: _sigScanSensitivity,
+          recolorArgb: _sigScanRecolor?.value,
+          autoTrim: _sigScanAutoTrim,
+          transparentBg: _sigTransparentBg,
+        ),
+      );
+      if (mounted && _sigScanRawPath == rawPath) {
+        setState(() => _sigScanProcessedBytes = png);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not clean scanned signature: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sigScanProcessing = false);
+    }
+  }
+
+  Future<void> _scanSignatureWithDocScanner() async {
+    DocumentScanner? scanner;
+    try {
+      final options = DocumentScannerOptions(
+        documentFormat: DocumentFormat.jpeg,
+        mode: ScannerMode.full,
+        pageLimit: 1,
+        isGalleryImport: true,
+      );
+      scanner = DocumentScanner(options: options);
+      final result = await scanner.scanDocument();
+      if (result.images.isNotEmpty) {
+        setState(() {
+          _sigScanRawPath = result.images.first;
+          _sigScanShowOriginal = false;
+        });
+        await _reprocessScannedSignature();
+      }
+    } on PlatformException catch (e) {
+      final msg = e.message ?? '';
+      if (!msg.toLowerCase().contains('cancel') && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Scanner: ${msg.isEmpty ? e.code : msg}')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Scanner unavailable: $e')),
+        );
+      }
+    } finally {
+      try {
+        await scanner?.close();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _pickScannedSignatureImage(ImageSource source) async {
+    try {
+      final picked = await _picker.pickImage(source: source, imageQuality: 95);
+      if (picked == null) return;
+      setState(() {
+        _sigScanRawPath = picked.path;
+        _sigScanShowOriginal = false;
+      });
+      await _reprocessScannedSignature();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Image picker error: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _addSignatureToProjectCanvas() async {
     if (_sigMode == 1 && _sigStrokes.isEmpty) return;
+    if (_sigMode == 2 && _sigScanRawPath == null) return;
     await _runWithSavingHud(
-      savingTitle: 'Saving Signature...',
+      savingTitle: _sigMode == 2 ? 'Placing Scanned Signature...' : 'Saving Signature...',
       savedTitle: 'Signature Added',
       savedSubtitle: 'Placed on Studio Canvas',
       action: () async {
-        final bytes = await _renderSignaturePngBytes(forceTransparent: true);
+        Uint8List? bytes;
+        if (_sigMode == 2 && _sigScanRawPath != null) {
+          bytes = await extractScannedSignatureOffline(
+            ScanSignatureRequest(
+              filePath: _sigScanRawPath!,
+              sensitivity: _sigScanSensitivity,
+              recolorArgb: _sigScanRecolor?.value,
+              autoTrim: _sigScanAutoTrim,
+              transparentBg: true,
+            ),
+          );
+        } else {
+          bytes = await _renderSignaturePngBytes(forceTransparent: true);
+        }
         if (bytes == null) throw Exception('Signature render failed');
         final docsDir = await getApplicationDocumentsDirectory();
         final assetsDir = Directory(p.join(docsDir.path, 'qalamix_assets'));
         if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
         final filePath = p.join(assetsDir.path, 'sig_${DateTime.now().microsecondsSinceEpoch}.png');
         await File(filePath).writeAsBytes(bytes);
-        final targetW = _page.width * 0.55;
-        final targetH = targetW * (420.0 / 1100.0);
+
+        double targetW = _page.width * 0.55;
+        double targetH = targetW * (420.0 / 1100.0);
+        if (_sigMode == 2) {
+          final decoded = img.decodeImage(bytes);
+          if (decoded != null && decoded.width > 0 && decoded.height > 0) {
+            final aspect = decoded.width / decoded.height;
+            targetW = _page.width * 0.52;
+            targetH = targetW / aspect;
+            if (targetH > _page.height * 0.36) {
+              targetH = _page.height * 0.36;
+              targetW = targetH * aspect;
+            }
+          }
+        }
+
         final layer = DesignLayer(
           id: 'sig_${DateTime.now().microsecondsSinceEpoch}',
-          name: _sigMode == 0 ? 'Sign: ${_sigTextController.text.trim()}' : 'Drawn Signature',
+          name: _sigMode == 0
+              ? 'Sign: ${_sigTextController.text.trim()}'
+              : _sigMode == 2
+                  ? 'Scanned Signature'
+                  : 'Drawn Signature',
           type: LayerType.image,
           x: (_page.width - targetW) / 2,
           y: _page.height * 0.65,
@@ -6389,12 +6512,23 @@ class _StudioScreenState extends State<StudioScreen> {
 
   Future<void> _exportSignaturePng({required bool shareOnly}) async {
     if (_sigMode == 1 && _sigStrokes.isEmpty) return;
+    if (_sigMode == 2 && _sigScanRawPath == null) return;
     await _runWithSavingHud(
       savingTitle: shareOnly ? 'Preparing Signature...' : 'Saving Signature PNG...',
       savedTitle: shareOnly ? 'Ready to Share' : 'Signature Saved',
       savedSubtitle: shareOnly ? 'PNG ready' : 'Saved to Gallery',
       action: () async {
-        final bytes = await _renderSignaturePngBytes();
+        final bytes = _sigMode == 2 && _sigScanRawPath != null
+            ? await extractScannedSignatureOffline(
+                ScanSignatureRequest(
+                  filePath: _sigScanRawPath!,
+                  sensitivity: _sigScanSensitivity,
+                  recolorArgb: _sigScanRecolor?.value,
+                  autoTrim: _sigScanAutoTrim,
+                  transparentBg: _sigTransparentBg,
+                ),
+              )
+            : await _renderSignaturePngBytes();
         if (bytes == null) throw Exception('Signature render failed');
         final fileName = 'qalamix_signature_${DateTime.now().millisecondsSinceEpoch}.png';
         final tmpDir = await getTemporaryDirectory();
@@ -6503,23 +6637,120 @@ class _StudioScreenState extends State<StudioScreen> {
         _sigFontFamily == 'Gulzar';
     const paperPreviewBg = Color(0xFFF8FAFC);
 
+    Widget sigTabBtn(int idx, IconData icon, String label) {
+      final sel = _sigMode == idx;
+      return Expanded(
+        child: InkWell(
+          onTap: () => setState(() => _sigMode = idx),
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
+            decoration: BoxDecoration(
+              color: sel ? _inkPrimary : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 16,
+                  color: sel
+                      ? (idx == 2 ? _brandNib : _onInkPrimary)
+                      : (idx == 2 ? _brandNibInk : _subColor),
+                ),
+                const SizedBox(height: 3),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: sel ? FontWeight.w700 : FontWeight.w600,
+                      color: sel ? _onInkPrimary : _textColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text('Sign & Official Seal Studio', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 2),
-        Text('18 signature fonts · Draw pad · Rubber Stamp / مہر Maker', style: TextStyle(fontSize: 12, color: _subColor)),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: 0, label: Text('18 Fonts'), icon: Icon(Icons.title_rounded, size: 15)),
-              ButtonSegment(value: 1, label: Text('Draw'), icon: Icon(Icons.draw_rounded, size: 15)),
-              ButtonSegment(value: 2, label: Text('Stamp / مہر'), icon: Icon(Icons.verified_outlined, size: 15)),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _cardBg,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: _inkPrimary,
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(color: _brandNib.withOpacity(0.55)),
+                    ),
+                    child: Icon(
+                      _sigMode == 3
+                          ? Icons.verified_outlined
+                          : _sigMode == 2
+                              ? Icons.document_scanner_rounded
+                              : Icons.draw_rounded,
+                      color: _brandNib,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Sign & Official Seal Studio',
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: _textColor),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Type Fonts · Smooth Draw · Scan Sign · Stamp / مہر',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11.5, color: _subColor),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: _chipBg,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _borderColor),
+                ),
+                child: Row(
+                  children: [
+                    sigTabBtn(0, Icons.title_rounded, '18 Fonts'),
+                    sigTabBtn(1, Icons.draw_rounded, 'Draw'),
+                    sigTabBtn(2, Icons.document_scanner_rounded, 'Scan Sign'),
+                    sigTabBtn(3, Icons.verified_outlined, 'Stamp'),
+                  ],
+                ),
+              ),
             ],
-            selected: {_sigMode},
-            onSelectionChanged: (s) => setState(() => _sigMode = s.first),
           ),
         ),
         const SizedBox(height: 12),
@@ -6726,10 +6957,21 @@ class _StudioScreenState extends State<StudioScreen> {
                           ),
                           child: Stack(
                             children: [
+                              Positioned(
+                                left: 22,
+                                right: 22,
+                                bottom: 42,
+                                child: IgnorePointer(
+                                  child: Container(
+                                    height: 1,
+                                    color: const Color(0xFF94A3B8).withOpacity(0.45),
+                                  ),
+                                ),
+                              ),
                               if (_sigStrokes.isEmpty)
                                 const Center(
                                   child: Text(
-                                    'Sign here or open Full-Screen Pad above',
+                                    'Sign above the line or open Big Pad',
                                     style: TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
                                   ),
                                 ),
@@ -6801,6 +7043,251 @@ class _StudioScreenState extends State<StudioScreen> {
                     selected: _sigTransparentBg,
                     onTap: () => setState(() => _sigTransparentBg = !_sigTransparentBg),
                   ),
+                ],
+              ),
+            ),
+          )
+        else if (_sigMode == 2)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Paper Signature Scanner',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: _textColor),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Scan your signature from white paper with ML Kit Scanner — shadows & paper background are removed automatically.',
+                    style: TextStyle(fontSize: 11.5, color: _subColor),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_sigScanRawPath == null)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 22),
+                      decoration: BoxDecoration(
+                        color: _inputBg,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: _borderColor, width: 1.3),
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: _inkPrimary,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(Icons.document_scanner_rounded, color: _brandNib, size: 26),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            'Scan Handwritten Signature',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _textColor),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Sign on plain paper, scan cleanly, and export a transparent PNG cutout.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 11.5, color: _subColor),
+                          ),
+                          const SizedBox(height: 14),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 44,
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: _inkPrimary,
+                                foregroundColor: _onInkPrimary,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                              ),
+                              onPressed: _scanSignatureWithDocScanner,
+                              icon: const Icon(Icons.document_scanner_outlined, size: 18, color: _brandNib),
+                              label: const Text('Scan with Document Scanner', style: TextStyle(fontWeight: FontWeight.w700)),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    side: BorderSide(color: _borderColor),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                  onPressed: () => _pickScannedSignatureImage(ImageSource.camera),
+                                  icon: const Icon(Icons.camera_alt_outlined, size: 16),
+                                  label: const Text('Camera'),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    side: BorderSide(color: _borderColor),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                  onPressed: () => _pickScannedSignatureImage(ImageSource.gallery),
+                                  icon: const Icon(Icons.photo_library_outlined, size: 16),
+                                  label: const Text('Gallery'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    )
+                  else ...[
+                    Container(
+                      width: double.infinity,
+                      height: 195,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: _sigScanShowOriginal
+                            ? _inputBg
+                            : (_sigTransparentBg ? paperPreviewBg : Colors.white),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: _borderColor),
+                      ),
+                      child: Stack(
+                        children: [
+                          Center(
+                            child: _sigScanShowOriginal
+                                ? Image.file(File(_sigScanRawPath!), fit: BoxFit.contain)
+                                : (_sigScanProcessedBytes != null
+                                    ? Image.memory(
+                                        _sigScanProcessedBytes!,
+                                        fit: BoxFit.contain,
+                                        gaplessPlayback: true,
+                                      )
+                                    : const SizedBox.shrink()),
+                          ),
+                          if (_sigScanProcessing)
+                            Positioned(
+                              right: 0,
+                              top: 0,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.75),
+                                  borderRadius: BorderRadius.circular(7),
+                                ),
+                                child: const Text(
+                                  'Cleaning...',
+                                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _choicePill(
+                          label: 'Re-scan',
+                          selected: false,
+                          onTap: _scanSignatureWithDocScanner,
+                        ),
+                        _choicePill(
+                          label: 'Gallery',
+                          selected: false,
+                          onTap: () => _pickScannedSignatureImage(ImageSource.gallery),
+                        ),
+                        _choicePill(
+                          label: _sigScanShowOriginal ? 'Showing Original' : 'Compare Original',
+                          selected: _sigScanShowOriginal,
+                          onTap: () => setState(() => _sigScanShowOriginal = !_sigScanShowOriginal),
+                        ),
+                        _choicePill(
+                          label: 'Clear',
+                          selected: false,
+                          onTap: () => setState(() {
+                            _sigScanRawPath = null;
+                            _sigScanProcessedBytes = null;
+                            _sigScanShowOriginal = false;
+                          }),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    _sliderRow(
+                      'Paper Clean',
+                      _sigScanSensitivity,
+                      15,
+                      92,
+                      (v) => setState(() => _sigScanSensitivity = v),
+                      onChangeEnd: (_) => _reprocessScannedSignature(),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text('Ink:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                        const SizedBox(width: 8),
+                        _choicePill(
+                          label: 'Original',
+                          selected: _sigScanRecolor == null,
+                          onTap: () {
+                            setState(() => _sigScanRecolor = null);
+                            _reprocessScannedSignature();
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        ...inkSwatches.map(
+                          (c) => Padding(
+                            padding: const EdgeInsets.only(right: 7),
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() => _sigScanRecolor = c);
+                                _reprocessScannedSignature();
+                              },
+                              child: Container(
+                                width: 25,
+                                height: 25,
+                                decoration: BoxDecoration(
+                                  color: c,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: _sigScanRecolor == c ? _brandNib : _borderColor,
+                                    width: _sigScanRecolor == c ? 2.8 : 1.2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        _choicePill(
+                          label: _sigScanAutoTrim ? 'Auto-Trim: On' : 'Auto-Trim: Off',
+                          selected: _sigScanAutoTrim,
+                          onTap: () {
+                            setState(() => _sigScanAutoTrim = !_sigScanAutoTrim);
+                            _reprocessScannedSignature();
+                          },
+                        ),
+                        _choicePill(
+                          label: _sigTransparentBg ? 'BG: Transparent PNG' : 'BG: White Paper',
+                          selected: _sigTransparentBg,
+                          onTap: () {
+                            setState(() => _sigTransparentBg = !_sigTransparentBg);
+                            _reprocessScannedSignature();
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -6953,10 +7440,19 @@ class _StudioScreenState extends State<StudioScreen> {
               foregroundColor: _onInkPrimary,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            onPressed: _sigMode == 2 ? _addStampToProjectCanvas : _addSignatureToProjectCanvas,
+            onPressed: _sigMode == 3
+                ? _addStampToProjectCanvas
+                : ((_sigMode == 1 && _sigStrokes.isEmpty) ||
+                        (_sigMode == 2 && (_sigScanProcessedBytes == null || _sigScanProcessing)))
+                    ? null
+                    : _addSignatureToProjectCanvas,
             icon: const Icon(Icons.add_to_photos_outlined, size: 18),
             label: Text(
-              _sigMode == 2 ? 'Add Stamp (مہر) to Studio Canvas' : 'Add Signature to Studio Canvas',
+              _sigMode == 3
+                  ? 'Add Stamp (مہر) to Studio Canvas'
+                  : _sigMode == 2
+                      ? 'Add Scanned Signature to Canvas'
+                      : 'Add Signature to Studio Canvas',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
@@ -6972,7 +7468,10 @@ class _StudioScreenState extends State<StudioScreen> {
                     side: BorderSide(color: _borderColor),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  onPressed: () => _sigMode == 2 ? _exportStampPng(shareOnly: false) : _exportSignaturePng(shareOnly: false),
+                  onPressed: ((_sigMode == 1 && _sigStrokes.isEmpty) ||
+                          (_sigMode == 2 && (_sigScanProcessedBytes == null || _sigScanProcessing)))
+                      ? null
+                      : () => _sigMode == 3 ? _exportStampPng(shareOnly: false) : _exportSignaturePng(shareOnly: false),
                   icon: const Icon(Icons.save_alt_rounded, size: 18),
                   label: const Text('Save PNG'),
                 ),
@@ -6987,7 +7486,10 @@ class _StudioScreenState extends State<StudioScreen> {
                     side: BorderSide(color: _borderColor),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  onPressed: () => _sigMode == 2 ? _exportStampPng(shareOnly: true) : _exportSignaturePng(shareOnly: true),
+                  onPressed: ((_sigMode == 1 && _sigStrokes.isEmpty) ||
+                          (_sigMode == 2 && (_sigScanProcessedBytes == null || _sigScanProcessing)))
+                      ? null
+                      : () => _sigMode == 3 ? _exportStampPng(shareOnly: true) : _exportSignaturePng(shareOnly: true),
                   icon: const Icon(Icons.share_outlined, size: 18),
                   label: const Text('Share'),
                 ),
