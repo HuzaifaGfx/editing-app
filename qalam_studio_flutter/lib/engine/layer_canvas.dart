@@ -1006,41 +1006,44 @@ class _ArtboardPainter extends CustomPainter {
       final needsAlpha = layerOpacity < 0.999;
 
       TextPainter? preparedTextPainter;
+      TextPainter? preparedStrokePainter;
       double textPadX = 0.0;
       double textPadY = 0.0;
       Rect localBounds;
 
       if (layer.type == LayerType.text) {
-        final weightIndex = ((layer.fontWeight / 100).round() - 1).clamp(0, 8);
-        final effectiveAlign =
-            layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left);
         final hasBg = layer.textBgColor.alpha > 0;
         textPadX = hasBg ? 14.0 : 0.0;
         textPadY = hasBg ? 8.0 : 0.0;
         final innerW = math.max(1.0, layer.width - textPadX * 2);
+        final hasStroke =
+            layer.textStrokeWidth > 0.05 && layer.textStrokeColor.alpha > 0;
 
-        preparedTextPainter = TextPainter(
-          text: TextSpan(
-            text: layer.text,
-            style: TextStyle(
-              fontFamily: layer.fontFamily,
-              fontSize: layer.fontSize,
-              fontWeight: FontWeight.values[weightIndex],
-              fontVariations: [ui.FontVariation('wght', layer.fontWeight.toDouble())],
-              height: layer.lineHeight,
-              color: layer.textColor,
-            ),
-          ),
-          textDirection: layer.isRtl ? TextDirection.rtl : TextDirection.ltr,
-          textAlign: effectiveAlign,
-        )..layout(minWidth: innerW, maxWidth: innerW);
+        preparedTextPainter = _buildTextPainter(
+          layer,
+          innerW,
+          isStrokePass: false,
+          includeShadow: !hasStroke,
+        );
+        if (hasStroke) {
+          preparedStrokePainter = _buildTextPainter(
+            layer,
+            innerW,
+            isStrokePass: true,
+            includeShadow: true,
+          );
+        }
 
+        final effectPad = 16.0 +
+            layer.textStrokeWidth +
+            layer.textShadowBlur * 2.0 +
+            math.max(layer.textShadowOffsetX.abs(), layer.textShadowOffsetY.abs());
         final maxH = math.max(layer.height, preparedTextPainter.height + textPadY * 2);
         localBounds = Rect.fromLTWH(
-          -layer.width / 2 - 16.0,
-          -layer.height / 2 - 16.0,
-          layer.width + 32.0,
-          maxH + 32.0,
+          -layer.width / 2 - effectPad,
+          -layer.height / 2 - effectPad,
+          layer.width + effectPad * 2,
+          maxH + effectPad * 2,
         );
       } else if (layer.type == LayerType.shape) {
         final strokePad = math.max(4.0, layer.shapeStrokeWidth / 2 + 4.0);
@@ -1082,7 +1085,14 @@ class _ArtboardPainter extends CustomPainter {
       if (layer.type == LayerType.image) {
         _paintImageLayer(canvas, layer, layerImages[layer.id]);
       } else if (layer.type == LayerType.text) {
-        _paintTextLayer(canvas, layer, preparedTextPainter!, textPadX, textPadY);
+        _paintTextLayer(
+          canvas,
+          layer,
+          preparedTextPainter!,
+          preparedStrokePainter,
+          textPadX,
+          textPadY,
+        );
       } else {
         _paintShapeLayer(canvas, layer);
       }
@@ -1266,10 +1276,63 @@ class _ArtboardPainter extends CustomPainter {
     canvas.restore();
   }
 
+  TextPainter _buildTextPainter(
+    DesignLayer layer,
+    double innerW, {
+    required bool isStrokePass,
+    required bool includeShadow,
+  }) {
+    final weightIndex = ((layer.fontWeight / 100).round() - 1).clamp(0, 8);
+    final effectiveAlign =
+        layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left);
+    final hasShadow = includeShadow &&
+        (layer.textShadowBlur > 0.05 ||
+            layer.textShadowOffsetX.abs() > 0.1 ||
+            layer.textShadowOffsetY.abs() > 0.1) &&
+        layer.textShadowColor.alpha > 0;
+    final shadows = hasShadow
+        ? [
+            Shadow(
+              color: layer.textShadowColor,
+              blurRadius: layer.textShadowBlur.clamp(0.0, 48.0),
+              offset: Offset(layer.textShadowOffsetX, layer.textShadowOffsetY),
+            ),
+          ]
+        : null;
+    final strokePaint = isStrokePass
+        ? (Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = layer.textStrokeWidth
+          ..strokeJoin = StrokeJoin.round
+          ..strokeCap = StrokeCap.round
+          ..color = layer.textStrokeColor)
+        : null;
+    return TextPainter(
+      text: TextSpan(
+        text: layer.text,
+        style: TextStyle(
+          fontFamily: layer.fontFamily,
+          fontSize: layer.fontSize,
+          fontWeight: FontWeight.values[weightIndex],
+          fontVariations: [ui.FontVariation('wght', layer.fontWeight.toDouble())],
+          height: layer.lineHeight,
+          letterSpacing:
+              layer.letterSpacing.abs() < 0.01 ? null : layer.letterSpacing,
+          color: isStrokePass ? null : layer.textColor,
+          foreground: strokePaint,
+          shadows: shadows,
+        ),
+      ),
+      textDirection: layer.isRtl ? TextDirection.rtl : TextDirection.ltr,
+      textAlign: effectiveAlign,
+    )..layout(minWidth: innerW, maxWidth: innerW);
+  }
+
   void _paintTextLayer(
     Canvas canvas,
     DesignLayer layer,
-    TextPainter tp,
+    TextPainter fillTp,
+    TextPainter? strokeTp,
     double padX,
     double padY,
   ) {
@@ -1285,7 +1348,11 @@ class _ArtboardPainter extends CustomPainter {
         Paint()..color = layer.textBgColor,
       );
     }
-    tp.paint(canvas, Offset(left + padX, top + padY));
+    final offset = Offset(left + padX, top + padY);
+    if (strokeTp != null) {
+      strokeTp.paint(canvas, offset);
+    }
+    fillTp.paint(canvas, offset);
   }
 
   void _paintShapeLayer(Canvas canvas, DesignLayer layer) {
@@ -1503,4 +1570,74 @@ class _ShapeLayerPainter extends CustomPainter {
       oldDelegate.strokeColor != strokeColor ||
       oldDelegate.strokeWidth != strokeWidth ||
       oldDelegate.borderRadius != borderRadius;
+}
+
+Future<Uint8List?> renderPageThumbnailBytes(
+  DocumentPage page, {
+  double maxSide = 180,
+}) async {
+  final decodedImages = <String, ui.Image>{};
+  try {
+    for (final layer in page.layers) {
+      if (!layer.visible || layer.type != LayerType.image) continue;
+      Uint8List? bytes;
+      if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
+        bytes = layer.processedGuillocheBytes;
+      } else if (layer.processedWhiteRemovedBytes != null) {
+        bytes = layer.processedWhiteRemovedBytes;
+      } else if (layer.localImagePath != null) {
+        final f = File(layer.localImagePath!);
+        if (await f.exists()) {
+          bytes = await f.readAsBytes();
+        }
+      }
+      if (bytes == null || bytes.isEmpty) continue;
+      final codec = await ui.instantiateImageCodec(bytes, targetWidth: 260);
+      final frame = await codec.getNextFrame();
+      decodedImages[layer.id] = frame.image;
+      codec.dispose();
+    }
+
+    final safeW = math.max(1.0, page.width);
+    final safeH = math.max(1.0, page.height);
+    final aspect = safeW / safeH;
+    final double outW =
+        aspect >= 1.0 ? maxSide : math.max(24.0, maxSide * aspect);
+    final double outH =
+        aspect >= 1.0 ? math.max(24.0, maxSide / aspect) : maxSide;
+    final scale = outW / safeW;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, outW, outH));
+    if (page.backgroundColor.alpha == 0) {
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, outW, outH),
+        Paint()..color = const Color(0xFFFFFFFF),
+      );
+    }
+    canvas.save();
+    canvas.scale(scale, scale);
+    _ArtboardPainter(
+      page: page,
+      layerImages: decodedImages,
+      forceTransparentBackground: false,
+    ).paint(canvas, Size(safeW, safeH));
+    canvas.restore();
+
+    final picture = recorder.endRecording();
+    final imgOut = await picture.toImage(
+      outW.round().clamp(1, 512),
+      outH.round().clamp(1, 512),
+    );
+    final bd = await imgOut.toByteData(format: ui.ImageByteFormat.png);
+    imgOut.dispose();
+    picture.dispose();
+    return bd?.buffer.asUint8List();
+  } catch (_) {
+    return null;
+  } finally {
+    for (final im in decodedImages.values) {
+      im.dispose();
+    }
+  }
 }

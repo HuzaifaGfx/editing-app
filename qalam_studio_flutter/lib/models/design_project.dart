@@ -124,6 +124,13 @@ class DesignLayer {
   Color textColor;
   TextAlign? textAlign;
   Color textBgColor;
+  double letterSpacing;
+  Color textStrokeColor;
+  double textStrokeWidth; // 0 = off
+  Color textShadowColor;
+  double textShadowBlur; // 0 = off
+  double textShadowOffsetX;
+  double textShadowOffsetY;
 
   // Image & shape overlay properties
   String? localImagePath;
@@ -164,6 +171,13 @@ class DesignLayer {
     this.textColor = const Color(0xFF0F172A),
     this.textAlign,
     this.textBgColor = const Color(0x00000000),
+    this.letterSpacing = 0.0,
+    this.textStrokeColor = const Color(0xFF000000),
+    this.textStrokeWidth = 0.0,
+    this.textShadowColor = const Color(0x80000000),
+    this.textShadowBlur = 0.0,
+    this.textShadowOffsetX = 0.0,
+    this.textShadowOffsetY = 0.0,
     this.localImagePath,
     this.aspectLocked = true,
     this.objectFit = BoxFit.cover,
@@ -201,6 +215,13 @@ class DesignLayer {
         textColor: textColor,
         textAlign: textAlign,
         textBgColor: textBgColor,
+        letterSpacing: letterSpacing,
+        textStrokeColor: textStrokeColor,
+        textStrokeWidth: textStrokeWidth,
+        textShadowColor: textShadowColor,
+        textShadowBlur: textShadowBlur,
+        textShadowOffsetX: textShadowOffsetX,
+        textShadowOffsetY: textShadowOffsetY,
         localImagePath: localImagePath,
         aspectLocked: aspectLocked,
         objectFit: objectFit,
@@ -238,6 +259,13 @@ class DesignLayer {
         'textColor': textColor.value,
         'textAlign': textAlign?.name,
         'textBgColor': textBgColor.value,
+        'letterSpacing': letterSpacing,
+        'textStrokeColor': textStrokeColor.value,
+        'textStrokeWidth': textStrokeWidth,
+        'textShadowColor': textShadowColor.value,
+        'textShadowBlur': textShadowBlur,
+        'textShadowOffsetX': textShadowOffsetX,
+        'textShadowOffsetY': textShadowOffsetY,
         'localImagePath': localImagePath,
         'aspectLocked': aspectLocked,
         'objectFit': objectFit.index,
@@ -278,6 +306,13 @@ class DesignLayer {
               )
             : null,
         textBgColor: Color(json['textBgColor'] ?? 0x00000000),
+        letterSpacing: (json['letterSpacing'] ?? 0.0).toDouble(),
+        textStrokeColor: Color(json['textStrokeColor'] ?? 0xFF000000),
+        textStrokeWidth: (json['textStrokeWidth'] ?? 0.0).toDouble(),
+        textShadowColor: Color(json['textShadowColor'] ?? 0x80000000),
+        textShadowBlur: (json['textShadowBlur'] ?? 0.0).toDouble(),
+        textShadowOffsetX: (json['textShadowOffsetX'] ?? 0.0).toDouble(),
+        textShadowOffsetY: (json['textShadowOffsetY'] ?? 0.0).toDouble(),
         localImagePath: json['localImagePath'],
         aspectLocked: json['aspectLocked'] ?? true,
         objectFit: BoxFit.values[json['objectFit'] ?? BoxFit.cover.index],

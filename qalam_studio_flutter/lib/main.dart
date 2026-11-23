@@ -1,16 +1,46 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'ui/studio_screen.dart';
 
 final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.light);
 
-void main() {
+Future<void> saveAppThemeMode(ThemeMode mode) async {
+  try {
+    final docsDir = await getApplicationDocumentsDirectory();
+    final file = File(p.join(docsDir.path, 'qalamix_theme_mode.txt'));
+    final value = mode == ThemeMode.dark
+        ? 'dark'
+        : (mode == ThemeMode.system ? 'system' : 'light');
+    await file.writeAsString(value);
+  } catch (_) {}
+}
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+  try {
+    final docsDir = await getApplicationDocumentsDirectory();
+    final file = File(p.join(docsDir.path, 'qalamix_theme_mode.txt'));
+    if (file.existsSync()) {
+      final raw = file.readAsStringSync().trim();
+      if (raw == 'dark') {
+        appThemeMode.value = ThemeMode.dark;
+      } else if (raw == 'system') {
+        appThemeMode.value = ThemeMode.system;
+      } else {
+        appThemeMode.value = ThemeMode.light;
+      }
+    }
+  } catch (_) {}
+
+  final isDarkStart = appThemeMode.value == ThemeMode.dark;
+  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.dark,
-    systemNavigationBarColor: Colors.white,
-    systemNavigationBarIconBrightness: Brightness.dark,
+    statusBarIconBrightness: isDarkStart ? Brightness.light : Brightness.dark,
+    systemNavigationBarColor: isDarkStart ? const Color(0xFF16191E) : Colors.white,
+    systemNavigationBarIconBrightness: isDarkStart ? Brightness.light : Brightness.dark,
   ));
   runApp(const QalamixApp());
 }
@@ -33,7 +63,7 @@ class QalamixApp extends StatelessWidget {
         primary: inkBlack,
         onPrimary: Colors.white,
         secondary: inkSlate,
-        surface: Color(0xFFFFFFFF),
+        surface: Colors.white,
         onSurface: Color(0xFF0F172A),
         onSurfaceVariant: Color(0xFF475569),
         outline: Color(0xFFCBD5E1),
@@ -60,7 +90,7 @@ class QalamixApp extends StatelessWidget {
         elevation: 0,
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
-        indicatorColor: const Color(0xFFF59E0B).withOpacity(0.14),
+        indicatorColor: const Color(0xFFF59E0B).withOpacity(0.16),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final sel = states.contains(WidgetState.selected);
@@ -183,7 +213,9 @@ class QalamixApp extends StatelessWidget {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: appThemeMode,
       builder: (context, mode, _) {
-        final isDark = mode == ThemeMode.dark;
+        final isDark = mode == ThemeMode.dark ||
+            (mode == ThemeMode.system &&
+                MediaQuery.platformBrightnessOf(context) == Brightness.dark);
         SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
           statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,

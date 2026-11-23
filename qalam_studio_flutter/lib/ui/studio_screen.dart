@@ -22,6 +22,7 @@ import '../engine/layer_canvas.dart';
 import '../main.dart';
 import '../models/design_project.dart';
 import '../storage/local_project_store.dart';
+import 'image_crop_sheet.dart';
 
 class StudioScreen extends StatefulWidget {
   const StudioScreen({super.key});
@@ -30,7 +31,7 @@ class StudioScreen extends StatefulWidget {
   State<StudioScreen> createState() => _StudioScreenState();
 }
 
-class _StudioScreenState extends State<StudioScreen> {
+class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver {
   static const Color _brandNib = Color(0xFFF59E0B);
   Color get _inkPrimary => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF111317);
   Color get _onInkPrimary => _isDark ? const Color(0xFF111317) : Colors.white;
@@ -50,7 +51,7 @@ class _StudioScreenState extends State<StudioScreen> {
   final ImagePicker _picker = ImagePicker();
   final GlobalKey _canvasExportKey = GlobalKey();
   final TextEditingController _textController = TextEditingController();
-  final TextEditingController _sigTextController = TextEditingController(text: 'Huzaifa');
+  final TextEditingController _sigTextController = TextEditingController();
 
   List<DesignProject> _projects = [];
   late DesignProject _project;
@@ -60,8 +61,13 @@ class _StudioScreenState extends State<StudioScreen> {
   bool _inStudio = false;
   (int, String)? _studioEntrySnapshot;
   int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Effects, 3=Layers
-  bool _sheetExpanded = true;
+  bool _sheetExpanded = false;
   bool _sheetTall = false;
+  Timer? _autosaveTimer;
+  Timer? _signSealAutosaveTimer;
+  final Map<String, Uint8List> _projectThumbCache = {};
+  final Map<String, int> _projectThumbStamp = {};
+  final Set<String> _projectThumbGenerating = {};
   bool _exportTransparentCanvas = false;
   bool _showGuides = true;
   bool _hideOverlaysForExport = false;
@@ -120,9 +126,9 @@ class _StudioScreenState extends State<StudioScreen> {
 
   // Rubber Stamp / مہر Maker state
   String _stampShape = 'round'; // 'round', 'oval', 'box'
-  final TextEditingController _stampOrgCtrl = TextEditingController(text: 'QALAMIX TRADERS');
-  final TextEditingController _stampStatusCtrl = TextEditingController(text: 'PAID · ادا شدہ');
-  final TextEditingController _stampSubCtrl = TextEditingController(text: 'LAHORE · PAKISTAN');
+  final TextEditingController _stampOrgCtrl = TextEditingController();
+  final TextEditingController _stampStatusCtrl = TextEditingController();
+  final TextEditingController _stampSubCtrl = TextEditingController();
   Color _stampInkColor = const Color(0xFF1E3A8A);
   bool _stampShowDate = true;
   bool _stampTransparentBg = true;
@@ -150,8 +156,10 @@ class _StudioScreenState extends State<StudioScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _project = _buildDefaultProject();
     _loadSavedProjects();
+    _loadSignSealDraft();
     _loadInstalledCustomFonts();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkQuickTourOnFirstLaunch());
     Future<void>.delayed(const Duration(milliseconds: 1400), () {
@@ -164,7 +172,26 @@ class _StudioScreenState extends State<StudioScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      if (_autosaveTimer?.isActive ?? false) {
+        _autosaveTimer?.cancel();
+        unawaited(_saveCurrentProject(showToast: false));
+      }
+      if (_signSealAutosaveTimer?.isActive ?? false) {
+        _signSealAutosaveTimer?.cancel();
+        unawaited(_saveSignSealDraft());
+      }
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autosaveTimer?.cancel();
+    _signSealAutosaveTimer?.cancel();
     _saveHudTimer?.cancel();
     _saveHudEntry?.remove();
     _saveHudEntry = null;
@@ -618,20 +645,344 @@ class _StudioScreenState extends State<StudioScreen> {
 
   Future<void> _loadSavedProjects() async {
     try {
-      final list = await LocalProjectStore.instance.loadAllProjects();
+      var list = await LocalProjectStore.instance.loadAllProjects();
       if (!mounted) return;
-      if (list.isNotEmpty) {
-        setState(() {
-          _projects = list;
-          _project = list.first;
-          _pageIndex = 0;
-        });
-        await _rehydrateProjectFilters(_project);
-      } else {
-        await LocalProjectStore.instance.saveProject(_project);
-        if (mounted) setState(() => _projects = [_project]);
+      if (list.isEmpty) {
+        final fallback = _buildDefaultProject();
+        await LocalProjectStore.instance.saveProject(fallback);
+        list = [fallback];
+      }
+      await _loadCachedThumbnailsFromDisk(list);
+      if (!mounted) return;
+      setState(() {
+        _projects = list;
+        final curIdx = list.indexWhere((p) => p.id == _project.id);
+        _project = curIdx >= 0 ? list[curIdx] : list.first;
+        _pageIndex = 0;
+      });
+      await _rehydrateProjectFilters(_project);
+      unawaited(_ensureProjectThumbnails(list));
+    } catch (_) {}
+  }
+
+  Future<void> _loadCachedThumbnailsFromDisk(List<DesignProject> list) async {
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final thumbDir = Directory(p.join(docsDir.path, 'qalamix_thumbs'));
+      if (!thumbDir.existsSync()) return;
+      for (final proj in list) {
+        final stampFile = File(p.join(thumbDir.path, '${proj.id}.stamp'));
+        final imgFile = File(p.join(thumbDir.path, '${proj.id}.png'));
+        if (imgFile.existsSync() && stampFile.existsSync()) {
+          final stamp = int.tryParse(stampFile.readAsStringSync().trim()) ?? -1;
+          if (stamp == proj.updatedAt) {
+            final bytes = await imgFile.readAsBytes();
+            if (bytes.isNotEmpty) {
+              _projectThumbCache[proj.id] = bytes;
+              _projectThumbStamp[proj.id] = stamp;
+            }
+          }
+        }
       }
     } catch (_) {}
+  }
+
+  Future<void> _ensureProjectThumbnails(List<DesignProject> list) async {
+    for (final proj in list) {
+      if (!mounted) return;
+      final cachedStamp = _projectThumbStamp[proj.id];
+      if (_projectThumbCache.containsKey(proj.id) && cachedStamp == proj.updatedAt) {
+        continue;
+      }
+      await _generateAndCacheProjectThumb(proj);
+    }
+  }
+
+  Future<void> _generateAndCacheProjectThumb(DesignProject proj) async {
+    if (proj.pages.isEmpty || _projectThumbGenerating.contains(proj.id)) return;
+    _projectThumbGenerating.add(proj.id);
+    try {
+      final bytes = await renderPageThumbnailBytes(proj.pages.first, maxSide: 180);
+      if (bytes == null || bytes.isEmpty) return;
+      final docsDir = await getApplicationDocumentsDirectory();
+      final thumbDir = Directory(p.join(docsDir.path, 'qalamix_thumbs'));
+      if (!thumbDir.existsSync()) thumbDir.createSync(recursive: true);
+      await File(p.join(thumbDir.path, '${proj.id}.png')).writeAsBytes(bytes);
+      await File(p.join(thumbDir.path, '${proj.id}.stamp')).writeAsString('${proj.updatedAt}');
+      if (!mounted) return;
+      setState(() {
+        _projectThumbCache[proj.id] = bytes;
+        _projectThumbStamp[proj.id] = proj.updatedAt;
+      });
+    } catch (_) {
+    } finally {
+      _projectThumbGenerating.remove(proj.id);
+    }
+  }
+
+  Future<void> _deleteCachedProjectThumb(String projId) async {
+    _projectThumbCache.remove(projId);
+    _projectThumbStamp.remove(projId);
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final thumbDir = Directory(p.join(docsDir.path, 'qalamix_thumbs'));
+      final imgFile = File(p.join(thumbDir.path, '$projId.png'));
+      final stampFile = File(p.join(thumbDir.path, '$projId.stamp'));
+      if (imgFile.existsSync()) await imgFile.delete();
+      if (stampFile.existsSync()) await stampFile.delete();
+    } catch (_) {}
+  }
+
+  void _scheduleAutosave({Duration delay = const Duration(milliseconds: 1200)}) {
+    _autosaveTimer?.cancel();
+    _autosaveTimer = Timer(delay, () {
+      if (!mounted) return;
+      unawaited(_saveCurrentProject(showToast: false));
+    });
+  }
+
+  void _scheduleSignSealAutosave({
+    Duration delay = const Duration(milliseconds: 1200),
+  }) {
+    _signSealAutosaveTimer?.cancel();
+    _signSealAutosaveTimer = Timer(delay, () {
+      if (!mounted) return;
+      unawaited(_saveSignSealDraft());
+    });
+  }
+
+  Future<void> _saveSignSealDraft() async {
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final file = File(p.join(docsDir.path, 'qalamix_sign_seal_draft.json'));
+      final payload = jsonEncode({
+        'sigText': _sigTextController.text,
+        'sigMode': _sigMode,
+        'sigFontFamily': _sigFontFamily,
+        'sigInkColor': _sigInkColor.value,
+        'sigFontSize': _sigFontSize,
+        'sigLetterSpacing': _sigLetterSpacing,
+        'sigSlanted': _sigSlanted,
+        'sigBold': _sigBold,
+        'sigTransparentBg': _sigTransparentBg,
+        'sigPenWidth': _sigPenWidth,
+        'sigPenType': _sigPenType,
+        'sigAutoSmooth': _sigAutoSmooth,
+        'stampShape': _stampShape,
+        'stampOrg': _stampOrgCtrl.text,
+        'stampStatus': _stampStatusCtrl.text,
+        'stampSub': _stampSubCtrl.text,
+        'stampInkColor': _stampInkColor.value,
+        'stampShowDate': _stampShowDate,
+        'stampTransparentBg': _stampTransparentBg,
+      });
+      await file.writeAsString(payload);
+    } catch (_) {}
+  }
+
+  Future<void> _loadSignSealDraft() async {
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final file = File(p.join(docsDir.path, 'qalamix_sign_seal_draft.json'));
+      if (!file.existsSync()) return;
+      final map = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _sigTextController.text = (map['sigText'] ?? '').toString();
+        _sigMode = (map['sigMode'] ?? _sigMode) as int;
+        _sigFontFamily = (map['sigFontFamily'] ?? _sigFontFamily).toString();
+        if (map['sigInkColor'] != null) {
+          _sigInkColor = Color((map['sigInkColor'] as num).toInt());
+        }
+        _sigFontSize = (map['sigFontSize'] ?? _sigFontSize).toDouble();
+        _sigLetterSpacing = (map['sigLetterSpacing'] ?? _sigLetterSpacing).toDouble();
+        _sigSlanted = (map['sigSlanted'] ?? _sigSlanted) as bool;
+        _sigBold = (map['sigBold'] ?? _sigBold) as bool;
+        _sigTransparentBg = (map['sigTransparentBg'] ?? _sigTransparentBg) as bool;
+        _sigPenWidth = (map['sigPenWidth'] ?? _sigPenWidth).toDouble();
+        _sigPenType = (map['sigPenType'] ?? _sigPenType).toString();
+        _sigAutoSmooth = (map['sigAutoSmooth'] ?? _sigAutoSmooth) as bool;
+        _stampShape = (map['stampShape'] ?? _stampShape).toString();
+        _stampOrgCtrl.text = (map['stampOrg'] ?? '').toString();
+        _stampStatusCtrl.text = (map['stampStatus'] ?? '').toString();
+        _stampSubCtrl.text = (map['stampSub'] ?? '').toString();
+        if (map['stampInkColor'] != null) {
+          _stampInkColor = Color((map['stampInkColor'] as num).toInt());
+        }
+        _stampShowDate = (map['stampShowDate'] ?? _stampShowDate) as bool;
+        _stampTransparentBg =
+            (map['stampTransparentBg'] ?? _stampTransparentBg) as bool;
+      });
+    } catch (_) {}
+  }
+
+  String _formatUpdatedTime(int ms) {
+    if (ms <= 0) return 'Updated recently';
+    final dt = DateTime.fromMillisecondsSinceEpoch(ms);
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inSeconds < 60) return 'Updated just now';
+    if (diff.inMinutes < 60) return 'Updated ${diff.inMinutes}m ago';
+    final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+    final min = dt.minute.toString().padLeft(2, '0');
+    final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+    final timeStr = '$hour12:$min $ampm';
+    final today = DateTime(now.year, now.month, now.day);
+    final dtDay = DateTime(dt.year, dt.month, dt.day);
+    if (dtDay == today) return 'Updated Today · $timeStr';
+    if (dtDay == today.subtract(const Duration(days: 1))) {
+      return 'Updated Yesterday · $timeStr';
+    }
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return 'Updated ${months[dt.month - 1]} ${dt.day} · $timeStr';
+  }
+
+  Future<void> _confirmDeleteProject(DesignProject proj) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Delete Project?',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          'Delete "${proj.name}" permanently from this device? This cannot be undone.',
+          style: TextStyle(fontSize: 13.5, color: _subColor, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final deletingCurrent = proj.id == _project.id;
+    await LocalProjectStore.instance.deleteProject(proj.id);
+    await _deleteCachedProjectThumb(proj.id);
+    await _loadSavedProjects();
+    if (deletingCurrent && mounted) {
+      setState(() {
+        _selectedLayerId = null;
+        _undoStack.clear();
+        _redoStack.clear();
+      });
+    }
+  }
+
+  Future<void> _rotateSelectedImage90(DesignLayer layer) async {
+    final srcPath = layer.localImagePath;
+    if (srcPath == null || !File(srcPath).existsSync()) return;
+    await _runWithSavingHud(
+      savingTitle: 'Rotating 90°...',
+      savingSubtitle: layer.name,
+      savedTitle: 'Image Rotated',
+      savedSubtitle: layer.name,
+      action: () async {
+        final rawBytes = await File(srcPath).readAsBytes();
+        final out = await compute(_rotateImage90Isolate, (
+          rawBytes,
+          p.extension(srcPath).toLowerCase(),
+        ));
+        if (out == null) return;
+        final docsDir = await getApplicationDocumentsDirectory();
+        final imgDir = Directory(p.join(docsDir.path, 'qalamix_images'));
+        if (!imgDir.existsSync()) imgDir.createSync(recursive: true);
+        final outPath = p.join(
+          imgDir.path,
+          'rot90_${DateTime.now().microsecondsSinceEpoch}${out.$2}',
+        );
+        await File(outPath).writeAsBytes(out.$1);
+        if (!mounted) return;
+        _pushUndoSnapshot();
+        final cx = layer.x + layer.width / 2.0;
+        final cy = layer.y + layer.height / 2.0;
+        final nextW = layer.height;
+        final nextH = layer.width;
+        setState(() {
+          layer.localImagePath = outPath;
+          layer.processedWhiteRemovedBytes = null;
+          layer.processedGuillocheBytes = null;
+          if (layer.isCanvasBackground) {
+            _page.width = nextW;
+            _page.height = nextH;
+            layer.x = 0;
+            layer.y = 0;
+            layer.width = nextW;
+            layer.height = nextH;
+          } else {
+            layer.width = nextW;
+            layer.height = nextH;
+            layer.x = cx - nextW / 2.0;
+            layer.y = cy - nextH / 2.0;
+            _clampLayerInPage(layer);
+          }
+        });
+        if (layer.filters.removeWhite > 0) {
+          await _applyWhiteRemoval(layer, layer.filters.removeWhite);
+        }
+        if (layer.filters.guilloche) {
+          await _applyGuillocheBlend(layer);
+        }
+        await _saveCurrentProject(showToast: false);
+      },
+    );
+  }
+
+  Future<void> _cropSelectedImage(DesignLayer layer) async {
+    final srcPath = layer.localImagePath;
+    if (srcPath == null || !File(srcPath).existsSync()) return;
+    final res = await showImageCropSheet(context, imagePath: srcPath);
+    if (res == null || !mounted) return;
+    _pushUndoSnapshot();
+    final cx = layer.x + layer.width / 2.0;
+    final cy = layer.y + layer.height / 2.0;
+    final newRatio = res.width / math.max(1.0, res.height.toDouble());
+    setState(() {
+      layer.localImagePath = res.filePath;
+      layer.processedWhiteRemovedBytes = null;
+      layer.processedGuillocheBytes = null;
+      if (layer.isCanvasBackground) {
+        final nextW = res.width.toDouble();
+        final nextH = res.height.toDouble();
+        _page.width = nextW;
+        _page.height = nextH;
+        layer.x = 0;
+        layer.y = 0;
+        layer.width = nextW;
+        layer.height = nextH;
+      } else {
+        final nextW = layer.width;
+        final nextH = (nextW / math.max(0.05, newRatio)).clamp(20.0, _page.height * 2.5);
+        layer.width = nextW;
+        layer.height = nextH;
+        layer.x = cx - nextW / 2.0;
+        layer.y = cy - nextH / 2.0;
+        _clampLayerInPage(layer);
+      }
+    });
+    if (layer.filters.removeWhite > 0) {
+      await _applyWhiteRemoval(layer, layer.filters.removeWhite);
+    }
+    if (layer.filters.guilloche) {
+      await _applyGuillocheBlend(layer);
+    }
+    await _saveCurrentProject(showToast: false);
   }
 
   DocumentPage get _page => _project.pages[_pageIndex.clamp(0, _project.pages.length - 1)];
@@ -646,6 +997,13 @@ class _StudioScreenState extends State<StudioScreen> {
   void _selectLayer(String? id) {
     setState(() {
       _selectedLayerId = id;
+      if (id != null) {
+        _sheetExpanded = true;
+        _sheetTall = false;
+      } else {
+        _sheetExpanded = false;
+        _sheetTall = false;
+      }
       final l = _activeLayer;
       if (l != null && l.type == LayerType.text) {
         _textController.text = l.text;
@@ -722,6 +1080,8 @@ class _StudioScreenState extends State<StudioScreen> {
         _studioEntrySnapshot = (_pageIndex, _project.encode());
       }
       _inStudio = true;
+      _sheetExpanded = _selectedLayerId != null;
+      _sheetTall = false;
       if (_activeLayer?.type == LayerType.text) {
         _textController.text = _activeLayer!.text;
       }
@@ -772,6 +1132,7 @@ class _StudioScreenState extends State<StudioScreen> {
     );
     if (!mounted || choice == null || choice == 'cancel') return;
     if (choice == 'discard') {
+      _autosaveTimer?.cancel();
       final snap = _studioEntrySnapshot;
       if (snap != null) {
         _restoreEncodedSnapshot(snap);
@@ -781,17 +1142,22 @@ class _StudioScreenState extends State<StudioScreen> {
           _inStudio = false;
           _navIndex = 0;
           _studioEntrySnapshot = null;
+          _sheetExpanded = false;
+          _sheetTall = false;
         });
       }
       return;
     }
     if (choice == 'save') {
+      _autosaveTimer?.cancel();
       await _saveCurrentProject(showToast: true);
       if (mounted) {
         setState(() {
           _inStudio = false;
           _navIndex = 0;
           _studioEntrySnapshot = null;
+          _sheetExpanded = false;
+          _sheetTall = false;
         });
       }
     }
@@ -802,7 +1168,9 @@ class _StudioScreenState extends State<StudioScreen> {
       message: _isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
       child: GestureDetector(
         onTap: () {
-          appThemeMode.value = _isDark ? ThemeMode.light : ThemeMode.dark;
+          final next = _isDark ? ThemeMode.light : ThemeMode.dark;
+          appThemeMode.value = next;
+          unawaited(saveAppThemeMode(next));
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 220),
@@ -906,12 +1274,14 @@ class _StudioScreenState extends State<StudioScreen> {
   }
 
   Future<void> _saveCurrentProject({bool showToast = true}) async {
+    _autosaveTimer?.cancel();
     Future<void> persist() async {
       _project.updatedAt = DateTime.now().millisecondsSinceEpoch;
       await LocalProjectStore.instance.saveProject(_project);
       final list = await LocalProjectStore.instance.loadAllProjects();
       if (!mounted) return;
       setState(() => _projects = list);
+      unawaited(_generateAndCacheProjectThumb(_project));
     }
 
     if (showToast) {
@@ -1451,7 +1821,8 @@ class _StudioScreenState extends State<StudioScreen> {
       }
       _selectedLayerId = null;
       _inspectorTab = 2;
-      _sheetExpanded = true;
+      _sheetExpanded = false;
+      _sheetTall = false;
     });
     await _saveCurrentProject(showToast: false);
   }
@@ -1487,7 +1858,9 @@ class _StudioScreenState extends State<StudioScreen> {
       _selectedLayerId = layer.id;
       _inspectorTab = 1;
       _sheetExpanded = true;
+      _sheetTall = false;
     });
+    _scheduleAutosave();
   }
 
   void _addTextLayer() {
@@ -1515,7 +1888,9 @@ class _StudioScreenState extends State<StudioScreen> {
       _textController.text = layer.text;
       _inspectorTab = 0;
       _sheetExpanded = true;
+      _sheetTall = false;
     });
+    _scheduleAutosave();
   }
 
   void _openShapePickerSheet() {
@@ -1557,7 +1932,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 ],
               ),
               Text(
-                'Full opacity vector shapes — customize colors & borders in Design.',
+                'Full opacity vector shapes — customize colors & borders in Style.',
                 style: TextStyle(fontSize: 12, color: _subColor),
               ),
               const SizedBox(height: 14),
@@ -1693,7 +2068,9 @@ class _StudioScreenState extends State<StudioScreen> {
       _selectedLayerId = layer.id;
       _inspectorTab = 0;
       _sheetExpanded = true;
+      _sheetTall = false;
     });
+    _scheduleAutosave();
   }
 
   void _clampLayerInPage(DesignLayer layer) {
@@ -1718,8 +2095,11 @@ class _StudioScreenState extends State<StudioScreen> {
     setState(() {
       _page.layers.add(copy);
       _selectedLayerId = copy.id;
+      _sheetExpanded = true;
+      _sheetTall = false;
       if (copy.type == LayerType.text) _textController.text = copy.text;
     });
+    _scheduleAutosave();
   }
 
   void _deleteSelectedLayer() {
@@ -1729,7 +2109,10 @@ class _StudioScreenState extends State<StudioScreen> {
     setState(() {
       _page.layers.removeWhere((x) => x.id == l.id);
       _selectedLayerId = null;
+      _sheetExpanded = false;
+      _sheetTall = false;
     });
+    _scheduleAutosave();
   }
 
   void _moveLayerOrder(DesignLayer layer, int delta) {
@@ -2061,7 +2444,7 @@ class _StudioScreenState extends State<StudioScreen> {
                   duration: const Duration(milliseconds: 420),
                   curve: Curves.easeOutCubic,
                   child: Material(
-                    color: Colors.white,
+                    color: _isDark ? const Color(0xFF0D0F12) : Colors.white,
                     child: SafeArea(
                       child: Stack(
                         children: [
@@ -2078,35 +2461,41 @@ class _StudioScreenState extends State<StudioScreen> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Image.asset(
-                                    'assets/images/qalamix_mark.png',
+                                    _isDark
+                                        ? 'assets/images/qalamix_logo_dark.png'
+                                        : 'assets/images/qalamix_mark.png',
                                     width: 112,
                                     height: 112,
                                     fit: BoxFit.contain,
                                     filterQuality: FilterQuality.high,
                                     isAntiAlias: true,
                                   ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'Qalamix',
-                                  style: TextStyle(
-                                    fontFamily: 'PlusJakartaSans',
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: -0.4,
-                                    color: Color(0xFF0F172A),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'Qalamix',
+                                    style: TextStyle(
+                                      fontFamily: 'PlusJakartaSans',
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.4,
+                                      color: _isDark
+                                          ? const Color(0xFFF8FAFC)
+                                          : const Color(0xFF0F172A),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 4),
-                                const Text(
-                                  'Design · Docs · Security Blend',
-                                  style: TextStyle(
-                                    fontFamily: 'PlusJakartaSans',
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w500,
-                                    letterSpacing: 0.2,
-                                    color: Color(0xFF64748B),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Design · Docs · Security Blend',
+                                    style: TextStyle(
+                                      fontFamily: 'PlusJakartaSans',
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w500,
+                                      letterSpacing: 0.2,
+                                      color: _isDark
+                                          ? const Color(0xFF94A3B8)
+                                          : const Color(0xFF64748B),
+                                    ),
                                   ),
-                                ),
                                 ],
                               ),
                             ),
@@ -2121,9 +2510,11 @@ class _StudioScreenState extends State<StudioScreen> {
                                 height: 3,
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(2),
-                                  child: const LinearProgressIndicator(
-                                    backgroundColor: Color(0xFFE2E8F0),
-                                    color: Color(0xFFF59E0B),
+                                  child: LinearProgressIndicator(
+                                    backgroundColor: _isDark
+                                        ? const Color(0xFF262B35)
+                                        : const Color(0xFFE2E8F0),
+                                    color: const Color(0xFFF59E0B),
                                   ),
                                 ),
                               ),
@@ -2164,7 +2555,10 @@ class _StudioScreenState extends State<StudioScreen> {
               hideOverlaysForExport: _hideOverlaysForExport,
               forceTransparentBackground: _exportTransparentCanvas,
               onSelectLayer: _selectLayer,
-              onUpdateLayer: (_) => setState(() {}),
+              onUpdateLayer: (_) {
+                setState(() {});
+                _scheduleAutosave();
+              },
               onInteractionStart: _pushUndoSnapshot,
             ),
           ),
@@ -2187,11 +2581,6 @@ class _StudioScreenState extends State<StudioScreen> {
               _quickBtn(Icons.font_download_outlined, 'Fonts', _openFontsLibrarySheet),
               _quickBtn(Icons.add_photo_alternate_outlined, 'Overlay', _addOverlayImage),
               _quickBtn(Icons.category_outlined, 'Shape', _openShapePickerSheet),
-              if (layer != null) ...[
-                _quickBtn(Icons.copy_rounded, 'Duplicate', _duplicateSelectedLayer),
-                if (!layer.isCanvasBackground)
-                  _quickBtn(Icons.delete_outline_rounded, 'Delete', _deleteSelectedLayer, danger: true),
-              ],
             ],
           ),
         ),
@@ -2254,9 +2643,9 @@ class _StudioScreenState extends State<StudioScreen> {
                                 scrollDirection: Axis.horizontal,
                                 child: Row(
                                   children: [
-                                    _tabChip(0, 'Design', Icons.tune_rounded),
-                                    _tabChip(1, 'Overlay', Icons.layers_outlined),
-                                    _tabChip(2, 'Effects', Icons.auto_fix_high_rounded),
+                                    _tabChip(0, 'Style', Icons.tune_rounded),
+                                    _tabChip(1, 'Photo', Icons.layers_outlined),
+                                    _tabChip(2, 'Adjust', Icons.auto_fix_high_rounded),
                                     _tabChip(3, 'Layers (${_page.layers.length})', Icons.format_list_bulleted_rounded),
                                   ],
                                 ),
@@ -2278,7 +2667,7 @@ class _StudioScreenState extends State<StudioScreen> {
                                       ),
                                     ),
                                     child: Text(
-                                      _sheetTall ? 'Half' : 'Tall',
+                                      _sheetTall ? 'Smaller' : 'Larger',
                                       style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w700,
@@ -2434,6 +2823,7 @@ class _StudioScreenState extends State<StudioScreen> {
             final item = _page.layers.removeAt(fromArr);
             _page.layers.insert(toArr, item);
           });
+          _scheduleAutosave();
         },
         itemBuilder: (context, index) {
           final l = reversed[index];
@@ -2515,21 +2905,31 @@ class _StudioScreenState extends State<StudioScreen> {
                     _compactLayerIcon(
                       l.visible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
                       l.visible ? 'Hide' : 'Show',
-                      () => setState(() => l.visible = !l.visible),
+                      () {
+                        setState(() => l.visible = !l.visible);
+                        _scheduleAutosave();
+                      },
                     ),
                     if (!l.isCanvasBackground)
                       _compactLayerIcon(
                         l.locked ? Icons.lock_outline : Icons.lock_open_rounded,
                         l.locked ? 'Unlock' : 'Lock',
-                        () => setState(() => l.locked = !l.locked),
+                        () {
+                          setState(() => l.locked = !l.locked);
+                          _scheduleAutosave();
+                        },
                       ),
                     _compactLayerIcon(
                       Icons.delete_outline_rounded,
                       'Delete',
-                      () => setState(() {
-                        _page.layers.removeWhere((x) => x.id == l.id);
-                        if (_selectedLayerId == l.id) _selectedLayerId = null;
-                      }),
+                      () {
+                        _pushUndoSnapshot();
+                        setState(() {
+                          _page.layers.removeWhere((x) => x.id == l.id);
+                          if (_selectedLayerId == l.id) _selectedLayerId = null;
+                        });
+                        _scheduleAutosave();
+                      },
                       color: Colors.redAccent,
                     ),
                   ],
@@ -2931,6 +3331,8 @@ class _StudioScreenState extends State<StudioScreen> {
                       });
                       if (preset.guilloche) {
                         _applyGuillocheBlend(targetImg);
+                      } else {
+                        _scheduleAutosave();
                       }
                     },
                   ),
@@ -2945,6 +3347,7 @@ class _StudioScreenState extends State<StudioScreen> {
             50,
             160,
             (v) => setState(() => targetImg.filters.brightness = v / 100.0),
+            onChangeEnd: (_) => _scheduleAutosave(),
           ),
           _sliderRow(
             'Contrast',
@@ -2952,6 +3355,7 @@ class _StudioScreenState extends State<StudioScreen> {
             50,
             180,
             (v) => setState(() => targetImg.filters.contrast = v / 100.0),
+            onChangeEnd: (_) => _scheduleAutosave(),
           ),
           _sliderRow(
             'Saturation',
@@ -2962,6 +3366,7 @@ class _StudioScreenState extends State<StudioScreen> {
               targetImg.filters.saturate = v / 100.0;
               if (v > 5) targetImg.filters.blackAndWhite = false;
             }),
+            onChangeEnd: (_) => _scheduleAutosave(),
           ),
           _sliderRow(
             'Warmth / Sepia',
@@ -2969,6 +3374,7 @@ class _StudioScreenState extends State<StudioScreen> {
             0,
             100,
             (v) => setState(() => targetImg.filters.sepia = v / 100.0),
+            onChangeEnd: (_) => _scheduleAutosave(),
           ),
           _sliderRow(
             'Portrait Blur V3',
@@ -2976,6 +3382,7 @@ class _StudioScreenState extends State<StudioScreen> {
             0,
             100,
             (v) => setState(() => targetImg.filters.portraitBlur = v),
+            onChangeEnd: (_) => _scheduleAutosave(),
           ),
           _sliderRow(
             'Soft Glow',
@@ -2983,6 +3390,7 @@ class _StudioScreenState extends State<StudioScreen> {
             0,
             100,
             (v) => setState(() => targetImg.filters.softGlow = v),
+            onChangeEnd: (_) => _scheduleAutosave(),
           ),
           _sliderRow(
             'PinkHaze Silk',
@@ -2990,6 +3398,7 @@ class _StudioScreenState extends State<StudioScreen> {
             0,
             100,
             (v) => setState(() => targetImg.filters.rosyTint = v),
+            onChangeEnd: (_) => _scheduleAutosave(),
           ),
           _sliderRow(
             'Skin Smooth',
@@ -2997,6 +3406,7 @@ class _StudioScreenState extends State<StudioScreen> {
             0,
             100,
             (v) => setState(() => targetImg.filters.skinSmooth = v),
+            onChangeEnd: (_) => _scheduleAutosave(),
           ),
         ],
       );
@@ -3030,10 +3440,58 @@ class _StudioScreenState extends State<StudioScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildSelectedLayerActionBar(layer),
+          if (layer.type == LayerType.image && layer.localImagePath != null) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: _borderColor),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () => _rotateSelectedImage90(layer),
+                    icon: const Icon(Icons.rotate_90_degrees_cw_rounded, size: 17),
+                    label: const Text('Rotate 90°', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _inkPrimary,
+                      foregroundColor: _onInkPrimary,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () => _cropSelectedImage(layer),
+                    icon: Icon(Icons.crop_rounded, size: 17, color: _brandNibOnInk),
+                    label: const Text('Crop Image', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
           _buildExactSizeInputs(layer),
           const SizedBox(height: 6),
-          _sliderRow('Opacity', layer.opacity, 0.0, 1.0, (v) => setState(() => layer.opacity = v)),
-          _sliderRow('Rotation', layer.rotation, -180.0, 180.0, (v) => setState(() => layer.rotation = v)),
+          _sliderRow(
+            'Opacity',
+            layer.opacity,
+            0.0,
+            1.0,
+            (v) => setState(() => layer.opacity = v),
+            onChangeEnd: (_) => _scheduleAutosave(),
+          ),
+          _sliderRow(
+            'Rotation',
+            layer.rotation,
+            -180.0,
+            180.0,
+            (v) => setState(() => layer.rotation = v),
+            onChangeEnd: (_) => _scheduleAutosave(),
+          ),
           const SizedBox(height: 6),
           Text('Blend Mode', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
@@ -3045,7 +3503,10 @@ class _StudioScreenState extends State<StudioScreen> {
               return _choicePill(
                 label: _blendLabel(b),
                 selected: sel,
-                onTap: () => setState(() => layer.blendMode = b),
+                onTap: () {
+                  setState(() => layer.blendMode = b);
+                  _scheduleAutosave();
+                },
               );
             }).toList(),
           ),
@@ -3065,11 +3526,14 @@ class _StudioScreenState extends State<StudioScreen> {
                   children: [
                     Text('Align Layer on Canvas', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
                     GestureDetector(
-                      onTap: () => setState(() {
-                        layer.x = (_page.width - layer.width) / 2;
-                        layer.y = (_page.height - layer.height) / 2;
-                        _clampLayerInPage(layer);
-                      }),
+                      onTap: () {
+                        setState(() {
+                          layer.x = (_page.width - layer.width) / 2;
+                          layer.y = (_page.height - layer.height) / 2;
+                          _clampLayerInPage(layer);
+                        });
+                        _scheduleAutosave();
+                      },
                       child: Text('Center Both', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _accentText)),
                     ),
                   ],
@@ -3078,24 +3542,33 @@ class _StudioScreenState extends State<StudioScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_horizontal_left_rounded, 'Left', () => setState(() {
-                        layer.x = 0;
-                        _clampLayerInPage(layer);
-                      })),
+                      child: _canvasAlignBtn(Icons.align_horizontal_left_rounded, 'Left', () {
+                        setState(() {
+                          layer.x = 0;
+                          _clampLayerInPage(layer);
+                        });
+                        _scheduleAutosave();
+                      }),
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_horizontal_center_rounded, 'Center', () => setState(() {
-                        layer.x = (_page.width - layer.width) / 2;
-                        _clampLayerInPage(layer);
-                      })),
+                      child: _canvasAlignBtn(Icons.align_horizontal_center_rounded, 'Center', () {
+                        setState(() {
+                          layer.x = (_page.width - layer.width) / 2;
+                          _clampLayerInPage(layer);
+                        });
+                        _scheduleAutosave();
+                      }),
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_horizontal_right_rounded, 'Right', () => setState(() {
-                        layer.x = _page.width - layer.width;
-                        _clampLayerInPage(layer);
-                      })),
+                      child: _canvasAlignBtn(Icons.align_horizontal_right_rounded, 'Right', () {
+                        setState(() {
+                          layer.x = _page.width - layer.width;
+                          _clampLayerInPage(layer);
+                        });
+                        _scheduleAutosave();
+                      }),
                     ),
                   ],
                 ),
@@ -3103,24 +3576,33 @@ class _StudioScreenState extends State<StudioScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_vertical_top_rounded, 'Top', () => setState(() {
-                        layer.y = 0;
-                        _clampLayerInPage(layer);
-                      })),
+                      child: _canvasAlignBtn(Icons.align_vertical_top_rounded, 'Top', () {
+                        setState(() {
+                          layer.y = 0;
+                          _clampLayerInPage(layer);
+                        });
+                        _scheduleAutosave();
+                      }),
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_vertical_center_rounded, 'Middle', () => setState(() {
-                        layer.y = (_page.height - layer.height) / 2;
-                        _clampLayerInPage(layer);
-                      })),
+                      child: _canvasAlignBtn(Icons.align_vertical_center_rounded, 'Middle', () {
+                        setState(() {
+                          layer.y = (_page.height - layer.height) / 2;
+                          _clampLayerInPage(layer);
+                        });
+                        _scheduleAutosave();
+                      }),
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_vertical_bottom_rounded, 'Bottom', () => setState(() {
-                        layer.y = _page.height - layer.height;
-                        _clampLayerInPage(layer);
-                      })),
+                      child: _canvasAlignBtn(Icons.align_vertical_bottom_rounded, 'Bottom', () {
+                        setState(() {
+                          layer.y = _page.height - layer.height;
+                          _clampLayerInPage(layer);
+                        });
+                        _scheduleAutosave();
+                      }),
                     ),
                   ],
                 ),
@@ -3142,31 +3624,46 @@ class _StudioScreenState extends State<StudioScreen> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _compactLayerIcon(Icons.arrow_back_rounded, 'Left', () => setState(() {
-                      layer.x -= 5;
-                      _clampLayerInPage(layer);
-                    })),
-                    _compactLayerIcon(Icons.arrow_upward_rounded, 'Up', () => setState(() {
-                      layer.y -= 5;
-                      _clampLayerInPage(layer);
-                    })),
-                    _compactLayerIcon(Icons.arrow_downward_rounded, 'Down', () => setState(() {
-                      layer.y += 5;
-                      _clampLayerInPage(layer);
-                    })),
-                    _compactLayerIcon(Icons.arrow_forward_rounded, 'Right', () => setState(() {
-                      layer.x += 5;
-                      _clampLayerInPage(layer);
-                    })),
+                    _compactLayerIcon(Icons.arrow_back_rounded, 'Left', () {
+                      setState(() {
+                        layer.x -= 5;
+                        _clampLayerInPage(layer);
+                      });
+                      _scheduleAutosave();
+                    }),
+                    _compactLayerIcon(Icons.arrow_upward_rounded, 'Up', () {
+                      setState(() {
+                        layer.y -= 5;
+                        _clampLayerInPage(layer);
+                      });
+                      _scheduleAutosave();
+                    }),
+                    _compactLayerIcon(Icons.arrow_downward_rounded, 'Down', () {
+                      setState(() {
+                        layer.y += 5;
+                        _clampLayerInPage(layer);
+                      });
+                      _scheduleAutosave();
+                    }),
+                    _compactLayerIcon(Icons.arrow_forward_rounded, 'Right', () {
+                      setState(() {
+                        layer.x += 5;
+                        _clampLayerInPage(layer);
+                      });
+                      _scheduleAutosave();
+                    }),
                     const SizedBox(width: 4),
                     _compactLayerIcon(
                       Icons.center_focus_strong_outlined,
                       'Center on Canvas',
-                      () => setState(() {
-                        layer.x = (_page.width - layer.width) / 2;
-                        layer.y = (_page.height - layer.height) / 2;
-                        _clampLayerInPage(layer);
-                      }),
+                      () {
+                        setState(() {
+                          layer.x = (_page.width - layer.width) / 2;
+                          layer.y = (_page.height - layer.height) / 2;
+                          _clampLayerInPage(layer);
+                        });
+                        _scheduleAutosave();
+                      },
                       color: _accentText,
                     ),
                   ],
@@ -3228,6 +3725,7 @@ class _StudioScreenState extends State<StudioScreen> {
                       _clampLayerInPage(l);
                     }
                   });
+                  _scheduleAutosave();
                 },
               );
             }).toList(),
@@ -3242,7 +3740,10 @@ class _StudioScreenState extends State<StudioScreen> {
                   min: 200,
                   max: 4096,
                   labelText: 'Canvas W',
-                  onChanged: (v) => setState(() => _page.width = v),
+                  onChanged: (v) {
+                    setState(() => _page.width = v);
+                    _scheduleAutosave();
+                  },
                 ),
               ),
               const SizedBox(width: 8),
@@ -3253,7 +3754,10 @@ class _StudioScreenState extends State<StudioScreen> {
                   min: 200,
                   max: 4096,
                   labelText: 'Canvas H',
-                  onChanged: (v) => setState(() => _page.height = v),
+                  onChanged: (v) {
+                    setState(() => _page.height = v);
+                    _scheduleAutosave();
+                  },
                 ),
               ),
             ],
@@ -3267,7 +3771,10 @@ class _StudioScreenState extends State<StudioScreen> {
             children: bgColors.map((c) {
               final sel = _page.backgroundColor.value == c.value;
               return GestureDetector(
-                onTap: () => setState(() => _page.backgroundColor = c),
+                onTap: () {
+                  setState(() => _page.backgroundColor = c);
+                  _scheduleAutosave();
+                },
                 child: Container(
                   width: 38,
                   height: 38,
@@ -3298,9 +3805,25 @@ class _StudioScreenState extends State<StudioScreen> {
 
     if (layer.type == LayerType.text) {
       final fontItems = _availableTextFontOptions();
+      final strokePalette = <Color>[
+        const Color(0xFF000000),
+        const Color(0xFFFFFFFF),
+        _brandNib,
+        const Color(0xFFE11D48),
+        const Color(0xFF2563EB),
+        const Color(0xFF047857),
+      ];
+      final shadowPalette = <Color>[
+        const Color(0x80000000),
+        const Color(0xCC000000),
+        const Color(0x99FFFFFF),
+        const Color(0x99F59E0B),
+        const Color(0x991D4ED8),
+      ];
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildSelectedLayerActionBar(layer),
           TextField(
             controller: _textController,
             textDirection: layer.isRtl ? TextDirection.rtl : TextDirection.ltr,
@@ -3308,7 +3831,10 @@ class _StudioScreenState extends State<StudioScreen> {
             decoration: const InputDecoration(
               labelText: 'Edit Text (Urdu / English)',
             ),
-            onChanged: (val) => setState(() => layer.text = val),
+            onChanged: (val) {
+              setState(() => layer.text = val);
+              _scheduleAutosave();
+            },
           ),
           const SizedBox(height: 10),
           Row(
@@ -3335,12 +3861,15 @@ class _StudioScreenState extends State<StudioScreen> {
               return _choicePill(
                 label: f.$2,
                 selected: layer.fontFamily == f.$1,
-                onTap: () => setState(() {
-                  layer.fontFamily = f.$1;
-                  layer.isRtl = f.$3;
-                  layer.lineHeight = f.$4;
-                  if (f.$1 == 'IBMPlexSansArabicSemiBold') layer.fontWeight = 600;
-                }),
+                onTap: () {
+                  setState(() {
+                    layer.fontFamily = f.$1;
+                    layer.isRtl = f.$3;
+                    layer.lineHeight = f.$4;
+                    if (f.$1 == 'IBMPlexSansArabicSemiBold') layer.fontWeight = 600;
+                  });
+                  _scheduleAutosave();
+                },
               );
             }).toList(),
           ),
@@ -3350,30 +3879,57 @@ class _StudioScreenState extends State<StudioScreen> {
               _choicePill(
                 label: 'Regular',
                 selected: layer.fontWeight < 550,
-                onTap: () => setState(() => layer.fontWeight = 400),
+                onTap: () {
+                  setState(() => layer.fontWeight = 400);
+                  _scheduleAutosave();
+                },
               ),
               const SizedBox(width: 8),
               _choicePill(
                 label: 'SemiBold',
                 selected: layer.fontWeight >= 550 && layer.fontWeight < 680,
-                onTap: () => setState(() => layer.fontWeight = 600),
+                onTap: () {
+                  setState(() => layer.fontWeight = 600);
+                  _scheduleAutosave();
+                },
               ),
               const SizedBox(width: 8),
               _choicePill(
                 label: 'Bold',
                 selected: layer.fontWeight >= 680,
-                onTap: () => setState(() => layer.fontWeight = 700),
+                onTap: () {
+                  setState(() => layer.fontWeight = 700);
+                  _scheduleAutosave();
+                },
               ),
             ],
           ),
           const SizedBox(height: 4),
-          _sliderRow('Text Scale', layer.fontSize, 12, 200, (v) => setState(() => layer.fontSize = v)),
+          _sliderRow(
+            'Text Scale',
+            layer.fontSize,
+            12,
+            200,
+            (v) => setState(() => layer.fontSize = v),
+            onChangeEnd: (_) => _scheduleAutosave(),
+          ),
+          _sliderRow(
+            'Letter Space',
+            layer.letterSpacing,
+            -2,
+            24,
+            (v) => setState(() => layer.letterSpacing = v),
+            onChangeEnd: (_) => _scheduleAutosave(),
+          ),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
-                  onPressed: () => setState(() => layer.fontSize = (layer.fontSize - 6).clamp(12.0, 200.0)),
+                  onPressed: () {
+                    setState(() => layer.fontSize = (layer.fontSize - 6).clamp(12.0, 200.0));
+                    _scheduleAutosave();
+                  },
                   child: const Text('A− Smaller'),
                 ),
               ),
@@ -3381,7 +3937,10 @@ class _StudioScreenState extends State<StudioScreen> {
               Expanded(
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
-                  onPressed: () => setState(() => layer.fontSize = (layer.fontSize + 6).clamp(12.0, 200.0)),
+                  onPressed: () {
+                    setState(() => layer.fontSize = (layer.fontSize + 6).clamp(12.0, 200.0));
+                    _scheduleAutosave();
+                  },
                   child: const Text('A+ Larger'),
                 ),
               ),
@@ -3397,7 +3956,10 @@ class _StudioScreenState extends State<StudioScreen> {
                   Icons.format_align_left_rounded,
                   'Left',
                   (layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left)) == TextAlign.left,
-                  () => setState(() => layer.textAlign = TextAlign.left),
+                  () {
+                    setState(() => layer.textAlign = TextAlign.left);
+                    _scheduleAutosave();
+                  },
                 ),
               ),
               const SizedBox(width: 6),
@@ -3406,7 +3968,10 @@ class _StudioScreenState extends State<StudioScreen> {
                   Icons.format_align_center_rounded,
                   'Center',
                   layer.textAlign == TextAlign.center,
-                  () => setState(() => layer.textAlign = TextAlign.center),
+                  () {
+                    setState(() => layer.textAlign = TextAlign.center);
+                    _scheduleAutosave();
+                  },
                 ),
               ),
               const SizedBox(width: 6),
@@ -3415,7 +3980,10 @@ class _StudioScreenState extends State<StudioScreen> {
                   Icons.format_align_right_rounded,
                   'Right',
                   (layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left)) == TextAlign.right,
-                  () => setState(() => layer.textAlign = TextAlign.right),
+                  () {
+                    setState(() => layer.textAlign = TextAlign.right);
+                    _scheduleAutosave();
+                  },
                 ),
               ),
               const SizedBox(width: 6),
@@ -3424,7 +3992,10 @@ class _StudioScreenState extends State<StudioScreen> {
                   Icons.format_align_justify_rounded,
                   'Justify',
                   layer.textAlign == TextAlign.justify,
-                  () => setState(() => layer.textAlign = TextAlign.justify),
+                  () {
+                    setState(() => layer.textAlign = TextAlign.justify);
+                    _scheduleAutosave();
+                  },
                 ),
               ),
             ],
@@ -3437,19 +4008,25 @@ class _StudioScreenState extends State<StudioScreen> {
               _choicePill(
                 label: 'RTL (Urdu/Arabic)',
                 selected: layer.isRtl,
-                onTap: () => setState(() {
-                  layer.isRtl = true;
-                  layer.textAlign ??= TextAlign.right;
-                }),
+                onTap: () {
+                  setState(() {
+                    layer.isRtl = true;
+                    layer.textAlign ??= TextAlign.right;
+                  });
+                  _scheduleAutosave();
+                },
               ),
               const SizedBox(width: 6),
               _choicePill(
                 label: 'LTR (English)',
                 selected: !layer.isRtl,
-                onTap: () => setState(() {
-                  layer.isRtl = false;
-                  layer.textAlign ??= TextAlign.left;
-                }),
+                onTap: () {
+                  setState(() {
+                    layer.isRtl = false;
+                    layer.textAlign ??= TextAlign.left;
+                  });
+                  _scheduleAutosave();
+                },
               ),
             ],
           ),
@@ -3468,7 +4045,10 @@ class _StudioScreenState extends State<StudioScreen> {
             ].map((c) {
               final sel = layer.textColor.value == c.value;
               return GestureDetector(
-                onTap: () => setState(() => layer.textColor = c),
+                onTap: () {
+                  setState(() => layer.textColor = c);
+                  _scheduleAutosave();
+                },
                 child: Container(
                   width: 30,
                   height: 30,
@@ -3499,7 +4079,10 @@ class _StudioScreenState extends State<StudioScreen> {
             ].map((c) {
               final sel = layer.textBgColor.value == c.value;
               return GestureDetector(
-                onTap: () => setState(() => layer.textBgColor = c),
+                onTap: () {
+                  setState(() => layer.textBgColor = c);
+                  _scheduleAutosave();
+                },
                 child: Container(
                   width: 30,
                   height: 30,
@@ -3514,6 +4097,157 @@ class _StudioScreenState extends State<StudioScreen> {
                 ),
               );
             }).toList(),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: _inputBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _borderColor),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text('Text Stroke (Outline)', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _textColor)),
+                    const Spacer(),
+                    if (layer.textStrokeWidth > 0.05)
+                      _choicePill(
+                        label: 'Off',
+                        selected: false,
+                        onTap: () {
+                          setState(() => layer.textStrokeWidth = 0.0);
+                          _scheduleAutosave();
+                        },
+                      ),
+                  ],
+                ),
+                _sliderRow(
+                  'Stroke Width',
+                  layer.textStrokeWidth,
+                  0,
+                  16,
+                  (v) => setState(() => layer.textStrokeWidth = v),
+                  onChangeEnd: (_) => _scheduleAutosave(),
+                ),
+                Wrap(
+                  spacing: 10,
+                  children: strokePalette.map((c) {
+                    final sel = layer.textStrokeColor.value == c.value;
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          layer.textStrokeColor = c;
+                          if (layer.textStrokeWidth <= 0.05) {
+                            layer.textStrokeWidth = 3.0;
+                          }
+                        });
+                        _scheduleAutosave();
+                      },
+                      child: Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          color: c,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: sel ? _brandNib : _borderColor, width: sel ? 2.6 : 1.2),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: _inputBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _borderColor),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text('Soft Text Shadow', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _textColor)),
+                    const Spacer(),
+                    if (layer.textShadowBlur > 0.05 ||
+                        layer.textShadowOffsetX.abs() > 0.1 ||
+                        layer.textShadowOffsetY.abs() > 0.1)
+                      _choicePill(
+                        label: 'Off',
+                        selected: false,
+                        onTap: () {
+                          setState(() {
+                            layer.textShadowBlur = 0.0;
+                            layer.textShadowOffsetX = 0.0;
+                            layer.textShadowOffsetY = 0.0;
+                          });
+                          _scheduleAutosave();
+                        },
+                      ),
+                  ],
+                ),
+                _sliderRow(
+                  'Shadow Blur',
+                  layer.textShadowBlur,
+                  0,
+                  24,
+                  (v) => setState(() => layer.textShadowBlur = v),
+                  onChangeEnd: (_) => _scheduleAutosave(),
+                ),
+                _sliderRow(
+                  'Offset X',
+                  layer.textShadowOffsetX,
+                  -20,
+                  20,
+                  (v) => setState(() => layer.textShadowOffsetX = v),
+                  onChangeEnd: (_) => _scheduleAutosave(),
+                ),
+                _sliderRow(
+                  'Offset Y',
+                  layer.textShadowOffsetY,
+                  -20,
+                  20,
+                  (v) => setState(() => layer.textShadowOffsetY = v),
+                  onChangeEnd: (_) => _scheduleAutosave(),
+                ),
+                Wrap(
+                  spacing: 10,
+                  children: shadowPalette.map((c) {
+                    final sel = layer.textShadowColor.value == c.value;
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          layer.textShadowColor = c;
+                          if (layer.textShadowBlur <= 0.05 &&
+                              layer.textShadowOffsetX.abs() < 0.1 &&
+                              layer.textShadowOffsetY.abs() < 0.1) {
+                            layer.textShadowBlur = 8.0;
+                            layer.textShadowOffsetY = 3.0;
+                          }
+                        });
+                        _scheduleAutosave();
+                      },
+                      child: Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          color: c.withOpacity(1.0),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: sel ? _brandNib : _borderColor, width: sel ? 2.6 : 1.2),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
           ),
         ],
       );
@@ -3535,7 +4269,9 @@ class _StudioScreenState extends State<StudioScreen> {
       }
 
       return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildSelectedLayerActionBar(layer),
           Row(
             children: [
               Expanded(
@@ -3545,7 +4281,10 @@ class _StudioScreenState extends State<StudioScreen> {
                     foregroundColor: layer.aspectLocked ? _onInkPrimary : _textColor,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  onPressed: () => setState(() => layer.aspectLocked = !layer.aspectLocked),
+                  onPressed: () {
+                    setState(() => layer.aspectLocked = !layer.aspectLocked);
+                    _scheduleAutosave();
+                  },
                   icon: Icon(layer.aspectLocked ? Icons.lock : Icons.lock_open, size: 16),
                   label: Text(layer.aspectLocked ? 'Ratio Locked' : 'Free Stretch',
                       style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -3553,13 +4292,23 @@ class _StudioScreenState extends State<StudioScreen> {
               ),
             ],
           ),
-          _sliderRow('Image Scale %', curScale, 10, 250, applyImageScale),
+          _sliderRow(
+            'Image Scale %',
+            curScale,
+            10,
+            250,
+            applyImageScale,
+            onChangeEnd: (_) => _scheduleAutosave(),
+          ),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
-                  onPressed: () => applyImageScale(curScale - 10),
+                  onPressed: () {
+                    applyImageScale(curScale - 10);
+                    _scheduleAutosave();
+                  },
                   child: const Text('− Smaller'),
                 ),
               ),
@@ -3567,21 +4316,33 @@ class _StudioScreenState extends State<StudioScreen> {
               Expanded(
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
-                  onPressed: () => applyImageScale(curScale + 10),
+                  onPressed: () {
+                    applyImageScale(curScale + 10);
+                    _scheduleAutosave();
+                  },
                   child: const Text('+ Larger'),
                 ),
               ),
             ],
           ),
-          _sliderRow('Corner Radius', layer.borderRadius, 0, 160,
-              (v) => setState(() => layer.borderRadius = v)),
+          _sliderRow(
+            'Corner Radius',
+            layer.borderRadius,
+            0,
+            160,
+            (v) => setState(() => layer.borderRadius = v),
+            onChangeEnd: (_) => _scheduleAutosave(),
+          ),
           const SizedBox(height: 6),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(side: BorderSide(color: layer.flipX ? _amber : _borderColor)),
-                  onPressed: () => setState(() => layer.flipX = !layer.flipX),
+                  onPressed: () {
+                    setState(() => layer.flipX = !layer.flipX);
+                    _scheduleAutosave();
+                  },
                   icon: const Icon(Icons.flip_rounded, size: 16),
                   label: const Text('Flip H'),
                 ),
@@ -3590,7 +4351,10 @@ class _StudioScreenState extends State<StudioScreen> {
               Expanded(
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(side: BorderSide(color: layer.flipY ? _amber : _borderColor)),
-                  onPressed: () => setState(() => layer.flipY = !layer.flipY),
+                  onPressed: () {
+                    setState(() => layer.flipY = !layer.flipY);
+                    _scheduleAutosave();
+                  },
                   icon: const Icon(Icons.flip_camera_android_rounded, size: 16),
                   label: const Text('Flip V'),
                 ),
@@ -3623,6 +4387,7 @@ class _StudioScreenState extends State<StudioScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _buildSelectedLayerActionBar(layer),
         Text('Shape Style', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
         const SizedBox(height: 6),
         Wrap(
@@ -3635,15 +4400,30 @@ class _StudioScreenState extends State<StudioScreen> {
               selected: sel,
               selectedColor: _amber,
               labelStyle: TextStyle(color: sel ? _onInkPrimary : _textColor),
-              onSelected: (_) => setState(() => layer.shapeKind = st.$1),
+              onSelected: (_) {
+                setState(() => layer.shapeKind = st.$1);
+                _scheduleAutosave();
+              },
             );
           }).toList(),
         ),
         const SizedBox(height: 8),
-        _sliderRow('Corner Radius', layer.borderRadius, 0, 120,
-            (v) => setState(() => layer.borderRadius = v)),
-        _sliderRow('Border Width', layer.shapeStrokeWidth, 0, 20,
-            (v) => setState(() => layer.shapeStrokeWidth = v)),
+        _sliderRow(
+          'Corner Radius',
+          layer.borderRadius,
+          0,
+          120,
+          (v) => setState(() => layer.borderRadius = v),
+          onChangeEnd: (_) => _scheduleAutosave(),
+        ),
+        _sliderRow(
+          'Border Width',
+          layer.shapeStrokeWidth,
+          0,
+          20,
+          (v) => setState(() => layer.shapeStrokeWidth = v),
+          onChangeEnd: (_) => _scheduleAutosave(),
+        ),
         const SizedBox(height: 6),
         Text('Fill Color', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
         const SizedBox(height: 8),
@@ -3652,7 +4432,10 @@ class _StudioScreenState extends State<StudioScreen> {
           children: palette.map((c) {
             final sel = layer.textColor.value == c.value;
             return GestureDetector(
-              onTap: () => setState(() => layer.textColor = c),
+              onTap: () {
+                setState(() => layer.textColor = c);
+                _scheduleAutosave();
+              },
               child: Container(
                 width: 30,
                 height: 30,
@@ -3674,14 +4457,17 @@ class _StudioScreenState extends State<StudioScreen> {
           children: palette.map((c) {
             final sel = layer.shapeStrokeColor.value == c.value;
             return GestureDetector(
-              onTap: () => setState(() {
-                layer.shapeStrokeColor = c;
-                if (c == Colors.transparent) {
-                  layer.shapeStrokeWidth = 0;
-                } else if (layer.shapeStrokeWidth <= 0) {
-                  layer.shapeStrokeWidth = 3;
-                }
-              }),
+              onTap: () {
+                setState(() {
+                  layer.shapeStrokeColor = c;
+                  if (c == Colors.transparent) {
+                    layer.shapeStrokeWidth = 0;
+                  } else if (layer.shapeStrokeWidth <= 0) {
+                    layer.shapeStrokeWidth = 3;
+                  }
+                });
+                _scheduleAutosave();
+              },
               child: Container(
                 width: 30,
                 height: 30,
@@ -3696,6 +4482,74 @@ class _StudioScreenState extends State<StudioScreen> {
           }).toList(),
         ),
       ],
+    );
+  }
+
+  Widget _buildSelectedLayerActionBar(DesignLayer layer) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: _inputBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _borderColor),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              layer.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _textColor),
+            ),
+          ),
+          const SizedBox(width: 6),
+          InkWell(
+            onTap: _duplicateSelectedLayer,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+              decoration: BoxDecoration(
+                color: _chipBg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _borderColor),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.copy_rounded, size: 13.5, color: _textColor),
+                  const SizedBox(width: 4),
+                  Text('Duplicate', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _textColor)),
+                ],
+              ),
+            ),
+          ),
+          if (!layer.isCanvasBackground) ...[
+            const SizedBox(width: 6),
+            InkWell(
+              onTap: _deleteSelectedLayer,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.redAccent.withOpacity(0.32)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.delete_outline_rounded, size: 13.5, color: Colors.redAccent),
+                    SizedBox(width: 4),
+                    Text('Delete', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.redAccent)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -3823,6 +4677,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 layer.width = nextW;
                 _clampLayerInPage(layer);
               });
+              _scheduleAutosave();
             },
           ),
         ),
@@ -3843,6 +4698,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 layer.height = nextH;
                 _clampLayerInPage(layer);
               });
+              _scheduleAutosave();
             },
           ),
         ),
@@ -4056,10 +4912,13 @@ class _StudioScreenState extends State<StudioScreen> {
                             fontVariations: [ui.FontVariation('wght', l.fontWeight.toDouble())],
                           ),
                           decoration: InputDecoration(hintText: 'Enter ${l.name}...'),
-                          onChanged: (val) => setState(() {
-                            l.text = val;
-                            if (_selectedLayerId == l.id) _textController.text = val;
-                          }),
+                          onChanged: (val) {
+                            setState(() {
+                              l.text = val;
+                              if (_selectedLayerId == l.id) _textController.text = val;
+                            });
+                            _scheduleAutosave();
+                          },
                         ),
                       ],
                     ),
@@ -5656,6 +6515,8 @@ class _StudioScreenState extends State<StudioScreen> {
           _pageIndex = 0;
           _selectedLayerId = layerId;
           _inspectorTab = 2;
+          _sheetExpanded = true;
+          _sheetTall = false;
           _undoStack.clear();
           _redoStack.clear();
           _studioEntrySnapshot = (0, fresh.encode());
@@ -5894,15 +6755,14 @@ class _StudioScreenState extends State<StudioScreen> {
           ],
         ),
         const SizedBox(height: 18),
-        _buildProjectsPhotoEffectsSection(),
-        const SizedBox(height: 18),
         Text(
           'Saved Projects (${_projects.length})',
-          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: _textColor),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _textColor),
         ),
         const SizedBox(height: 10),
         ..._projects.map((proj) {
           final isCurrent = proj.id == _project.id;
+          final thumbBytes = _projectThumbCache[proj.id];
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: InkWell(
@@ -5915,6 +6775,8 @@ class _StudioScreenState extends State<StudioScreen> {
                   _redoStack.clear();
                   _studioEntrySnapshot = (0, proj.encode());
                   _inStudio = true;
+                  _sheetExpanded = false;
+                  _sheetTall = false;
                 });
                 await _rehydrateProjectFilters(proj);
               },
@@ -5923,7 +6785,7 @@ class _StudioScreenState extends State<StudioScreen> {
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: _cardBg,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(14),
                   border: Border.all(
                     color: isCurrent ? _brandNib : _borderColor,
                     width: isCurrent ? 1.5 : 1,
@@ -5935,18 +6797,28 @@ class _StudioScreenState extends State<StudioScreen> {
                     Row(
                       children: [
                         Container(
-                          width: 44,
-                          height: 44,
+                          width: 52,
+                          height: 58,
                           decoration: BoxDecoration(
                             color: isCurrent ? _inkPrimary : _amberTintBg,
-                            borderRadius: BorderRadius.circular(12),
-                            border: isCurrent ? null : Border.all(color: _amberTintBorder),
+                            borderRadius: BorderRadius.circular(11),
+                            border: Border.all(
+                              color: isCurrent ? _brandNib : _amberTintBorder,
+                              width: isCurrent ? 1.4 : 1,
+                            ),
                           ),
-                          child: Icon(
-                            isCurrent ? Icons.layers_rounded : Icons.folder_open_rounded,
-                            color: isCurrent ? _brandNibOnInk : _brandNibInk,
-                            size: 21,
-                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: thumbBytes != null
+                              ? Image.memory(
+                                  thumbBytes,
+                                  fit: BoxFit.cover,
+                                  gaplessPlayback: true,
+                                )
+                              : Icon(
+                                  isCurrent ? Icons.layers_rounded : Icons.folder_open_rounded,
+                                  color: isCurrent ? _brandNibOnInk : _brandNibInk,
+                                  size: 22,
+                                ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -5984,28 +6856,23 @@ class _StudioScreenState extends State<StudioScreen> {
                                   ),
                                 ],
                               ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _formatUpdatedTime(proj.updatedAt),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 11, color: _mutedColor),
+                              ),
                             ],
                           ),
                         ),
                         _compactLayerIcon(Icons.edit_outlined, 'Rename Project', () => _renameProjectDialog(proj)),
-                        if (_projects.length > 1)
-                          _compactLayerIcon(
-                            Icons.delete_outline_rounded,
-                            'Delete Project',
-                            () async {
-                              final deletingCurrent = proj.id == _project.id;
-                              await LocalProjectStore.instance.deleteProject(proj.id);
-                              await _loadSavedProjects();
-                              if (deletingCurrent && mounted) {
-                                setState(() {
-                                  _selectedLayerId = null;
-                                  _undoStack.clear();
-                                  _redoStack.clear();
-                                });
-                              }
-                            },
-                            color: Colors.redAccent,
-                          ),
+                        _compactLayerIcon(
+                          Icons.delete_outline_rounded,
+                          'Delete Project',
+                          () => _confirmDeleteProject(proj),
+                          color: Colors.redAccent,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 11),
@@ -6024,6 +6891,8 @@ class _StudioScreenState extends State<StudioScreen> {
                                 _redoStack.clear();
                                 _studioEntrySnapshot = (0, proj.encode());
                                 _inStudio = true;
+                                _sheetExpanded = false;
+                                _sheetTall = false;
                               });
                               await _rehydrateProjectFilters(proj);
                             },
@@ -6113,6 +6982,8 @@ class _StudioScreenState extends State<StudioScreen> {
             ),
           );
         }),
+        const SizedBox(height: 18),
+        _buildProjectsPhotoEffectsSection(),
       ],
     );
   }
@@ -6660,10 +7531,11 @@ class _StudioScreenState extends State<StudioScreen> {
           }
         }
 
+        final sigLabel = _sigTextController.text.trim();
         final layer = DesignLayer(
           id: 'sig_${DateTime.now().microsecondsSinceEpoch}',
           name: _sigMode == 0
-              ? 'Sign: ${_sigTextController.text.trim()}'
+              ? 'Sign: ${sigLabel.isEmpty ? 'Signature' : sigLabel}'
               : _sigMode == 2
                   ? 'Scanned Signature'
                   : 'Drawn Signature',
@@ -6680,6 +7552,8 @@ class _StudioScreenState extends State<StudioScreen> {
           setState(() {
             _page.layers.add(layer);
             _selectedLayerId = layer.id;
+            _sheetExpanded = true;
+            _sheetTall = false;
             _inStudio = true;
           });
         }
@@ -6769,6 +7643,8 @@ class _StudioScreenState extends State<StudioScreen> {
     setState(() {
       _page.layers.add(layer);
       _selectedLayerId = layer.id;
+      _sheetExpanded = true;
+      _sheetTall = false;
       _inStudio = true;
     });
     await _runWithSavingHud(
@@ -6942,9 +7818,13 @@ class _StudioScreenState extends State<StudioScreen> {
                   TextField(
                     controller: _sigTextController,
                     textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (_) {
+                      setState(() {});
+                      _scheduleSignSealAutosave();
+                    },
                     decoration: const InputDecoration(
                       labelText: 'Enter Signature Name (English / Urdu)',
+                      hintText: 'Your Name / دستخط',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -7004,7 +7884,10 @@ class _StudioScreenState extends State<StudioScreen> {
                         (c) => Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: GestureDetector(
-                            onTap: () => setState(() => _sigInkColor = c),
+                            onTap: () {
+                              setState(() => _sigInkColor = c);
+                              _scheduleSignSealAutosave();
+                            },
                             child: Container(
                               width: 28,
                               height: 28,
@@ -7023,8 +7906,22 @@ class _StudioScreenState extends State<StudioScreen> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  _sliderRow('Size', _sigFontSize, 42, 130, (v) => setState(() => _sigFontSize = v)),
-                  _sliderRow('Spacing', _sigLetterSpacing, -4, 12, (v) => setState(() => _sigLetterSpacing = v)),
+                  _sliderRow(
+                    'Size',
+                    _sigFontSize,
+                    42,
+                    130,
+                    (v) => setState(() => _sigFontSize = v),
+                    onChangeEnd: (_) => _scheduleSignSealAutosave(),
+                  ),
+                  _sliderRow(
+                    'Spacing',
+                    _sigLetterSpacing,
+                    -4,
+                    12,
+                    (v) => setState(() => _sigLetterSpacing = v),
+                    onChangeEnd: (_) => _scheduleSignSealAutosave(),
+                  ),
                   Wrap(
                     spacing: 8,
                     runSpacing: 6,
@@ -7032,17 +7929,26 @@ class _StudioScreenState extends State<StudioScreen> {
                       _choicePill(
                         label: 'Slant',
                         selected: _sigSlanted,
-                        onTap: () => setState(() => _sigSlanted = !_sigSlanted),
+                        onTap: () {
+                          setState(() => _sigSlanted = !_sigSlanted);
+                          _scheduleSignSealAutosave();
+                        },
                       ),
                       _choicePill(
                         label: 'Bold Ink',
                         selected: _sigBold,
-                        onTap: () => setState(() => _sigBold = !_sigBold),
+                        onTap: () {
+                          setState(() => _sigBold = !_sigBold);
+                          _scheduleSignSealAutosave();
+                        },
                       ),
                       _choicePill(
                         label: _sigTransparentBg ? 'BG: Transparent' : 'BG: White Paper',
                         selected: _sigTransparentBg,
-                        onTap: () => setState(() => _sigTransparentBg = !_sigTransparentBg),
+                        onTap: () {
+                          setState(() => _sigTransparentBg = !_sigTransparentBg);
+                          _scheduleSignSealAutosave();
+                        },
                       ),
                     ],
                   ),
@@ -7113,8 +8019,15 @@ class _StudioScreenState extends State<StudioScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  _buildSignaturePenSelector(),
-                  _sliderRow('Pen Size', _sigPenWidth, 2, 14, (v) => setState(() => _sigPenWidth = v)),
+                  _buildSignaturePenSelector(onChanged: _scheduleSignSealAutosave),
+                  _sliderRow(
+                    'Pen Size',
+                    _sigPenWidth,
+                    2,
+                    14,
+                    (v) => setState(() => _sigPenWidth = v),
+                    onChangeEnd: (_) => _scheduleSignSealAutosave(),
+                  ),
                   LayoutBuilder(
                     builder: (context, padConstraints) {
                       final padW = padConstraints.maxWidth;
@@ -7219,7 +8132,10 @@ class _StudioScreenState extends State<StudioScreen> {
                   _choicePill(
                     label: _sigTransparentBg ? 'BG: Transparent PNG' : 'BG: White Paper',
                     selected: _sigTransparentBg,
-                    onTap: () => setState(() => _sigTransparentBg = !_sigTransparentBg),
+                    onTap: () {
+                      setState(() => _sigTransparentBg = !_sigTransparentBg);
+                      _scheduleSignSealAutosave();
+                    },
                   ),
                 ],
               ),
@@ -7512,7 +8428,10 @@ class _StudioScreenState extends State<StudioScreen> {
                         child: _choicePill(
                           label: 'Round Seal',
                           selected: _stampShape == 'round',
-                          onTap: () => setState(() => _stampShape = 'round'),
+                          onTap: () {
+                            setState(() => _stampShape = 'round');
+                            _scheduleSignSealAutosave();
+                          },
                         ),
                       ),
                       const SizedBox(width: 6),
@@ -7520,7 +8439,10 @@ class _StudioScreenState extends State<StudioScreen> {
                         child: _choicePill(
                           label: 'Oval Stamp',
                           selected: _stampShape == 'oval',
-                          onTap: () => setState(() => _stampShape = 'oval'),
+                          onTap: () {
+                            setState(() => _stampShape = 'oval');
+                            _scheduleSignSealAutosave();
+                          },
                         ),
                       ),
                       const SizedBox(width: 6),
@@ -7528,7 +8450,10 @@ class _StudioScreenState extends State<StudioScreen> {
                         child: _choicePill(
                           label: 'Box Stamp',
                           selected: _stampShape == 'box',
-                          onTap: () => setState(() => _stampShape = 'box'),
+                          onTap: () {
+                            setState(() => _stampShape = 'box');
+                            _scheduleSignSealAutosave();
+                          },
                         ),
                       ),
                     ],
@@ -7536,25 +8461,40 @@ class _StudioScreenState extends State<StudioScreen> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _stampOrgCtrl,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(labelText: 'Shop / Organization Name (Top)'),
+                    onChanged: (_) {
+                      setState(() {});
+                      _scheduleSignSealAutosave();
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Organization Name (Top)',
+                      hintText: 'Organization Name',
+                    ),
                   ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: _stampStatusCtrl,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(labelText: 'Center Badge (PAID / منظور شدہ)'),
+                    onChanged: (_) {
+                      setState(() {});
+                      _scheduleSignSealAutosave();
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Center Badge (Status)',
+                      hintText: 'APPROVED / VERIFIED',
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
-                    children: ['PAID · ادا شدہ', 'منظور شدہ', 'VERIFIED', 'ORIGINAL', 'وصول پایا']
+                    children: ['APPROVED', 'VERIFIED', 'ORIGINAL', 'منظور شدہ', 'وصول پایا']
                         .map(
                           (preset) => _choicePill(
                             label: preset,
                             selected: _stampStatusCtrl.text == preset,
-                            onTap: () => setState(() => _stampStatusCtrl.text = preset),
+                            onTap: () {
+                              setState(() => _stampStatusCtrl.text = preset);
+                              _scheduleSignSealAutosave();
+                            },
                           ),
                         )
                         .toList(),
@@ -7562,8 +8502,14 @@ class _StudioScreenState extends State<StudioScreen> {
                   const SizedBox(height: 10),
                   TextField(
                     controller: _stampSubCtrl,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(labelText: 'City / Reg No. (Bottom)'),
+                    onChanged: (_) {
+                      setState(() {});
+                      _scheduleSignSealAutosave();
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'City / Reg No. (Bottom)',
+                      hintText: 'City or Reg No.',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -7579,7 +8525,10 @@ class _StudioScreenState extends State<StudioScreen> {
                         (c) => Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: GestureDetector(
-                            onTap: () => setState(() => _stampInkColor = c),
+                            onTap: () {
+                              setState(() => _stampInkColor = c);
+                              _scheduleSignSealAutosave();
+                            },
                             child: Container(
                               width: 26,
                               height: 26,
@@ -7599,13 +8548,19 @@ class _StudioScreenState extends State<StudioScreen> {
                       _choicePill(
                         label: _stampShowDate ? 'Date: On' : 'Date: Off',
                         selected: _stampShowDate,
-                        onTap: () => setState(() => _stampShowDate = !_stampShowDate),
+                        onTap: () {
+                          setState(() => _stampShowDate = !_stampShowDate);
+                          _scheduleSignSealAutosave();
+                        },
                       ),
                       const SizedBox(width: 6),
                       _choicePill(
                         label: _stampTransparentBg ? 'Clear PNG' : 'White',
                         selected: _stampTransparentBg,
-                        onTap: () => setState(() => _stampTransparentBg = !_stampTransparentBg),
+                        onTap: () {
+                          setState(() => _stampTransparentBg = !_stampTransparentBg);
+                          _scheduleSignSealAutosave();
+                        },
                       ),
                     ],
                   ),
@@ -9724,8 +10679,8 @@ class _StampPainter extends CustomPainter {
     final w = size.width;
     final h = size.height;
     final center = Offset(w / 2, h / 2);
-    final orgText = org.trim().isEmpty ? 'QALAMIX' : org.trim();
-    final statusText = status.trim().isEmpty ? 'APPROVED' : status.trim();
+    final orgText = org.trim().isEmpty ? 'ORGANIZATION' : org.trim();
+    final statusText = status.trim().isEmpty ? 'STATUS' : status.trim();
     final subText = sub.trim().isEmpty ? 'OFFICIAL SEAL' : sub.trim();
     final today = _todayBadge();
 
@@ -9879,4 +10834,16 @@ class _CustomInstalledFont {
     required this.isRtl,
     required this.defaultLineHeight,
   });
+}
+
+(Uint8List, String)? _rotateImage90Isolate((Uint8List, String) args) {
+  final decoded = img.decodeImage(args.$1);
+  if (decoded == null) return null;
+  final oriented = img.bakeOrientation(decoded);
+  final rotated = img.copyRotate(oriented, angle: 90);
+  final preferPng = args.$2 == '.png' || rotated.numChannels == 4;
+  if (preferPng) {
+    return (Uint8List.fromList(img.encodePng(rotated)), '.png');
+  }
+  return (Uint8List.fromList(img.encodeJpg(rotated, quality: 95)), '.jpg');
 }
