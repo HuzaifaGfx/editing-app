@@ -16,13 +16,14 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
-import '../engine/batch_processor.dart';
 import '../engine/filter_matrix.dart';
 import '../engine/layer_canvas.dart';
 import '../main.dart';
 import '../models/design_project.dart';
 import '../storage/local_project_store.dart';
 import 'image_crop_sheet.dart';
+import 'new_project_sheet.dart';
+import 'pdf_import.dart';
 
 class StudioScreen extends StatefulWidget {
   const StudioScreen({super.key});
@@ -57,7 +58,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   late DesignProject _project;
   int _pageIndex = 0;
   String? _selectedLayerId;
-  int _navIndex = 0; // 0=Projects, 1=Fill, 2=Sign/Seal, 3=Docs, 4=Batch
+  int _navIndex = 0; // 0=Projects, 1=Fill, 2=Sign/Seal, 3=Docs
   bool _inStudio = false;
   (int, String)? _studioEntrySnapshot;
   int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Effects, 3=Layers
@@ -133,14 +134,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   bool _stampShowDate = true;
   bool _stampTransparentBg = true;
 
-  // Batch state
-  List<String> _batchInputs = [];
-  List<String> _batchOutputs = [];
-  bool _batchProcessing = false;
-  bool _batchBw = false;
-  bool _batchGuilloche = false;
-  String _batchGuillochePattern = 'banknote';
-  double _batchRemoveWhite = 0.0;
+  // Apply-to-all images state
+  bool _applyAllBw = false;
+  bool _applyAllGuilloche = false;
+  String _applyAllGuillochePattern = 'banknote';
+  bool _applyAllRemoveWhiteEnabled = false;
+  double _applyAllRemoveWhite = 35.0;
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _cardBg => _isDark ? const Color(0xFF1E222B) : Colors.white;
@@ -1007,6 +1006,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         _sheetTall = false;
       }
       final l = _activeLayer;
+      if (l != null && l.locked && l.isCanvasBackground && _inspectorTab == 3) {
+        _inspectorTab = 0;
+      }
       if (l != null && l.type == LayerType.text) {
         _textController.text = l.text;
       }
@@ -2174,11 +2176,145 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     await _saveCurrentProject(showToast: false);
   }
 
+  Future<void> _openPdfForEditing() async {
+    final imported = await importPdfAsProject(context, _mediaChannel);
+    if (imported == null || !mounted) return;
+    final list = await LocalProjectStore.instance.loadAllProjects();
+    if (!mounted) return;
+    setState(() {
+      _projects = list;
+      _project = imported;
+      _pageIndex = 0;
+      _selectedLayerId = null;
+      _inspectorTab = 0;
+      _sheetExpanded = false;
+      _sheetTall = false;
+      _undoStack.clear();
+      _redoStack.clear();
+      _studioEntrySnapshot = (0, imported.encode());
+      _inStudio = true;
+    });
+    unawaited(_generateAndCacheProjectThumb(imported));
+  }
+
+  Future<void> _applyLookToAllImages() async {
+    final targets = <DesignLayer>[
+      for (final pg in _project.pages)
+        for (final l in pg.layers)
+          if (l.type == LayerType.image &&
+              !(l.locked && l.isCanvasBackground) &&
+              l.localImagePath != null &&
+              l.localImagePath!.trim().isNotEmpty &&
+              File(l.localImagePath!).existsSync())
+            l,
+    ];
+    if (targets.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No editable image files found.')),
+        );
+      }
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Apply to all images', style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w700)),
+        content: Text(
+          'Apply this look to ${targets.length} images?',
+          style: TextStyle(fontSize: 13.5, color: _subColor),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: _inkPrimary,
+              foregroundColor: _onInkPrimary,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    _pushUndoSnapshot();
+    final tol = _applyAllRemoveWhiteEnabled ? _applyAllRemoveWhite.clamp(5.0, 95.0).toDouble() : 0.0;
+    var appliedCount = 0;
+
+    await _runWithSavingHud(
+      savingTitle: 'Applying Look...',
+      savingSubtitle: '${targets.length} image(s)',
+      savedTitle: 'Look Applied',
+      savedSubtitle: '${targets.length} image(s) updated',
+      action: () async {
+        for (final l in targets) {
+          final fp = l.localImagePath;
+          if (fp == null || fp.trim().isEmpty || !File(fp).existsSync()) continue;
+          if (mounted) {
+            setState(() {
+              l.filters.guilloche = _applyAllGuilloche;
+              l.filters.guillochePattern = _applyAllGuillochePattern;
+              l.filters.removeWhite = tol;
+              if (_applyAllGuilloche) {
+                l.filters.blackAndWhite = false;
+                l.filters.grayscale = 0.0;
+                l.filters.brightness = 1.0;
+                l.filters.contrast = 1.0;
+                l.filters.saturate = 1.0;
+                l.filters.sepia = 0.0;
+              } else if (_applyAllBw) {
+                l.filters.blackAndWhite = true;
+                l.filters.grayscale = 1.0;
+                l.filters.brightness = 1.04;
+                l.filters.contrast = 1.22;
+                l.filters.saturate = 0.0;
+                l.filters.sepia = 0.0;
+                l.processedGuillocheBytes = null;
+              } else {
+                l.filters.blackAndWhite = false;
+                l.filters.grayscale = 0.0;
+                l.filters.brightness = 1.0;
+                l.filters.contrast = 1.0;
+                l.filters.saturate = 1.0;
+                l.filters.sepia = 0.0;
+                l.processedGuillocheBytes = null;
+              }
+              if (tol <= 0) {
+                l.processedWhiteRemovedBytes = null;
+              }
+            });
+          }
+          if (tol > 0) {
+            await _applyWhiteRemoval(l, tol);
+          } else if (_applyAllGuilloche) {
+            await _applyGuillocheBlend(l);
+          }
+          appliedCount++;
+        }
+        await _saveCurrentProject(showToast: false);
+      },
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Applied look to $appliedCount image${appliedCount == 1 ? '' : 's'}.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final stageBg = _isDark ? const Color(0xFF12141A) : const Color(0xFFE6E1D6);
 
-    const hubTitles = ['Projects', 'Quick Fill', 'Sign & Seal', 'Docs & Scanner', 'Batch Studio'];
+    const hubTitles = ['Projects', 'Quick Fill', 'Sign & Seal', 'Docs & Scanner'];
     return PopScope(
       canPop: !_inStudio,
       onPopInvoked: (didPop) {
@@ -2398,14 +2534,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         ],
       ),
       body: IndexedStack(
-        index: _inStudio ? 0 : (_navIndex + 1),
+        index: _inStudio ? 0 : (_navIndex.clamp(0, 3) + 1),
         children: [
           _buildStudioView(stageBg),
           _buildProjectsView(),
           (!_inStudio && _navIndex == 1) ? _buildQuickFillView() : const SizedBox.shrink(),
           (!_inStudio && _navIndex == 2) ? _buildSignatureView() : const SizedBox.shrink(),
           _buildPagesView(),
-          _buildBatchView(),
         ],
       ),
       bottomNavigationBar: _inStudio
@@ -2415,16 +2550,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 border: Border(top: BorderSide(color: _borderColor)),
               ),
               child: NavigationBar(
-                selectedIndex: _navIndex,
+                selectedIndex: _navIndex.clamp(0, 3),
                 onDestinationSelected: (i) => setState(() {
-                  _navIndex = i;
+                  _navIndex = i.clamp(0, 3);
                 }),
                 destinations: const [
                   NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder_rounded), label: 'Projects'),
                   NavigationDestination(icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
                   NavigationDestination(icon: Icon(Icons.draw_outlined), selectedIcon: Icon(Icons.draw_rounded), label: 'Sign/Seal'),
                   NavigationDestination(icon: Icon(Icons.description_outlined), selectedIcon: Icon(Icons.description_rounded), label: 'Docs'),
-                  NavigationDestination(icon: Icon(Icons.auto_awesome_motion_outlined), selectedIcon: Icon(Icons.auto_awesome_motion_rounded), label: 'Batch'),
                 ],
               ),
             ),
@@ -2542,6 +2676,55 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
 
     return Column(
       children: [
+        if (_project.pages.length > 1)
+          Container(
+            height: 44,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: _panelBg,
+              border: Border(bottom: BorderSide(color: _borderColor)),
+            ),
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              itemCount: _project.pages.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (ctx, i) {
+                final active = i == _pageIndex;
+                return InkWell(
+                  onTap: () {
+                    setState(() {
+                      _pageIndex = i;
+                      _selectedLayerId = null;
+                      _sheetExpanded = false;
+                      _sheetTall = false;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 34),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: active ? _amberTintBg : _chipBg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: active ? _amberTintBorder : _borderColor,
+                      ),
+                    ),
+                    child: Text(
+                      '${i + 1}',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                        color: active ? _accentText : _textColor,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
         Expanded(
           child: Container(
             color: stageBg,
@@ -2792,6 +2975,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   }
 
   Widget _buildInspectorBody(DesignLayer? layer) {
+    if (layer != null && layer.locked && layer.isCanvasBackground && _inspectorTab != 3) {
+      return Padding(
+        padding: const EdgeInsets.all(14),
+        child: Text(
+          'PDF page is locked. Add text, a shape, or a stamp on top.',
+          style: TextStyle(color: _subColor, fontSize: 13),
+        ),
+      );
+    }
+
     // TAB 3: LAYERS
     if (_inspectorTab == 3) {
       if (_page.layers.isEmpty) {
@@ -2826,7 +3019,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         },
         itemBuilder: (context, index) {
           final l = reversed[index];
-          final isSel = !l.isCanvasBackground && l.id == _selectedLayerId;
+          final isSel = l.id == _selectedLayerId;
           final typeIcon = l.isCanvasBackground
               ? Icons.wallpaper_rounded
               : (l.type == LayerType.text
@@ -2894,8 +3087,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       _compactLayerIcon(Icons.arrow_upward_rounded, 'Bring Forward', () => _moveLayerOrder(l, 1)),
                       _compactLayerIcon(Icons.arrow_downward_rounded, 'Send Backward', () => _moveLayerOrder(l, -1)),
                     ],
-                    _compactLayerIcon(Icons.edit_outlined, 'Rename Layer', () => _renameLayerDialog(l)),
-                    if (l.type == LayerType.image)
+                    if (!(l.locked && l.isCanvasBackground))
+                      _compactLayerIcon(Icons.edit_outlined, 'Rename Layer', () => _renameLayerDialog(l)),
+                    if (l.type == LayerType.image && !(l.locked && l.isCanvasBackground))
                       _compactLayerIcon(
                         Icons.swap_horiz_rounded,
                         'Replace Image',
@@ -2960,6 +3154,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
         );
       }
+      if (targetImg.locked && targetImg.isCanvasBackground) {
+        return Padding(
+          padding: const EdgeInsets.all(14),
+          child: Text(
+            'PDF page is locked. Add text, a shape, or a stamp on top.',
+            style: TextStyle(color: _subColor, fontSize: 13),
+          ),
+        );
+      }
+      final editableImageCount = [
+        for (final pg in _project.pages)
+          for (final l in pg.layers)
+            if (l.type == LayerType.image && !(l.locked && l.isCanvasBackground)) l,
+      ].length;
       final isWhiteRemoved = targetImg.filters.removeWhite > 0;
       final effectPresets = <(String, FilterSettings)>[
         ('Original', FilterSettings(removeWhite: targetImg.filters.removeWhite)),
@@ -3411,6 +3619,98 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             (v) => setState(() => targetImg.filters.skinSmooth = v),
             onChangeEnd: (_) => _scheduleAutosave(),
           ),
+          if (editableImageCount >= 2) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _inputBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _borderColor),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Apply to all images',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _textColor),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Black & White', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    activeColor: _amber,
+                    value: _applyAllBw,
+                    onChanged: (v) => setState(() {
+                      _applyAllBw = v;
+                      if (v) _applyAllGuilloche = false;
+                    }),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Guilloche', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    activeColor: _amber,
+                    value: _applyAllGuilloche,
+                    onChanged: (v) => setState(() {
+                      _applyAllGuilloche = v;
+                      if (v) _applyAllBw = false;
+                    }),
+                  ),
+                  if (_applyAllGuilloche) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        ('banknote', 'Banknote'),
+                        ('rosette', 'Rosette'),
+                        ('mesh', 'Mesh'),
+                      ].map((pat) {
+                        final sel = _applyAllGuillochePattern == pat.$1;
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            child: _choicePill(
+                              label: pat.$2,
+                              selected: sel,
+                              onTap: () => setState(() => _applyAllGuillochePattern = pat.$1),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Remove white', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    activeColor: _amber,
+                    value: _applyAllRemoveWhiteEnabled,
+                    onChanged: (v) => setState(() => _applyAllRemoveWhiteEnabled = v),
+                  ),
+                  if (_applyAllRemoveWhiteEnabled)
+                    _sliderRow(
+                      'Remove white',
+                      _applyAllRemoveWhite,
+                      5,
+                      95,
+                      (v) => setState(() => _applyAllRemoveWhite = v),
+                    ),
+                  const SizedBox(height: 8),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _inkPrimary,
+                      foregroundColor: _onInkPrimary,
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: _applyLookToAllImages,
+                    child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       );
     }
@@ -3709,11 +4009,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             spacing: 6,
             runSpacing: 6,
             children: [
+              ('A4 Doc 992×1403', 992.0, 1403.0),
+              ('A4 Landscape 1403×992', 1403.0, 992.0),
+              ('Card 1050×600', 1050.0, 600.0),
               ('Poster 900×1200', 900.0, 1200.0),
               ('Square 1080×1080', 1080.0, 1080.0),
               ('Story 1080×1920', 1080.0, 1920.0),
-              ('Thumb 1280×720', 1280.0, 720.0),
-              ('A4 Doc 992×1403', 992.0, 1403.0),
+              ('Wide 1280×720', 1280.0, 720.0),
             ].map((pItem) {
               final sel = (_page.width - pItem.$2).abs() < 2 && (_page.height - pItem.$3).abs() < 2;
               return _choicePill(
@@ -5471,45 +5773,71 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: _scannerTealBorder, width: 1.2),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: _scannerTealBg,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _scannerTealBorder),
-                ),
-                child: Icon(Icons.document_scanner_rounded, color: _scannerTeal, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Document Scanner',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textColor),
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: _scannerTealBg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _scannerTealBorder),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Scan or upload pages · Live Preview · PDF / JPEG',
-                      style: TextStyle(fontSize: 11.5, color: _subColor),
+                    child: Icon(Icons.document_scanner_rounded, color: _scannerTeal, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Document Scanner',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textColor),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Scan or upload pages · Live Preview · PDF / JPEG',
+                          style: TextStyle(fontSize: 11.5, color: _subColor),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: _scannerTeal,
-                  foregroundColor: _isDark ? const Color(0xFF0A0C0F) : Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                ),
-                onPressed: _openDocumentScannerSheet,
-                child: const Text('Scan', style: TextStyle(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _scannerTeal,
+                        foregroundColor: _isDark ? const Color(0xFF0A0C0F) : Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                      ),
+                      onPressed: _openDocumentScannerSheet,
+                      icon: const Icon(Icons.document_scanner_outlined, size: 17),
+                      label: const Text('Scan', style: TextStyle(fontWeight: FontWeight.w800)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _accentText,
+                        side: BorderSide(color: _amberTintBorder),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                      ),
+                      onPressed: _openPdfForEditing,
+                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 17),
+                      label: const Text('Edit PDF', style: TextStyle(fontWeight: FontWeight.w800)),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -5698,323 +6026,6 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ),
           );
         }),
-      ],
-    );
-  }
-
-  Widget _buildBatchView() {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const Text('Offline Batch Processor', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 3),
-        Text('Process multiple photos, preview results, then download or share', style: TextStyle(fontSize: 12, color: _subColor)),
-        const SizedBox(height: 14),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _chipBg,
-                    foregroundColor: _textColor,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: () async {
-                    final imgs = await _picker.pickMultiImage();
-                    if (imgs.isNotEmpty) {
-                      setState(() {
-                        _batchInputs = imgs.map((e) => e.path).toList();
-                        _batchOutputs = [];
-                      });
-                    }
-                  },
-                  icon: Icon(Icons.photo_library_outlined, color: _accentText),
-                  label: Text(
-                    _batchInputs.isEmpty ? 'Select Multiple Photos' : '${_batchInputs.length} Photo(s) Selected',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Black & White Effect', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                  subtitle: Text('Crisp monochrome contrast', style: TextStyle(fontSize: 11.5, color: _subColor)),
-                  activeColor: _amber,
-                  value: _batchBw,
-                  onChanged: (v) => setState(() {
-                    _batchBw = v;
-                    if (v) _batchGuilloche = false;
-                  }),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Guilloche Blend (Security Portrait)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                  subtitle: Text('Grayscale + contour bend + banknote texture + cream tint', style: TextStyle(fontSize: 11.5, color: _subColor)),
-                  activeColor: _amber,
-                  value: _batchGuilloche,
-                  onChanged: (v) => setState(() {
-                    _batchGuilloche = v;
-                    if (v) _batchBw = false;
-                  }),
-                ),
-                if (_batchGuilloche) ...[
-                  Row(
-                    children: [
-                      ('banknote', 'Banknote'),
-                      ('rosette', 'Rosette'),
-                      ('mesh', 'Mesh'),
-                    ].map((pat) {
-                      final sel = _batchGuillochePattern == pat.$1;
-                      return Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 2),
-                          child: _choicePill(
-                            label: pat.$2,
-                            selected: sel,
-                            onTap: () => setState(() => _batchGuillochePattern = pat.$1),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 6),
-                ],
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Remove White Background (PNG)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                  activeColor: _amber,
-                  value: _batchRemoveWhite > 0,
-                  onChanged: (v) => setState(() => _batchRemoveWhite = v ? 35.0 : 0.0),
-                ),
-                if (_batchRemoveWhite > 0)
-                  _sliderRow('White Tol.', _batchRemoveWhite, 5, 95, (v) => setState(() => _batchRemoveWhite = v)),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: _inkPrimary,
-              foregroundColor: _onInkPrimary,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: _batchInputs.isEmpty || _batchProcessing
-                ? null
-                : () async {
-                    setState(() => _batchProcessing = true);
-                    try {
-                      await _runWithSavingHud(
-                        savingTitle: 'Creating Previews...',
-                        savingSubtitle: '${_batchInputs.length} image(s)',
-                        savedTitle: 'Previews Ready',
-                        savedSubtitle: 'Tap any image to inspect or download',
-                        action: () async {
-                          final dir = await getTemporaryDirectory();
-                          final out = await runBatchOffline(BatchJobRequest(
-                            inputPaths: _batchInputs,
-                            outputDir: dir.path,
-                            brightness: _batchBw ? 1.03 : 1.0,
-                            contrast: _batchBw ? 1.22 : 1.0,
-                            blackAndWhite: _batchBw,
-                            guilloche: _batchGuilloche,
-                            guillochePattern: _batchGuillochePattern,
-                            removeWhiteTolerance: _batchRemoveWhite,
-                          ));
-                          if (mounted) {
-                            setState(() => _batchOutputs = out);
-                          }
-                        },
-                      );
-                    } finally {
-                      if (mounted) setState(() => _batchProcessing = false);
-                    }
-                  },
-            icon: Icon(_batchProcessing ? Icons.hourglass_top_rounded : Icons.visibility_rounded, size: 18),
-            label: Text(
-              _batchProcessing ? 'Building Previews...' : 'Process & Preview',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-        ),
-        if (_batchOutputs.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Processed Previews (${_batchOutputs.length})',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                ),
-              ),
-              TextButton.icon(
-                onPressed: () async {
-                  await _runWithSavingHud(
-                    savingTitle: 'Downloading All...',
-                    savingSubtitle: '${_batchOutputs.length} image(s)',
-                    savedTitle: 'Saved to Gallery',
-                    savedSubtitle: '${_batchOutputs.length} image(s) downloaded',
-                    action: () async {
-                      for (final fp in _batchOutputs) {
-                        await _saveBytesToDeviceGallery(await File(fp).readAsBytes(), p.basename(fp));
-                      }
-                    },
-                  );
-                },
-                icon: const Icon(Icons.download_rounded, size: 18),
-                label: const Text('Download All', style: TextStyle(fontWeight: FontWeight.w700)),
-              ),
-              IconButton(
-                tooltip: 'Share All',
-                icon: Icon(Icons.share_rounded, color: _accentText),
-                onPressed: () async {
-                  await Share.shareXFiles(
-                    _batchOutputs.map((fp) => XFile(fp)).toList(),
-                    text: 'Qalamix Batch (${_batchOutputs.length})',
-                  );
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-              childAspectRatio: 0.78,
-            ),
-            itemCount: _batchOutputs.length,
-            itemBuilder: (ctx, idx) {
-              final fp = _batchOutputs[idx];
-              return Card(
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: InkWell(
-                        onTap: () {
-                          showDialog<void>(
-                            context: context,
-                            builder: (dCtx) => Dialog(
-                              backgroundColor: _panelBg,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(14, 10, 6, 6),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            p.basename(fp),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                                          ),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(Icons.close_rounded),
-                                          onPressed: () => Navigator.pop(dCtx),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  ConstrainedBox(
-                                    constraints: const BoxConstraints(maxHeight: 380),
-                                    child: Image.file(File(fp), fit: BoxFit.contain),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.all(10),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: FilledButton.icon(
-                                            style: FilledButton.styleFrom(
-                                              backgroundColor: _inkPrimary,
-                                              foregroundColor: _onInkPrimary,
-                                            ),
-                                            onPressed: () async {
-                                              Navigator.pop(dCtx);
-                                              await _runWithSavingHud(
-                                                savingTitle: 'Downloading...',
-                                                savedTitle: 'Saved to Gallery',
-                                                action: () async {
-                                                  await _saveBytesToDeviceGallery(
-                                                    await File(fp).readAsBytes(),
-                                                    p.basename(fp),
-                                                  );
-                                                },
-                                              );
-                                            },
-                                            icon: const Icon(Icons.download_rounded, size: 17),
-                                            label: const Text('Download', style: TextStyle(fontWeight: FontWeight.w700)),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        IconButton(
-                                          icon: const Icon(Icons.share_rounded),
-                                          onPressed: () => Share.shareXFiles([XFile(fp)]),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                        child: Image.file(File(fp), fit: BoxFit.cover),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              p.basename(fp),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            tooltip: 'Download',
-                            icon: const Icon(Icons.download_rounded, size: 18),
-                            onPressed: () async {
-                              await _runWithSavingHud(
-                                savingTitle: 'Downloading...',
-                                savedTitle: 'Saved to Gallery',
-                                action: () async {
-                                  await _saveBytesToDeviceGallery(
-                                    await File(fp).readAsBytes(),
-                                    p.basename(fp),
-                                  );
-                                },
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ],
       ],
     );
   }
@@ -6544,7 +6555,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
                     ),
                     onPressed: () async {
-                      final fresh = _buildDefaultProject();
+                      final res = await showNewProjectSheet(context);
+                      if (!mounted || res == null) return;
+                      if (res.openPdf) {
+                        await _openPdfForEditing();
+                        return;
+                      }
+                      final fresh = res.project;
+                      if (fresh == null) return;
                       await _runWithSavingHud(
                         savingTitle: 'Creating Project...',
                         savingSubtitle: fresh.name,
@@ -6559,11 +6577,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             _project = fresh;
                             _pageIndex = 0;
                             _selectedLayerId = null;
+                            _inspectorTab = 0;
+                            _sheetExpanded = false;
+                            _sheetTall = false;
                             _undoStack.clear();
                             _redoStack.clear();
                             _studioEntrySnapshot = (0, fresh.encode());
                             _inStudio = true;
                           });
+                          unawaited(_generateAndCacheProjectThumb(fresh));
                         },
                       );
                     },
