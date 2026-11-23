@@ -39,7 +39,8 @@ jobs:
         run: |
           chmod +x ./build.sh
           ./build.sh
-          flutter analyze lib/
+          flutter analyze lib/ test/
+          flutter test
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

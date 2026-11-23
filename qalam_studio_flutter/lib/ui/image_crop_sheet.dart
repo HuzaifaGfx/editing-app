@@ -348,14 +348,16 @@ class _ImageCropSheetState extends State<_ImageCropSheet> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final sheetBg = isDark ? const Color(0xFF16191E) : Colors.white;
-    final stageBg = isDark ? const Color(0xFF0D0F12) : const Color(0xFF0F172A);
-    final border = isDark ? const Color(0xFF262B35) : const Color(0xFFE2E8F0);
-    final ink = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF111317);
-    final onInk = isDark ? const Color(0xFF111317) : Colors.white;
-    final sub = isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569);
-    final chipBg = isDark ? const Color(0xFF222731) : const Color(0xFFF1F5F9);
+    final sheetBg = isDark ? const Color(0xFF1E222B) : Colors.white;
+    final stageBg = isDark ? const Color(0xFF12141A) : const Color(0xFFE6E1D6);
+    final border = isDark ? const Color(0xFF2C313C) : const Color(0xFFE7E2D8);
+    final sub = isDark ? const Color(0xFF94A3B8) : const Color(0xFF57534E);
+    final chipBg = isDark ? const Color(0xFF262B36) : const Color(0xFFF3F0E9);
+    final selChipBg = isDark ? const Color(0xFFF59E0B).withOpacity(0.18) : const Color(0xFFFFF6E0);
+    final selChipBorder = isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
+    final selChipFg = isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
     const amber = Color(0xFFF59E0B);
+    const onAmber = Color(0xFF1C1917);
 
     Widget aspectBtn(String label, double? ratio) {
       final sel = (_aspectRatio == null && ratio == null) ||
@@ -366,16 +368,16 @@ class _ImageCropSheetState extends State<_ImageCropSheet> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: sel ? ink : chipBg,
+            color: sel ? selChipBg : chipBg,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: sel ? ink : border),
+            border: Border.all(color: sel ? selChipBorder : border),
           ),
           child: Text(
             label,
             style: TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w700,
-              color: sel ? onInk : (isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A)),
+              color: sel ? selChipFg : (isDark ? const Color(0xFFF8FAFC) : const Color(0xFF1C1917)),
             ),
           ),
         ),
@@ -507,18 +509,18 @@ class _ImageCropSheetState extends State<_ImageCropSheet> {
                     child: FilledButton.icon(
                       onPressed: _applying || _decodedPreview == null ? null : _apply,
                       style: FilledButton.styleFrom(
-                        backgroundColor: ink,
-                        foregroundColor: onInk,
+                        backgroundColor: amber,
+                        foregroundColor: onAmber,
                         padding: const EdgeInsets.symmetric(vertical: 13),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       icon: _applying
-                          ? SizedBox(
+                          ? const SizedBox(
                               width: 16,
                               height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: onInk),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: onAmber),
                             )
-                          : const Icon(Icons.check_rounded, size: 18, color: amber),
+                          : const Icon(Icons.check_rounded, size: 18, color: onAmber),
                       label: Text(
                         _applying ? 'Applying...' : 'Apply Crop',
                         style: const TextStyle(fontWeight: FontWeight.w700),

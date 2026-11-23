@@ -33,13 +33,13 @@ class StudioScreen extends StatefulWidget {
 
 class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver {
   static const Color _brandNib = Color(0xFFF59E0B);
-  Color get _inkPrimary => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF111317);
-  Color get _onInkPrimary => _isDark ? const Color(0xFF111317) : Colors.white;
-  Color get _brandNibInk => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
-  Color get _brandNibOnInk => _isDark ? const Color(0xFFD97706) : const Color(0xFFF59E0B);
-  Color get _amber => _inkPrimary;
-  Color get _amberTintBg => _isDark ? const Color(0xFFF59E0B).withOpacity(0.14) : const Color(0xFFFFFBEB);
-  Color get _amberTintBorder => _isDark ? const Color(0xFFFBBF24).withOpacity(0.42) : const Color(0xFFFCD34D);
+  Color get _amber => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
+  Color get _inkPrimary => _brandNib;
+  Color get _onInkPrimary => const Color(0xFF1C1917);
+  Color get _brandNibInk => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
+  Color get _brandNibOnInk => const Color(0xFF1C1917);
+  Color get _amberTintBg => _isDark ? const Color(0xFFF59E0B).withOpacity(0.18) : const Color(0xFFFFF6E0);
+  Color get _amberTintBorder => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
   Color get _scannerTeal => _isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
   Color get _scannerTealBg => _isDark ? const Color(0xFF0D9488).withOpacity(0.18) : const Color(0xFFF0FDFA);
   Color get _scannerTealBorder => _isDark ? const Color(0xFF2DD4BF).withOpacity(0.36) : const Color(0xFF99F6E4);
@@ -143,15 +143,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   double _batchRemoveWhite = 0.0;
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
-  Color get _cardBg => _isDark ? const Color(0xFF16191E) : Colors.white;
-  Color get _panelBg => _isDark ? const Color(0xFF16191E) : Colors.white;
-  Color get _inputBg => _isDark ? const Color(0xFF111317) : const Color(0xFFF8FAFC);
-  Color get _chipBg => _isDark ? const Color(0xFF222731) : const Color(0xFFF1F5F9);
-  Color get _borderColor => _isDark ? const Color(0xFF262B35) : const Color(0xFFE2E8F0);
-  Color get _textColor => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
-  Color get _subColor => _isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569);
-  Color get _mutedColor => _isDark ? const Color(0xFF64748B) : const Color(0xFF64748B);
-  Color get _accentText => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF111317);
+  Color get _cardBg => _isDark ? const Color(0xFF1E222B) : Colors.white;
+  Color get _panelBg => _isDark ? const Color(0xFF1E222B) : Colors.white;
+  Color get _inputBg => _isDark ? const Color(0xFF12141A) : const Color(0xFFFAF8F4);
+  Color get _chipBg => _isDark ? const Color(0xFF262B36) : const Color(0xFFF3F0E9);
+  Color get _borderColor => _isDark ? const Color(0xFF2C313C) : const Color(0xFFE7E2D8);
+  Color get _textColor => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF1C1917);
+  Color get _subColor => _isDark ? const Color(0xFF94A3B8) : const Color(0xFF57534E);
+  Color get _mutedColor => _isDark ? const Color(0xFF64748B) : const Color(0xFF78716C);
+  Color get _accentText => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
 
   @override
   void initState() {
@@ -236,7 +236,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     constraints: const BoxConstraints(maxWidth: 340),
                     padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF16191E) : Colors.white,
+                      color: isDark ? const Color(0xFF1E222B) : Colors.white,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: borderCol.withOpacity(0.75), width: 1.4),
                       boxShadow: [
@@ -422,7 +422,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         _isDark
                             ? 'assets/images/qalamix_logo_dark.png'
                             : 'assets/images/qalamix_logo.jpg',
-                        fit: BoxFit.cover,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                        isAntiAlias: true,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -1179,11 +1181,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           height: 32,
           padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(
-            color: _isDark ? const Color(0xFF1F242D) : const Color(0xFFF1F5F9),
+            color: _isDark ? const Color(0xFF262B36) : const Color(0xFFF3F0E9),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: _isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
-            ),
+            border: Border.all(color: _borderColor),
           ),
           child: Stack(
             children: [
@@ -1203,7 +1203,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       child: Icon(
                         Icons.dark_mode_rounded,
                         size: 13.5,
-                        color: _isDark ? Colors.transparent : const Color(0xFF94A3B8),
+                        color: _isDark ? Colors.transparent : const Color(0xFF78716C),
                       ),
                     ),
                   ),
@@ -1217,20 +1217,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   width: 26,
                   height: 24,
                   decoration: BoxDecoration(
-                    color: _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF111317),
+                    color: _amber,
                     borderRadius: BorderRadius.circular(14),
                     boxShadow: [
                       BoxShadow(
                         blurRadius: 4,
                         offset: const Offset(0, 1),
-                        color: Colors.black.withOpacity(0.18),
+                        color: Colors.black.withOpacity(0.16),
                       ),
                     ],
                   ),
                   child: Icon(
                     _isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
                     size: 14,
-                    color: _isDark ? const Color(0xFF111317) : _brandNib,
+                    color: const Color(0xFF1C1917),
                   ),
                 ),
               ),
@@ -1765,9 +1765,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected ? _amber : _chipBg,
+          color: selected ? _amberTintBg : _chipBg,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: selected ? _amber : _borderColor),
+          border: Border.all(color: selected ? _amberTintBorder : _borderColor),
         ),
         child: Text(
           label,
@@ -1776,7 +1776,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           style: TextStyle(
             fontSize: 12.5,
             fontWeight: FontWeight.w700,
-            color: selected ? _onInkPrimary : _textColor,
+            color: selected ? _accentText : _textColor,
           ),
         ),
       ),
@@ -2176,7 +2176,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
-    final stageBg = _isDark ? const Color(0xFF0A0C0F) : const Color(0xFFEAECEF);
+    final stageBg = _isDark ? const Color(0xFF12141A) : const Color(0xFFE6E1D6);
 
     const hubTitles = ['Projects', 'Quick Fill', 'Sign & Seal', 'Docs & Scanner', 'Batch Studio'];
     return PopScope(
@@ -2240,11 +2240,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             : Row(
                 children: [
                   Container(
-                    width: 34,
-                    height: 34,
-                    padding: _isDark ? EdgeInsets.zero : const EdgeInsets.all(3),
+                    width: 36,
+                    height: 36,
                     decoration: BoxDecoration(
-                      color: _isDark ? const Color(0xFF111317) : const Color(0xFFF8FAFC),
+                      color: _isDark ? const Color(0xFF16191E) : Colors.white,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: _borderColor),
                     ),
@@ -2252,8 +2251,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     child: Image.asset(
                       _isDark
                           ? 'assets/images/qalamix_logo_dark.png'
-                          : 'assets/images/qalamix_mark.png',
-                      fit: _isDark ? BoxFit.cover : BoxFit.contain,
+                          : 'assets/images/qalamix_logo.jpg',
+                      fit: BoxFit.contain,
                       filterQuality: FilterQuality.high,
                       isAntiAlias: true,
                     ),
@@ -2463,7 +2462,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                   Image.asset(
                                     _isDark
                                         ? 'assets/images/qalamix_logo_dark.png'
-                                        : 'assets/images/qalamix_mark.png',
+                                        : 'assets/images/qalamix_logo.jpg',
                                     width: 112,
                                     height: 112,
                                     fit: BoxFit.contain,
@@ -2480,7 +2479,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                       letterSpacing: -0.4,
                                       color: _isDark
                                           ? const Color(0xFFF8FAFC)
-                                          : const Color(0xFF0F172A),
+                                          : const Color(0xFF1C1917),
                                     ),
                                   ),
                                   const SizedBox(height: 4),
@@ -2512,8 +2511,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                   borderRadius: BorderRadius.circular(2),
                                   child: LinearProgressIndicator(
                                     backgroundColor: _isDark
-                                        ? const Color(0xFF262B35)
-                                        : const Color(0xFFE2E8F0),
+                                        ? const Color(0xFF2C313C)
+                                        : const Color(0xFFE7E2D8),
                                     color: const Color(0xFFF59E0B),
                                   ),
                                 ),
@@ -2768,21 +2767,21 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: active ? _inkPrimary : _chipBg,
+            color: active ? _amberTintBg : _chipBg,
             borderRadius: BorderRadius.circular(8),
-            border: active ? null : Border.all(color: _borderColor),
+            border: Border.all(color: active ? _amberTintBorder : _borderColor),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: active ? _brandNibOnInk : _subColor),
+              Icon(icon, size: 14, color: active ? _accentText : _subColor),
               const SizedBox(width: 5),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: active ? FontWeight.w700 : FontWeight.w600,
-                  color: active ? _onInkPrimary : _textColor,
+                  color: active ? _accentText : _textColor,
                 ),
               ),
             ],
@@ -2860,10 +2859,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         width: 32,
                         height: 32,
                         decoration: BoxDecoration(
-                          color: isSel ? _inkPrimary : _chipBg,
+                          color: isSel ? _amberTintBg : _chipBg,
                           borderRadius: BorderRadius.circular(8),
+                          border: isSel ? Border.all(color: _amberTintBorder) : null,
                         ),
-                        child: Icon(typeIcon, size: 16, color: isSel ? _brandNibOnInk : _subColor),
+                        child: Icon(typeIcon, size: 16, color: isSel ? _accentText : _subColor),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -3317,10 +3317,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 return Padding(
                   padding: const EdgeInsets.only(right: 6),
                   child: ChoiceChip(
-                    label: Text(label, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                    label: Text(label, style: TextStyle(fontSize: 11.5, fontWeight: active ? FontWeight.w700 : FontWeight.w600)),
                     selected: active,
-                    selectedColor: _amber,
-                    labelStyle: TextStyle(color: active ? _onInkPrimary : _textColor),
+                    selectedColor: _amberTintBg,
+                    backgroundColor: _chipBg,
+                    checkmarkColor: _accentText,
+                    side: BorderSide(color: active ? _amberTintBorder : _borderColor),
+                    labelStyle: TextStyle(color: active ? _accentText : _textColor),
                     onSelected: (_) {
                       _pushUndoSnapshot();
                       setState(() {
@@ -4396,10 +4399,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           children: shapeTypes.map((st) {
             final sel = layer.shapeKind == st.$1;
             return ChoiceChip(
-              label: Text(st.$2, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+              label: Text(st.$2, style: TextStyle(fontSize: 11, fontWeight: sel ? FontWeight.w700 : FontWeight.w600)),
               selected: sel,
-              selectedColor: _amber,
-              labelStyle: TextStyle(color: sel ? _onInkPrimary : _textColor),
+              selectedColor: _amberTintBg,
+              backgroundColor: _chipBg,
+              checkmarkColor: _accentText,
+              side: BorderSide(color: sel ? _amberTintBorder : _borderColor),
+              labelStyle: TextStyle(color: sel ? _accentText : _textColor),
               onSelected: (_) {
                 setState(() => layer.shapeKind = st.$1);
                 _scheduleAutosave();
@@ -4564,16 +4570,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? _amber : _chipBg,
+          color: selected ? _amberTintBg : _chipBg,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? _amber : _borderColor),
+          border: Border.all(color: selected ? _amberTintBorder : _borderColor),
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 11.5,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? _onInkPrimary : _textColor,
+            color: selected ? _accentText : _textColor,
           ),
         ),
       ),
@@ -4617,14 +4623,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         decoration: BoxDecoration(
-          color: selected ? _amber : _inputBg,
+          color: selected ? _amberTintBg : _inputBg,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? _amber : _borderColor),
+          border: Border.all(color: selected ? _amberTintBorder : _borderColor),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 14, color: selected ? _onInkPrimary : _subColor),
+            Icon(icon, size: 14, color: selected ? _accentText : _subColor),
             const SizedBox(width: 4),
             Flexible(
               child: Text(
@@ -4634,7 +4640,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
-                  color: selected ? _onInkPrimary : _textColor,
+                  color: selected ? _accentText : _textColor,
                 ),
               ),
             ),
@@ -6077,62 +6083,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     }
   }
 
-  Color _parseColorAny(dynamic raw, Color fallback) {
-    if (raw is int) return Color(raw);
-    if (raw is String) {
-      final clean = raw.trim().toLowerCase();
-      if (clean == 'transparent') return Colors.transparent;
-      if (clean.startsWith('#')) {
-        var hex = clean.substring(1);
-        if (hex.length == 3) {
-          hex = '${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}';
-        }
-        if (hex.length == 6) hex = 'ff$hex';
-        final val = int.tryParse(hex, radix: 16);
-        if (val != null) return Color(val);
-      }
-    }
-    return fallback;
-  }
 
-  BlendMode _parseBlendModeAny(dynamic raw) {
-    if (raw is int && raw >= 0 && raw < BlendMode.values.length) {
-      return BlendMode.values[raw];
-    }
-    if (raw is String) {
-      switch (raw.toLowerCase().replaceAll('_', '-')) {
-        case 'multiply':
-          return BlendMode.multiply;
-        case 'screen':
-          return BlendMode.screen;
-        case 'overlay':
-          return BlendMode.overlay;
-        case 'softlight':
-        case 'soft-light':
-          return BlendMode.softLight;
-        case 'hardlight':
-        case 'hard-light':
-          return BlendMode.hardLight;
-        case 'darken':
-          return BlendMode.darken;
-        case 'lighten':
-          return BlendMode.lighten;
-        case 'colordodge':
-        case 'color-dodge':
-          return BlendMode.colorDodge;
-        case 'colorburn':
-        case 'color-burn':
-          return BlendMode.colorBurn;
-        case 'difference':
-          return BlendMode.difference;
-        case 'exclusion':
-          return BlendMode.exclusion;
-        default:
-          return BlendMode.srcOver;
-      }
-    }
-    return BlendMode.srcOver;
-  }
 
   String _blendLabel(BlendMode b) {
     switch (b) {
@@ -6173,125 +6124,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       }
       if (raw == null || raw.trim().isEmpty) return;
 
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic>) {
-        throw const FormatException('Invalid JSON object');
-      }
-
-      Map<String, dynamic> projMap;
-      final embedded = <String, String>{};
-      if ((decoded['format'] == 'qalamix_project_v1' || decoded['format'] == ('qalam' '_project_v1')) && decoded['project'] is Map<String, dynamic>) {
-        projMap = Map<String, dynamic>.from(decoded['project'] as Map);
-        final embRaw = decoded['embeddedImages'];
-        if (embRaw is Map) {
-          for (final entry in embRaw.entries) {
-            if (entry.key is String && entry.value is String) {
-              embedded[entry.key as String] = entry.value as String;
-            }
-          }
-        }
-      } else if (decoded['pages'] is List) {
-        projMap = Map<String, dynamic>.from(decoded);
-      } else {
-        throw const FormatException('Not a Qalamix project file');
-      }
-
-      final restoredPaths = <String, String>{};
-      for (final entry in embedded.entries) {
-        final local = await _writeBase64ToLocalImage(entry.value, 'imp');
-        if (local != null) restoredPaths[entry.key] = local;
-      }
-
-      final rawPages = (projMap['pages'] as List? ?? []);
-      if (rawPages.isEmpty) throw const FormatException('Project has no pages');
-
-      final pages = <DocumentPage>[];
-      for (int pi = 0; pi < rawPages.length; pi++) {
-        final pgRaw = Map<String, dynamic>.from(rawPages[pi] as Map);
-        final rawLayers = (pgRaw['layers'] as List? ?? []);
-        final layers = <DesignLayer>[];
-        for (int li = 0; li < rawLayers.length; li++) {
-          final lRaw = Map<String, dynamic>.from(rawLayers[li] as Map);
-          final typeStr = (lRaw['type'] ?? 'text').toString();
-          final lType = LayerType.values.firstWhere(
-            (t) => t.name == typeStr,
-            orElse: () => LayerType.text,
-          );
-          String? imgPath = lRaw['localImagePath'] as String?;
-          if (imgPath != null && restoredPaths.containsKey(imgPath)) {
-            imgPath = restoredPaths[imgPath];
-          } else if (lType == LayerType.image && lRaw['src'] is String) {
-            final src = lRaw['src'] as String;
-            if (src.startsWith('data:image')) {
-              imgPath = await _writeBase64ToLocalImage(src, 'webimg');
-            }
-          }
-          final fMap = (lRaw['filters'] is Map)
-              ? Map<String, dynamic>.from(lRaw['filters'] as Map)
-              : <String, dynamic>{};
-          layers.add(DesignLayer(
-            id: (lRaw['id'] ?? 'l_${pi}_$li').toString(),
-            name: (lRaw['name'] ?? 'Layer ${li + 1}').toString(),
-            type: lType,
-            x: (lRaw['x'] ?? 40).toDouble(),
-            y: (lRaw['y'] ?? 40).toDouble(),
-            width: (lRaw['width'] ?? 240).toDouble(),
-            height: (lRaw['height'] ?? 160).toDouble(),
-            rotation: (lRaw['rotation'] ?? 0).toDouble(),
-            opacity: (lRaw['opacity'] ?? 1.0).toDouble(),
-            blendMode: _parseBlendModeAny(lRaw['blendMode']),
-            visible: lRaw['visible'] ?? true,
-            locked: lRaw['locked'] ?? false,
-            isCanvasBackground: lRaw['isCanvasBackground'] ?? false,
-            text: (lRaw['text'] ?? '').toString(),
-            isRtl: lRaw['isRtl'] ?? (lRaw['direction'] == 'rtl'),
-            fontFamily: (lRaw['fontFamily'] ?? 'PlusJakartaSans').toString(),
-            fontSize: (lRaw['fontSize'] ?? 32).toDouble(),
-            fontWeight: ((lRaw['fontWeight'] ?? 400) as num).toInt(),
-            lineHeight: (lRaw['lineHeight'] ?? 1.4).toDouble(),
-            textColor: _parseColorAny(
-              lRaw['textColor'] ?? lRaw['color'] ?? lRaw['fillColor'],
-              const Color(0xFF0F172A),
-            ),
-            textAlign: lRaw['textAlign'] is String
-                ? TextAlign.values.firstWhere(
-                    (t) => t.name == lRaw['textAlign'],
-                    orElse: () => (lRaw['isRtl'] ?? lRaw['direction'] == 'rtl') ? TextAlign.right : TextAlign.left,
-                  )
-                : null,
-            textBgColor: _parseColorAny(lRaw['textBgColor'] ?? lRaw['backgroundColor'], Colors.transparent),
-            flipX: lRaw['flipX'] ?? false,
-            flipY: lRaw['flipY'] ?? false,
-            localImagePath: imgPath,
-            aspectLocked: lRaw['aspectLocked'] ?? true,
-            objectFit: lRaw['objectFit'] is int
-                ? BoxFit.values[(lRaw['objectFit'] as int).clamp(0, BoxFit.values.length - 1)]
-                : BoxFit.cover,
-            borderRadius: (lRaw['borderRadius'] ?? 0).toDouble(),
-            shapeKind: (lRaw['shapeKind'] ?? 'rect').toString(),
-            shapeStrokeColor: _parseColorAny(
-              lRaw['shapeStrokeColor'] ?? lRaw['strokeColor'],
-              const Color(0xFFF59E0B),
-            ),
-            shapeStrokeWidth: ((lRaw['shapeStrokeWidth'] ?? lRaw['strokeWidth']) ?? 0.0).toDouble(),
-            filters: FilterSettings.fromJson(fMap),
-          ));
-        }
-        pages.add(DocumentPage(
-          id: (pgRaw['id'] ?? 'pg_$pi').toString(),
-          title: (pgRaw['title'] ?? 'Page ${pi + 1}').toString(),
-          width: (pgRaw['width'] ?? 900).toDouble(),
-          height: (pgRaw['height'] ?? 1200).toDouble(),
-          backgroundColor: _parseColorAny(pgRaw['backgroundColor'], const Color(0xFFFAF9F6)),
-          layers: layers,
-        ));
-      }
-
-      final imported = DesignProject(
-        id: 'proj_imp_${DateTime.now().millisecondsSinceEpoch}',
-        name: (projMap['name'] ?? 'Imported Project').toString(),
-        updatedAt: DateTime.now().millisecondsSinceEpoch,
-        pages: pages,
+      final imported = await parseImportedProjectBundle(
+        raw,
+        writeImage: _writeBase64ToLocalImage,
       );
 
       await _runWithSavingHud(
@@ -6800,11 +6635,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                           width: 52,
                           height: 58,
                           decoration: BoxDecoration(
-                            color: isCurrent ? _inkPrimary : _amberTintBg,
+                            color: _amberTintBg,
                             borderRadius: BorderRadius.circular(11),
                             border: Border.all(
                               color: isCurrent ? _brandNib : _amberTintBorder,
-                              width: isCurrent ? 1.4 : 1,
+                              width: isCurrent ? 1.5 : 1,
                             ),
                           ),
                           clipBehavior: Clip.antiAlias,
@@ -6816,7 +6651,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 )
                               : Icon(
                                   isCurrent ? Icons.layers_rounded : Icons.folder_open_rounded,
-                                  color: isCurrent ? _brandNibOnInk : _brandNibInk,
+                                  color: _accentText,
                                   size: 22,
                                 ),
                         ),
@@ -7061,10 +6896,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 return Padding(
                   padding: const EdgeInsets.only(right: 6),
                   child: ChoiceChip(
-                    label: Text(p.$2, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                    label: Text(p.$2, style: TextStyle(fontSize: 11.5, fontWeight: selected ? FontWeight.w700 : FontWeight.w600)),
                     selected: selected,
-                    selectedColor: _inkPrimary,
-                    labelStyle: TextStyle(color: selected ? _onInkPrimary : _textColor),
+                    selectedColor: _amberTintBg,
+                    backgroundColor: _chipBg,
+                    checkmarkColor: _accentText,
+                    side: BorderSide(color: selected ? _amberTintBorder : _borderColor),
+                    labelStyle: TextStyle(color: selected ? _accentText : _textColor),
                     onSelected: (_) {
                       setState(() => _sigPenType = p.$1);
                       onChanged?.call();
@@ -7078,7 +6916,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
                 ),
                 selected: _sigAutoSmooth,
-                selectedColor: _amber.withOpacity(0.24),
+                selectedColor: _amberTintBg,
+                backgroundColor: _chipBg,
+                checkmarkColor: _accentText,
+                side: BorderSide(color: _sigAutoSmooth ? _amberTintBorder : _borderColor),
                 labelStyle: TextStyle(color: _sigAutoSmooth ? _accentText : _subColor),
                 onSelected: (_) {
                   setState(() => _sigAutoSmooth = !_sigAutoSmooth);
@@ -7108,7 +6949,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           return StatefulBuilder(
             builder: (ctx, setModalState) {
               return Scaffold(
-                backgroundColor: _isDark ? const Color(0xFF0D0F12) : const Color(0xFFF3F5F8),
+                backgroundColor: _isDark ? const Color(0xFF12141A) : const Color(0xFFF6F4EF),
                 appBar: AppBar(
                   backgroundColor: _cardBg,
                   leading: IconButton(
@@ -7700,8 +7541,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
             decoration: BoxDecoration(
-              color: sel ? _inkPrimary : Colors.transparent,
+              color: sel ? _amberTintBg : Colors.transparent,
               borderRadius: BorderRadius.circular(10),
+              border: sel ? Border.all(color: _amberTintBorder) : null,
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -7709,9 +7551,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 Icon(
                   icon,
                   size: 16,
-                  color: sel
-                      ? (idx == 2 ? _brandNib : _onInkPrimary)
-                      : (idx == 2 ? _brandNibInk : _subColor),
+                  color: sel ? _accentText : _subColor,
                 ),
                 const SizedBox(height: 3),
                 FittedBox(
@@ -7722,7 +7562,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: sel ? FontWeight.w700 : FontWeight.w600,
-                      color: sel ? _onInkPrimary : _textColor,
+                      color: sel ? _accentText : _textColor,
                     ),
                   ),
                 ),
@@ -7752,9 +7592,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: _inkPrimary,
+                      color: _amberTintBg,
                       borderRadius: BorderRadius.circular(11),
-                      border: Border.all(color: _brandNib.withOpacity(0.55)),
+                      border: Border.all(color: _amberTintBorder),
                     ),
                     child: Icon(
                       _sigMode == 3
@@ -7762,7 +7602,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                           : _sigMode == 2
                               ? Icons.document_scanner_rounded
                               : Icons.draw_rounded,
-                      color: _brandNib,
+                      color: _accentText,
                       size: 20,
                     ),
                   ),
