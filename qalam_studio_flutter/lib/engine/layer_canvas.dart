@@ -1641,3 +1641,98 @@ Future<Uint8List?> renderPageThumbnailBytes(
     }
   }
 }
+
+Future<Uint8List?> renderPagePngBytes(
+  DocumentPage page, {
+  double pixelRatio = 1.0,
+  bool forceTransparentBackground = false,
+  int? maxLongestSide,
+}) async {
+  final uniqueImages = <ui.Image>[];
+  final pathCache = <String, ui.Image>{};
+  final decodedImages = <String, ui.Image>{};
+  try {
+    for (final layer in page.layers) {
+      if (!layer.visible || layer.type != LayerType.image) continue;
+      if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
+        final bytes = layer.processedGuillocheBytes!;
+        if (bytes.isEmpty) continue;
+        final codec = await ui.instantiateImageCodec(bytes);
+        final frame = await codec.getNextFrame();
+        codec.dispose();
+        uniqueImages.add(frame.image);
+        decodedImages[layer.id] = frame.image;
+      } else if (layer.processedWhiteRemovedBytes != null) {
+        final bytes = layer.processedWhiteRemovedBytes!;
+        if (bytes.isEmpty) continue;
+        final codec = await ui.instantiateImageCodec(bytes);
+        final frame = await codec.getNextFrame();
+        codec.dispose();
+        uniqueImages.add(frame.image);
+        decodedImages[layer.id] = frame.image;
+      } else if (layer.localImagePath != null &&
+          layer.localImagePath!.isNotEmpty) {
+        final path = layer.localImagePath!;
+        final cached = pathCache[path];
+        if (cached != null) {
+          decodedImages[layer.id] = cached;
+        } else {
+          final f = File(path);
+          if (!await f.exists()) continue;
+          final bytes = await f.readAsBytes();
+          if (bytes.isEmpty) continue;
+          final codec = await ui.instantiateImageCodec(bytes);
+          final frame = await codec.getNextFrame();
+          codec.dispose();
+          uniqueImages.add(frame.image);
+          pathCache[path] = frame.image;
+          decodedImages[layer.id] = frame.image;
+        }
+      }
+    }
+
+    final safeW = math.max(1.0, page.width);
+    final safeH = math.max(1.0, page.height);
+    var targetW = safeW * pixelRatio;
+    var targetH = safeH * pixelRatio;
+    if (maxLongestSide != null && maxLongestSide > 0) {
+      final longest = math.max(targetW, targetH);
+      if (longest > maxLongestSide) {
+        final factor = maxLongestSide / longest;
+        targetW *= factor;
+        targetH *= factor;
+      }
+    }
+    final int outW = math.max(1, targetW.round());
+    final int outH = math.max(1, targetH.round());
+    final scaleX = outW / safeW;
+    final scaleY = outH / safeH;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(
+      recorder,
+      Rect.fromLTWH(0, 0, outW.toDouble(), outH.toDouble()),
+    );
+    canvas.save();
+    canvas.scale(scaleX, scaleY);
+    _ArtboardPainter(
+      page: page,
+      layerImages: decodedImages,
+      forceTransparentBackground: forceTransparentBackground,
+    ).paint(canvas, Size(safeW, safeH));
+    canvas.restore();
+
+    final picture = recorder.endRecording();
+    final imgOut = await picture.toImage(outW, outH);
+    final bd = await imgOut.toByteData(format: ui.ImageByteFormat.png);
+    imgOut.dispose();
+    picture.dispose();
+    return bd?.buffer.asUint8List();
+  } catch (_) {
+    return null;
+  } finally {
+    for (final im in uniqueImages) {
+      im.dispose();
+    }
+  }
+}

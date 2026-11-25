@@ -5,7 +5,6 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
@@ -24,6 +23,12 @@ import '../storage/local_project_store.dart';
 import 'image_crop_sheet.dart';
 import 'new_project_sheet.dart';
 import 'pdf_import.dart';
+
+Uint8List? _encodeJpgFromPngIsolate(Uint8List pngBytes) {
+  final decoded = img.decodePng(pngBytes);
+  if (decoded == null) return null;
+  return Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
+}
 
 class StudioScreen extends StatefulWidget {
   const StudioScreen({super.key});
@@ -1405,45 +1410,37 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     return outPath;
   }
 
-  Future<Uint8List?> _captureCanvasBytes({
-    double pixelRatio = 2.0,
-    String format = 'png',
-    bool transparent = false,
-  }) async {
-    final prevInStudio = _inStudio;
-    final prevNav = _navIndex;
-    setState(() {
-      _inStudio = true;
-      _selectedLayerId = null;
-      _hideOverlaysForExport = true;
-      _exportTransparentCanvas = format == 'png' && transparent;
-    });
-    await Future.delayed(const Duration(milliseconds: 120));
-    try {
-      final boundary =
-          _canvasExportKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) return null;
-      final image = await boundary.toImage(pixelRatio: pixelRatio);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) return null;
-      final pngBytes = byteData.buffer.asUint8List();
-      if (format == 'jpg') {
-        final decoded = img.decodePng(pngBytes);
-        if (decoded != null) {
-          return Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
-        }
-      }
-      return pngBytes;
-    } finally {
-      if (mounted) {
-        setState(() {
-          _hideOverlaysForExport = false;
-          _exportTransparentCanvas = false;
-          _inStudio = prevInStudio;
-          _navIndex = prevNav;
-        });
+  String _safeExportFilePart(String name) {
+    final cleaned = name
+        .trim()
+        .replaceAll(RegExp(r'[\\/:*?"<>|\s]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+    if (cleaned.isEmpty) return 'project';
+    return cleaned.length > 40 ? cleaned.substring(0, 40) : cleaned;
+  }
+
+  Future<Uint8List> _buildProjectPdfBytes(double scale) async {
+    final doc = pw.Document();
+    for (final pg in _project.pages) {
+      final pgBytes = await renderPagePngBytes(
+        pg,
+        pixelRatio: scale,
+        forceTransparentBackground: false,
+        maxLongestSide: 3200,
+      );
+      if (pgBytes != null && pgBytes.isNotEmpty) {
+        final pdfImg = pw.MemoryImage(pgBytes);
+        doc.addPage(
+          pw.Page(
+            pageFormat: PdfPageFormat(pg.width, pg.height),
+            margin: pw.EdgeInsets.zero,
+            build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
+          ),
+        );
       }
     }
+    return doc.save();
   }
 
   Future<void> _executeExport({
@@ -1452,47 +1449,87 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     required bool transparent,
     required bool shareOnly,
     required bool asPdf,
+    bool printPdf = false,
   }) async {
     if (asPdf) {
+      final safeProj = _safeExportFilePart(_project.name);
+      final fileName = 'qalamix_${safeProj}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      if (printPdf) {
+        await _runWithSavingHud(
+          savingTitle: 'Preparing Print...',
+          savingSubtitle: '${_project.pages.length} page(s)',
+          savedTitle: 'Print Ready',
+          savedSubtitle: 'Opening print preview',
+          action: () async {
+            final pdfBytes = await _buildProjectPdfBytes(scale);
+            await Printing.layoutPdf(onLayout: (_) async => pdfBytes);
+          },
+        );
+        return;
+      }
+
+      if (shareOnly) {
+        await _runWithSavingHud(
+          savingTitle: 'Preparing PDF...',
+          savingSubtitle: '${_project.pages.length} page(s)',
+          savedTitle: 'PDF Ready',
+          savedSubtitle: fileName,
+          action: () async {
+            final pdfBytes = await _buildProjectPdfBytes(scale);
+            final tmpDir = await getTemporaryDirectory();
+            final tmpPath = p.join(tmpDir.path, fileName);
+            await File(tmpPath).writeAsBytes(pdfBytes);
+            await Share.shareXFiles([XFile(tmpPath)], text: _project.name);
+          },
+        );
+        return;
+      }
+
+      String savedLoc = '';
+      String? shareTmpPath;
       await _runWithSavingHud(
-        savingTitle: 'Generating PDF...',
+        savingTitle: 'Saving PDF...',
         savingSubtitle: '${_project.pages.length} page(s)',
-        savedTitle: 'PDF Ready',
-        savedSubtitle: 'Opening print & save view',
+        savedTitle: 'PDF Saved',
+        savedSubtitle: fileName,
         action: () async {
-          final origPageIdx = _pageIndex;
-          final doc = pw.Document();
-          try {
-            for (int i = 0; i < _project.pages.length; i++) {
-              if (_pageIndex != i) {
-                setState(() => _pageIndex = i);
-                await Future.delayed(const Duration(milliseconds: 110));
-              }
-              final pgBytes = await _captureCanvasBytes(
-                pixelRatio: scale,
-                format: 'png',
-                transparent: false,
-              );
-              if (pgBytes != null) {
-                final pg = _project.pages[i];
-                final pdfImg = pw.MemoryImage(pgBytes);
-                doc.addPage(
-                  pw.Page(
-                    pageFormat: PdfPageFormat(pg.width, pg.height),
-                    margin: pw.EdgeInsets.zero,
-                    build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
-                  ),
-                );
-              }
-            }
-          } finally {
-            if (mounted && _pageIndex != origPageIdx) {
-              setState(() => _pageIndex = origPageIdx);
-            }
+          final pdfBytes = await _buildProjectPdfBytes(scale);
+          if (Platform.isAndroid) {
+            savedLoc = await _mediaChannel.invokeMethod<String>('savePdfToDownloads', {
+                  'bytes': pdfBytes,
+                  'name': fileName,
+                }) ??
+                '';
           }
-          await Printing.layoutPdf(onLayout: (_) async => doc.save());
+          final tmpDir = await getTemporaryDirectory();
+          final tmpPath = p.join(tmpDir.path, fileName);
+          await File(tmpPath).writeAsBytes(pdfBytes);
+          shareTmpPath = tmpPath;
+          if (savedLoc.isEmpty) {
+            final extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+            final outDir = Directory(p.join(extDir.path, 'Qalamix'));
+            if (!outDir.existsSync()) outDir.createSync(recursive: true);
+            final outPath = p.join(outDir.path, fileName);
+            await File(outPath).writeAsBytes(pdfBytes);
+            savedLoc = outPath;
+          }
         },
       );
+      if (savedLoc.isNotEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('PDF saved: $savedLoc'),
+            duration: const Duration(seconds: 3),
+            action: shareTmpPath == null
+                ? null
+                : SnackBarAction(
+                    label: 'Share PDF',
+                    textColor: _amber,
+                    onPressed: () => Share.shareXFiles([XFile(shareTmpPath!)], text: _project.name),
+                  ),
+          ),
+        );
+      }
       return;
     }
 
@@ -1504,22 +1541,34 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       savedTitle: shareOnly ? 'Ready to Share' : 'Saved to Gallery',
       savedSubtitle: '${format.toUpperCase()} · ${scale.toStringAsFixed(0)}x',
       action: () async {
-        final bytes = await _captureCanvasBytes(
+        final pngBytes = await renderPagePngBytes(
+          _page,
           pixelRatio: scale,
-          format: format,
-          transparent: transparent,
+          forceTransparentBackground: format == 'png' && transparent,
         );
-        if (bytes == null) throw Exception('Canvas capture failed');
+        if (pngBytes == null || pngBytes.isEmpty) {
+          throw Exception('Canvas render failed');
+        }
+        final Uint8List outBytes;
+        if (format == 'jpg') {
+          final jpg = await compute(_encodeJpgFromPngIsolate, pngBytes);
+          if (jpg == null || jpg.isEmpty) {
+            throw Exception('JPG encoding failed');
+          }
+          outBytes = jpg;
+        } else {
+          outBytes = pngBytes;
+        }
         final ext = format == 'jpg' ? 'jpg' : 'png';
         final fileName = 'qalamix_export_${DateTime.now().millisecondsSinceEpoch}.$ext';
         final tmpDir = await getTemporaryDirectory();
         final tmpPath = p.join(tmpDir.path, fileName);
-        await File(tmpPath).writeAsBytes(bytes);
+        await File(tmpPath).writeAsBytes(outBytes);
         tmpPathForShare = tmpPath;
         if (shareOnly) {
           await Share.shareXFiles([XFile(tmpPath)], text: _project.name);
         } else {
-          savedLocation = await _saveBytesToDeviceGallery(bytes, fileName);
+          savedLocation = await _saveBytesToDeviceGallery(outBytes, fileName);
         }
       },
     );
@@ -1553,6 +1602,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
+            final isPdf = format == 'pdf';
             return SafeArea(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
@@ -1619,6 +1669,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             }),
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _optionTile(
+                            label: 'PDF',
+                            selected: isPdf,
+                            onTap: () => setSheetState(() {
+                              format = 'pdf';
+                              transparent = false;
+                            }),
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 14),
@@ -1673,60 +1734,38 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             scale: scale,
                             transparent: transparent,
                             shareOnly: false,
-                            asPdf: false,
+                            asPdf: isPdf,
                           );
                         },
                         icon: const Icon(Icons.save_alt_rounded, size: 19),
-                        label: const Text('Save to Gallery', style: TextStyle(fontWeight: FontWeight.w700)),
+                        label: Text(
+                          isPdf ? 'Download PDF' : 'Save to Gallery',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 13),
-                              side: BorderSide(color: _borderColor),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _executeExport(
-                                format: format,
-                                scale: scale,
-                                transparent: transparent,
-                                shareOnly: true,
-                                asPdf: false,
-                              );
-                            },
-                            icon: const Icon(Icons.share_outlined, size: 18),
-                            label: const Text('Share'),
-                          ),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          side: BorderSide(color: _borderColor),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 13),
-                              side: BorderSide(color: _borderColor),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _executeExport(
-                                format: 'png',
-                                scale: scale,
-                                transparent: false,
-                                shareOnly: false,
-                                asPdf: true,
-                              );
-                            },
-                            icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-                            label: Text(_project.pages.length > 1 ? 'PDF (${_project.pages.length} Pages)' : 'Print / PDF'),
-                          ),
-                        ),
-                      ],
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _executeExport(
+                            format: format,
+                            scale: scale,
+                            transparent: transparent,
+                            shareOnly: true,
+                            asPdf: isPdf,
+                          );
+                        },
+                        icon: const Icon(Icons.share_outlined, size: 18),
+                        label: Text(isPdf ? 'Share PDF' : 'Share'),
+                      ),
                     ),
                     const SizedBox(height: 8),
                     SizedBox(
@@ -1743,6 +1782,24 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         },
                         icon: Icon(Icons.folder_shared_outlined, size: 18, color: _accentText),
                         label: const Text('Share Editable Project (.qalamix.json)'),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Center(
+                      child: TextButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _executeExport(
+                            format: 'pdf',
+                            scale: scale,
+                            transparent: false,
+                            shareOnly: false,
+                            asPdf: true,
+                            printPdf: true,
+                          );
+                        },
+                        icon: Icon(Icons.print_outlined, size: 16, color: _subColor),
+                        label: Text('Print', style: TextStyle(fontSize: 13, color: _subColor, fontWeight: FontWeight.w600)),
                       ),
                     ),
                   ],
@@ -1764,7 +1821,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: selected ? _amberTintBg : _chipBg,
@@ -2746,7 +2803,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
         ),
         Container(
-          height: 50,
+          height: 56,
           decoration: BoxDecoration(
             color: _panelBg,
             border: Border(top: BorderSide(color: _borderColor)),
@@ -2912,7 +2969,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         onTap: onTap,
         borderRadius: BorderRadius.circular(9),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 11),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(9),
@@ -3452,7 +3509,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ],
           if (isGuilloche) ...[
             const SizedBox(height: 8),
-            Text('Security Texture', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _subColor)),
+            Text('Security Texture', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _subColor)),
             const SizedBox(height: 6),
             Row(
               children: [
@@ -3504,7 +3561,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ),
           ],
           const SizedBox(height: 10),
-          Text('Studio Effects', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _subColor)),
+          Text('Studio Effects', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _subColor)),
           const SizedBox(height: 6),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -3796,7 +3853,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             onChangeEnd: (_) => _scheduleAutosave(),
           ),
           const SizedBox(height: 6),
-          Text('Blend Mode', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Blend Mode', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 6,
@@ -3815,7 +3872,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
           const SizedBox(height: 10),
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: _inputBg,
               borderRadius: BorderRadius.circular(10),
@@ -3827,7 +3884,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Align Layer on Canvas', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                    Text('Align Layer on Canvas', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
                     GestureDetector(
                       onTap: () {
                         setState(() {
@@ -3914,7 +3971,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
           const SizedBox(height: 8),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: _inputBg,
               borderRadius: BorderRadius.circular(10),
@@ -3923,7 +3980,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Nudge (5px)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                Text('Nudge (5px)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -4003,7 +4060,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
           const SizedBox(height: 12),
           const SizedBox(height: 12),
-          Text('Canvas Size Presets', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Canvas Size Presets', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 6,
@@ -4068,7 +4125,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ],
           ),
           const SizedBox(height: 12),
-          Text('Canvas Background', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Canvas Background', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 10,
@@ -4132,9 +4189,26 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           TextField(
             controller: _textController,
             textDirection: layer.isRtl ? TextDirection.rtl : TextDirection.ltr,
-            maxLines: 2,
-            decoration: const InputDecoration(
+            minLines: 1,
+            maxLines: null,
+            enableInteractiveSelection: true,
+            style: const TextStyle(fontSize: 16, height: 1.45),
+            decoration: InputDecoration(
               labelText: 'Edit Text (Urdu / English)',
+              suffixIcon: IconButton(
+                tooltip: 'Copy text',
+                icon: const Icon(Icons.copy_rounded, size: 19),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: layer.text));
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Text copied', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+              ),
             ),
             onChanged: (val) {
               setState(() => layer.text = val);
@@ -4145,7 +4219,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Font Family (${fontItems.length})', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+              Text('Font Family (${fontItems.length})', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
               TextButton.icon(
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -4252,7 +4326,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ],
           ),
           const SizedBox(height: 8),
-          Text('Text Alignment', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Text Alignment', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
           Row(
             children: [
@@ -4308,7 +4382,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           const SizedBox(height: 8),
           Row(
             children: [
-              Text('Script Direction:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+              Text('Script Direction:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
               const SizedBox(width: 8),
               _choicePill(
                 label: 'RTL (Urdu/Arabic)',
@@ -4336,7 +4410,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ],
           ),
           const SizedBox(height: 10),
-          Text('Text Color', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Text Color', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 10,
@@ -4370,7 +4444,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             }).toList(),
           ),
           const SizedBox(height: 10),
-          Text('Text Highlight Box', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Text Highlight Box', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 10,
@@ -4416,7 +4490,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               children: [
                 Row(
                   children: [
-                    Text('Text Stroke (Outline)', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _textColor)),
+                    Text('Text Stroke (Outline)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _textColor)),
                     const Spacer(),
                     if (layer.textStrokeWidth > 0.05)
                       _choicePill(
@@ -4479,7 +4553,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               children: [
                 Row(
                   children: [
-                    Text('Soft Text Shadow', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _textColor)),
+                    Text('Soft Text Shadow', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _textColor)),
                     const Spacer(),
                     if (layer.textShadowBlur > 0.05 ||
                         layer.textShadowOffsetX.abs() > 0.1 ||
@@ -4693,7 +4767,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSelectedLayerActionBar(layer),
-        Text('Shape Style', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+        Text('Shape Style', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
         const SizedBox(height: 6),
         Wrap(
           spacing: 6,
@@ -4733,7 +4807,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           onChangeEnd: (_) => _scheduleAutosave(),
         ),
         const SizedBox(height: 6),
-        Text('Fill Color', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+        Text('Fill Color', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
         const SizedBox(height: 8),
         Wrap(
           spacing: 10,
@@ -4758,7 +4832,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           }).toList(),
         ),
         const SizedBox(height: 10),
-        Text('Border Color', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _subColor)),
+        Text('Border Color', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
         const SizedBox(height: 8),
         Wrap(
           spacing: 10,

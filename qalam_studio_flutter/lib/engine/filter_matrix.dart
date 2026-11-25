@@ -306,7 +306,8 @@ img.Image applyGuillocheBlendToImage(
   double opacityPct = 88.0,
   String pattern = 'banknote',
 }) {
-  final rgba = src.numChannels == 4 ? src.clone() : src.convert(numChannels: 4);
+  final sized = src.width > 1600 ? img.copyResize(src, width: 1600) : src;
+  final rgba = sized.numChannels == 4 ? sized.clone() : sized.convert(numChannels: 4);
   final w = rgba.width;
   final h = rgba.height;
   final total = w * h;
@@ -407,10 +408,11 @@ Uint8List? _guillocheIsolate(GuillocheRequest req) {
   final decoded = img.decodeImage(bytes);
   if (decoded == null) return null;
   var work = decoded;
-  if (work.width > 1800 || work.height > 1800) {
-    work = work.width >= work.height
-        ? img.copyResize(work, width: 1800)
-        : img.copyResize(work, height: 1800);
+  if (work.width > 1600) {
+    work = img.copyResize(work, width: 1600);
+  }
+  if (work.height > 1600) {
+    work = img.copyResize(work, height: 1600);
   }
   if (req.removeWhiteTolerance > 0) {
     work = removeWhiteOnImage(work, req.removeWhiteTolerance);
@@ -453,10 +455,11 @@ Uint8List? _scanSignatureIsolate(ScanSignatureRequest req) {
   if (decoded == null) return null;
 
   var work = decoded;
-  if (work.width > 1500 || work.height > 1500) {
-    work = work.width >= work.height
-        ? img.copyResize(work, width: 1500)
-        : img.copyResize(work, height: 1500);
+  if (work.width > 1600) {
+    work = img.copyResize(work, width: 1600);
+  }
+  if (work.height > 1600) {
+    work = img.copyResize(work, height: 1600);
   }
   final rgba = work.numChannels == 4 ? work.clone() : work.convert(numChannels: 4);
   final w = rgba.width;
