@@ -646,7 +646,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                     ? const Color(0xFF1A1E26).withOpacity(0.94)
                     : Colors.white.withOpacity(0.96),
                 child: Container(
-                  height: 36,
+                  height: 40,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
@@ -674,7 +674,7 @@ class _LayerCanvasState extends State<LayerCanvas> {
                       InkWell(
                         onTap: _resetZoom,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                           child: Text(
                             '${(_currentZoom * 100).round()}%',
                             style: TextStyle(
@@ -723,11 +723,11 @@ class _LayerCanvasState extends State<LayerCanvas> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: SizedBox(
-          width: 34,
-          height: 34,
+          width: 40,
+          height: 40,
           child: Icon(
             icon,
-            size: 17,
+            size: 19,
             color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
           ),
         ),
