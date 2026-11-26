@@ -18,3 +18,13 @@
    flutter build apk --release --split-per-abi
    ```
 5. Output APKs will be generated at `build/app/outputs/flutter-apk/`.
+
+## APK size note
+
+The shipped APK is a universal APK (one file for all devices, currently
+about 31 MB, well under the 40 MB limit). If its size ever approaches the
+limit, building with `--split-per-abi` instead (`flutter build apk --release
+--split-per-abi`) produces one smaller APK per device architecture, roughly
+a third of the universal size each. The CI build (`build.sh` /
+`.github/workflows/build-apk.yml`) intentionally keeps the universal APK for
+now, so do not switch it to split builds unless size forces it.

@@ -172,8 +172,14 @@ class _LayerCanvasState extends State<LayerCanvas> {
       ui.decodeImageFromList(bytes, (ui.Image result) {
         if (!completer.isCompleted) completer.complete(result);
       });
-      final decoded = await completer.future;
+      // decodeImageFromList has no error callback, so a corrupt image
+      // never completes the callback. Time out instead of hanging
+      // forever with the layer stuck in _loadingImageKeys.
+      final decoded = await completer.future.timeout(
+        const Duration(seconds: 10),
+      );
       if (!mounted) {
+        _loadingImageKeys.remove(key);
         decoded.dispose();
         return;
       }

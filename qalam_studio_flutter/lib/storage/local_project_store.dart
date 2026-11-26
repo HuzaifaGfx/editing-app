@@ -46,7 +46,23 @@ class LocalProjectStore {
   Future<List<DesignProject>> loadAllProjects() async {
     final db = await database;
     final rows = await db.query('projects', orderBy: 'updated_at DESC');
-    return rows.map((r) => DesignProject.decode(r['payload'] as String)).toList();
+    // One corrupt saved project must not hide the whole library: decode
+    // each row on its own and drop only the rows that fail to decode.
+    final projects = <DesignProject>[];
+    for (final row in rows) {
+      try {
+        projects.add(DesignProject.decode(row['payload'] as String));
+      } catch (_) {
+        try {
+          await db.delete(
+            'projects',
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+        } catch (_) {}
+      }
+    }
+    return projects;
   }
 
   Future<void> deleteProject(String id) async {

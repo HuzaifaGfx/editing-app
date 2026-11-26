@@ -24,10 +24,16 @@ import 'image_crop_sheet.dart';
 import 'new_project_sheet.dart';
 import 'pdf_import.dart';
 
-Uint8List? _encodeJpgFromPngIsolate(Uint8List pngBytes) {
-  final decoded = img.decodePng(pngBytes);
+class _JpgEncodeRequest {
+  const _JpgEncodeRequest(this.pngBytes, this.quality);
+  final Uint8List pngBytes;
+  final int quality;
+}
+
+Uint8List? _encodeJpgFromPngIsolate(_JpgEncodeRequest request) {
+  final decoded = img.decodePng(request.pngBytes);
   if (decoded == null) return null;
-  return Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
+  return Uint8List.fromList(img.encodeJpg(decoded, quality: request.quality));
 }
 
 class StudioScreen extends StatefulWidget {
@@ -60,6 +66,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   final TextEditingController _sigTextController = TextEditingController();
 
   List<DesignProject> _projects = [];
+  String _projectSearchQuery = '';
+  List<DesignProject> get _filteredProjects {
+    final q = _projectSearchQuery.trim().toLowerCase();
+    if (q.isEmpty) return _projects;
+    return _projects.where((p) => p.name.toLowerCase().contains(q)).toList();
+  }
+
   late DesignProject _project;
   int _pageIndex = 0;
   String? _selectedLayerId;
@@ -1057,7 +1070,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     }
     setState(() {
       _project = restored;
-      _pageIndex = snap.$1.clamp(0, restored.pages.length - 1);
+      _pageIndex = restored.pages.isEmpty
+          ? 0
+          : snap.$1.clamp(0, restored.pages.length - 1);
       final stillExists = _page.layers.any((l) => l.id == _selectedLayerId);
       if (!stillExists) _selectedLayerId = null;
       final cur = _activeLayer;
@@ -1422,7 +1437,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
 
   Future<Uint8List> _buildProjectPdfBytes(double scale) async {
     final doc = pw.Document();
-    for (final pg in _project.pages) {
+    final failedPages = <int>[];
+    for (var i = 0; i < _project.pages.length; i++) {
+      final pg = _project.pages[i];
       final pgBytes = await renderPagePngBytes(
         pg,
         pixelRatio: scale,
@@ -1438,7 +1455,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
           ),
         );
+      } else {
+        failedPages.add(i + 1);
       }
+    }
+    // Never hand back a silently incomplete (or empty) PDF as a success.
+    if (failedPages.isNotEmpty) {
+      throw Exception('Could not render page(s): ${failedPages.join(', ')}');
+    }
+    if (_project.pages.isEmpty) {
+      throw Exception('Could not render page(s): project has no pages');
     }
     return doc.save();
   }
@@ -1450,6 +1476,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     required bool shareOnly,
     required bool asPdf,
     bool printPdf = false,
+    int jpgQuality = 85,
   }) async {
     if (asPdf) {
       final safeProj = _safeExportFilePart(_project.name);
@@ -1551,7 +1578,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         }
         final Uint8List outBytes;
         if (format == 'jpg') {
-          final jpg = await compute(_encodeJpgFromPngIsolate, pngBytes);
+          final jpg = await compute(
+            _encodeJpgFromPngIsolate,
+            _JpgEncodeRequest(pngBytes, jpgQuality),
+          );
           if (jpg == null || jpg.isEmpty) {
             throw Exception('JPG encoding failed');
           }
@@ -1591,6 +1621,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     String format = 'png';
     double scale = 2.0;
     bool transparent = false;
+    int jpgQuality = 85;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -1699,6 +1730,25 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         ],
                       ],
                     ),
+                    if (format == 'jpg') ...[
+                      const SizedBox(height: 14),
+                      Text('JPG Quality', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          for (final q in [(95, 'High 95'), (85, 'Balanced 85'), (70, 'Compact 70')]) ...[
+                            Expanded(
+                              child: _optionTile(
+                                label: q.$2,
+                                selected: jpgQuality == q.$1,
+                                onTap: () => setSheetState(() => jpgQuality = q.$1),
+                              ),
+                            ),
+                            if (q.$1 != 70) const SizedBox(width: 8),
+                          ],
+                        ],
+                      ),
+                    ],
                     if (format == 'png') ...[
                       const SizedBox(height: 8),
                       Container(
@@ -1735,6 +1785,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             transparent: transparent,
                             shareOnly: false,
                             asPdf: isPdf,
+                            jpgQuality: jpgQuality,
                           );
                         },
                         icon: const Icon(Icons.save_alt_rounded, size: 19),
@@ -1761,6 +1812,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             transparent: transparent,
                             shareOnly: true,
                             asPdf: isPdf,
+                            jpgQuality: jpgQuality,
                           );
                         },
                         icon: const Icon(Icons.share_outlined, size: 18),
@@ -3143,6 +3195,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     if (!l.isCanvasBackground) ...[
                       _compactLayerIcon(Icons.arrow_upward_rounded, 'Bring Forward', () => _moveLayerOrder(l, 1)),
                       _compactLayerIcon(Icons.arrow_downward_rounded, 'Send Backward', () => _moveLayerOrder(l, -1)),
+                      _compactLayerIcon(Icons.vertical_align_top_rounded, 'Bring to Front', () => _moveLayerOrder(l, 999)),
+                      _compactLayerIcon(Icons.vertical_align_bottom_rounded, 'Send to Back', () => _moveLayerOrder(l, -999)),
                     ],
                     if (!(l.locked && l.isCanvasBackground))
                       _compactLayerIcon(Icons.edit_outlined, 'Rename Layer', () => _renameLayerDialog(l)),
@@ -6691,7 +6745,39 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _textColor),
         ),
         const SizedBox(height: 10),
-        ..._projects.map((proj) {
+        TextField(
+          onChanged: (v) => setState(() => _projectSearchQuery = v),
+          decoration: InputDecoration(
+            hintText: 'Search projects...',
+            prefixIcon: const Icon(Icons.search_rounded, size: 18),
+            filled: true,
+            fillColor: _inputBg,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(11),
+              borderSide: BorderSide(color: _borderColor),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(11),
+              borderSide: BorderSide(color: _borderColor),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(11),
+              borderSide: BorderSide(color: _amber),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (_filteredProjects.isEmpty && _projects.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'No projects match "$_projectSearchQuery".',
+              style: TextStyle(fontSize: 13, color: _subColor),
+            ),
+          ),
+        ..._filteredProjects.map((proj) {
           final isCurrent = proj.id == _project.id;
           final thumbBytes = _projectThumbCache[proj.id];
           return Padding(

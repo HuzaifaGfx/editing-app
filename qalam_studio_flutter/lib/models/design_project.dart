@@ -9,6 +9,38 @@ typedef ImportedImageWriter = Future<String?> Function(
   String prefix,
 );
 
+/// Lenient JSON helpers: imported / hand-edited project files often carry
+/// numbers as strings (e.g. "40" instead of 40) or omit ids. These accept
+/// num-or-String and fall back instead of throwing.
+double _asDouble(dynamic raw, double fallback) {
+  if (raw is num) return raw.toDouble();
+  if (raw is String) return double.tryParse(raw.trim()) ?? fallback;
+  return fallback;
+}
+
+int _asInt(dynamic raw, int fallback) {
+  if (raw is num) return raw.toInt();
+  if (raw is String) return int.tryParse(raw.trim()) ?? fallback;
+  return fallback;
+}
+
+bool _asBool(dynamic raw, bool fallback) {
+  if (raw is bool) return raw;
+  if (raw is num) return raw != 0;
+  if (raw is String) {
+    final v = raw.trim().toLowerCase();
+    if (v == 'true' || v == '1' || v == 'yes') return true;
+    if (v == 'false' || v == '0' || v == 'no') return false;
+  }
+  return fallback;
+}
+
+String _asString(dynamic raw, String fallback) {
+  if (raw == null) return fallback;
+  if (raw is String) return raw;
+  return raw.toString();
+}
+
 Color parseColorAny(dynamic raw, Color fallback) {
   if (raw is int) return Color(raw);
   if (raw is num) return Color(raw.toInt());
@@ -20,6 +52,12 @@ Color parseColorAny(dynamic raw, Color fallback) {
       if (hex.length == 3) {
         hex = '${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}';
       }
+      if (hex.length == 4) {
+        // #RGBA -> #AARRGGBB.
+        hex =
+            '${hex[3]}${hex[3]}${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}';
+      }
+      // #RRGGBB gets an opaque alpha; #AARRGGBB (length 8) is used as-is.
       if (hex.length == 6) hex = 'ff$hex';
       final val = int.tryParse(hex, radix: 16);
       if (val != null) return Color(val);
@@ -143,22 +181,22 @@ class FilterSettings {
       };
 
   factory FilterSettings.fromJson(Map<String, dynamic> json) => FilterSettings(
-        brightness: (json['brightness'] ?? 1.0).toDouble(),
-        contrast: (json['contrast'] ?? 1.0).toDouble(),
-        saturate: (json['saturate'] ?? 1.0).toDouble(),
-        sepia: (json['sepia'] ?? 0.0).toDouble(),
-        grayscale: (json['grayscale'] ?? 0.0).toDouble(),
-        removeWhite: (json['removeWhite'] ?? 0.0).toDouble(),
-        blackAndWhite: json['blackAndWhite'] ?? false,
-        guilloche: json['guilloche'] ?? false,
-        guillocheContrast: (json['guillocheContrast'] ?? 13.0).toDouble(),
-        guillocheBend: (json['guillocheBend'] ?? 3.0).toDouble(),
-        guillocheOpacity: (json['guillocheOpacity'] ?? 88.0).toDouble(),
-        guillochePattern: (json['guillochePattern'] ?? 'banknote').toString(),
-        softGlow: (json['softGlow'] ?? 0.0).toDouble(),
-        rosyTint: (json['rosyTint'] ?? 0.0).toDouble(),
-        skinSmooth: (json['skinSmooth'] ?? 0.0).toDouble(),
-        portraitBlur: (json['portraitBlur'] ?? 0.0).toDouble(),
+        brightness: _asDouble(json['brightness'], 1.0),
+        contrast: _asDouble(json['contrast'], 1.0),
+        saturate: _asDouble(json['saturate'], 1.0),
+        sepia: _asDouble(json['sepia'], 0.0),
+        grayscale: _asDouble(json['grayscale'], 0.0),
+        removeWhite: _asDouble(json['removeWhite'], 0.0),
+        blackAndWhite: _asBool(json['blackAndWhite'], false),
+        guilloche: _asBool(json['guilloche'], false),
+        guillocheContrast: _asDouble(json['guillocheContrast'], 13.0),
+        guillocheBend: _asDouble(json['guillocheBend'], 3.0),
+        guillocheOpacity: _asDouble(json['guillocheOpacity'], 88.0),
+        guillochePattern: _asString(json['guillochePattern'], 'banknote'),
+        softGlow: _asDouble(json['softGlow'], 0.0),
+        rosyTint: _asDouble(json['rosyTint'], 0.0),
+        skinSmooth: _asDouble(json['skinSmooth'], 0.0),
+        portraitBlur: _asDouble(json['portraitBlur'], 0.0),
       );
 }
 
@@ -347,35 +385,38 @@ class DesignLayer {
       (t) => t.name == typeStr,
       orElse: () => LayerType.text,
     );
-    final isRtlVal = json['isRtl'] ?? (json['direction'] == 'rtl');
+    final isRtlVal = _asBool(json['isRtl'], json['direction'] == 'rtl');
     final rawFit = json['objectFit'];
-    final fit = rawFit is int
-        ? BoxFit.values[rawFit.clamp(0, BoxFit.values.length - 1)]
+    final fitIdx = rawFit is int
+        ? rawFit
+        : (rawFit is String ? int.tryParse(rawFit.trim()) ?? -1 : -1);
+    final fit = fitIdx >= 0
+        ? BoxFit.values[fitIdx.clamp(0, BoxFit.values.length - 1)]
         : BoxFit.cover;
     final filtersMap = json['filters'] is Map
         ? Map<String, dynamic>.from(json['filters'] as Map)
         : <String, dynamic>{};
 
     return DesignLayer(
-      id: (json['id'] ?? '').toString(),
-      name: (json['name'] ?? 'Layer').toString(),
+      id: _asString(json['id'], ''),
+      name: _asString(json['name'], 'Layer'),
       type: layerType,
-      x: (json['x'] ?? 0).toDouble(),
-      y: (json['y'] ?? 0).toDouble(),
-      width: (json['width'] ?? 240).toDouble(),
-      height: (json['height'] ?? 160).toDouble(),
-      rotation: (json['rotation'] ?? 0).toDouble(),
-      opacity: (json['opacity'] ?? 1.0).toDouble(),
+      x: _asDouble(json['x'], 0),
+      y: _asDouble(json['y'], 0),
+      width: _asDouble(json['width'], 240),
+      height: _asDouble(json['height'], 160),
+      rotation: _asDouble(json['rotation'], 0),
+      opacity: _asDouble(json['opacity'], 1.0),
       blendMode: parseBlendModeAny(json['blendMode']),
-      visible: json['visible'] ?? true,
-      locked: json['locked'] ?? false,
-      isCanvasBackground: json['isCanvasBackground'] ?? false,
-      text: (json['text'] ?? '').toString(),
+      visible: _asBool(json['visible'], true),
+      locked: _asBool(json['locked'], false),
+      isCanvasBackground: _asBool(json['isCanvasBackground'], false),
+      text: _asString(json['text'], ''),
       isRtl: isRtlVal,
-      fontFamily: (json['fontFamily'] ?? 'PlusJakartaSans').toString(),
-      fontSize: (json['fontSize'] ?? 32).toDouble(),
-      fontWeight: ((json['fontWeight'] ?? 400) as num).toInt(),
-      lineHeight: (json['lineHeight'] ?? 1.4).toDouble(),
+      fontFamily: _asString(json['fontFamily'], 'PlusJakartaSans'),
+      fontSize: _asDouble(json['fontSize'], 32),
+      fontWeight: _asInt(json['fontWeight'], 400),
+      lineHeight: _asDouble(json['lineHeight'], 1.4),
       textColor: parseColorAny(
         json['textColor'] ?? json['color'] ?? json['fillColor'],
         const Color(0xFF0F172A),
@@ -390,32 +431,34 @@ class DesignLayer {
         json['textBgColor'] ?? json['backgroundColor'],
         const Color(0x00000000),
       ),
-      letterSpacing: (json['letterSpacing'] ?? 0.0).toDouble(),
+      letterSpacing: _asDouble(json['letterSpacing'], 0.0),
       textStrokeColor: parseColorAny(
         json['textStrokeColor'],
         const Color(0xFF000000),
       ),
-      textStrokeWidth: (json['textStrokeWidth'] ?? 0.0).toDouble(),
+      textStrokeWidth: _asDouble(json['textStrokeWidth'], 0.0),
       textShadowColor: parseColorAny(
         json['textShadowColor'],
         const Color(0x80000000),
       ),
-      textShadowBlur: (json['textShadowBlur'] ?? 0.0).toDouble(),
-      textShadowOffsetX: (json['textShadowOffsetX'] ?? 0.0).toDouble(),
-      textShadowOffsetY: (json['textShadowOffsetY'] ?? 0.0).toDouble(),
-      localImagePath: json['localImagePath'] as String?,
-      aspectLocked: json['aspectLocked'] ?? true,
+      textShadowBlur: _asDouble(json['textShadowBlur'], 0.0),
+      textShadowOffsetX: _asDouble(json['textShadowOffsetX'], 0.0),
+      textShadowOffsetY: _asDouble(json['textShadowOffsetY'], 0.0),
+      localImagePath: json['localImagePath']?.toString(),
+      aspectLocked: _asBool(json['aspectLocked'], true),
       objectFit: fit,
-      borderRadius: (json['borderRadius'] ?? 0).toDouble(),
-      shapeKind: (json['shapeKind'] ?? 'rect').toString(),
+      borderRadius: _asDouble(json['borderRadius'], 0),
+      shapeKind: _asString(json['shapeKind'], 'rect'),
       shapeStrokeColor: parseColorAny(
         json['shapeStrokeColor'] ?? json['strokeColor'],
         const Color(0xFFF59E0B),
       ),
-      shapeStrokeWidth:
-          ((json['shapeStrokeWidth'] ?? json['strokeWidth']) ?? 0.0).toDouble(),
-      flipX: json['flipX'] ?? false,
-      flipY: json['flipY'] ?? false,
+      shapeStrokeWidth: _asDouble(
+        json['shapeStrokeWidth'] ?? json['strokeWidth'],
+        0.0,
+      ),
+      flipX: _asBool(json['flipX'], false),
+      flipY: _asBool(json['flipY'], false),
       filters: FilterSettings.fromJson(filtersMap),
     );
   }
@@ -448,13 +491,17 @@ class DocumentPage {
       };
 
   factory DocumentPage.fromJson(Map<String, dynamic> json) => DocumentPage(
-        id: json['id'],
-        title: json['title'],
-        width: (json['width'] ?? 900).toDouble(),
-        height: (json['height'] ?? 1200).toDouble(),
-        backgroundColor: Color(json['backgroundColor'] ?? 0xFFFAF9F6),
+        id: _asString(json['id'], ''),
+        title: _asString(json['title'], ''),
+        width: _asDouble(json['width'], 900),
+        height: _asDouble(json['height'], 1200),
+        backgroundColor: parseColorAny(
+          json['backgroundColor'],
+          const Color(0xFFFAF9F6),
+        ),
         layers: (json['layers'] as List? ?? [])
-            .map((e) => DesignLayer.fromJson(e))
+            .whereType<Map>()
+            .map((e) => DesignLayer.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
       );
 }
@@ -482,11 +529,12 @@ class DesignProject {
   factory DesignProject.decode(String raw) {
     final map = jsonDecode(raw) as Map<String, dynamic>;
     return DesignProject(
-      id: map['id'],
-      name: map['name'],
-      updatedAt: map['updatedAt'] ?? 0,
+      id: _asString(map['id'], ''),
+      name: _asString(map['name'], 'Untitled'),
+      updatedAt: _asInt(map['updatedAt'], 0),
       pages: (map['pages'] as List? ?? [])
-          .map((p) => DocumentPage.fromJson(p))
+          .whereType<Map>()
+          .map((p) => DocumentPage.fromJson(Map<String, dynamic>.from(p)))
           .toList(),
     );
   }
@@ -564,8 +612,8 @@ Future<DesignProject> parseImportedProjectBundle(
     pages.add(DocumentPage(
       id: (pgRaw['id'] ?? 'pg_$pi').toString(),
       title: (pgRaw['title'] ?? 'Page ${pi + 1}').toString(),
-      width: (pgRaw['width'] ?? 900).toDouble(),
-      height: (pgRaw['height'] ?? 1200).toDouble(),
+      width: _asDouble(pgRaw['width'], 900),
+      height: _asDouble(pgRaw['height'], 1200),
       backgroundColor:
           parseColorAny(pgRaw['backgroundColor'], const Color(0xFFFAF9F6)),
       layers: layers,
