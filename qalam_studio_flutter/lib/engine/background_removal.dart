@@ -21,10 +21,8 @@ library;
 
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:google_mlkit_selfie_segmentation/google_mlkit_selfie_segmentation.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
