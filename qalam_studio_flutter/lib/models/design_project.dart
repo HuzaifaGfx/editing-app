@@ -115,9 +115,9 @@ class FilterSettings {
   bool blackAndWhite;
   bool guilloche;
   double guillocheContrast; // 0..25 (% contrast boost, default 13)
-  double guillocheBend;     // 0..6 (px contour bend, default 3)
-  double guillocheOpacity;  // 75..100 (% skin opacity over paper, default 88)
-  String guillochePattern;  // 'banknote' | 'rosette' | 'mesh'
+  double guillocheBend; // 0..6 (px contour bend, default 3)
+  double guillocheOpacity; // 75..100 (% skin opacity over paper, default 88)
+  String guillochePattern; // 'banknote' | 'rosette' | 'mesh'
   double softGlow;
   double rosyTint;
   double skinSmooth;
@@ -249,6 +249,13 @@ class DesignLayer {
   Uint8List? processedWhiteRemovedBytes;
   Uint8List? processedGuillocheBytes;
 
+  // Serialized AI outputs (file paths, so undo/redo snapshots and app
+  // restarts keep them for free — the path lives inside the undo JSON).
+  // Never overwrite the original [localImagePath]; the chain is
+  // original -> enhanced -> background-removed.
+  String? backgroundRemovedPath;
+  String? enhancedPath;
+
   DesignLayer({
     required this.id,
     required this.name,
@@ -291,6 +298,8 @@ class DesignLayer {
     FilterSettings? filters,
     this.processedWhiteRemovedBytes,
     this.processedGuillocheBytes,
+    this.backgroundRemovedPath,
+    this.enhancedPath,
   }) : filters = filters ?? FilterSettings();
 
   DesignLayer cloneWithNewId(String newId) => DesignLayer(
@@ -335,6 +344,8 @@ class DesignLayer {
         filters: filters.copy(),
         processedWhiteRemovedBytes: processedWhiteRemovedBytes,
         processedGuillocheBytes: processedGuillocheBytes,
+        backgroundRemovedPath: backgroundRemovedPath,
+        enhancedPath: enhancedPath,
       );
 
   Map<String, dynamic> toJson() => {
@@ -376,6 +387,8 @@ class DesignLayer {
         'shapeStrokeWidth': shapeStrokeWidth,
         'flipX': flipX,
         'flipY': flipY,
+        'backgroundRemovedPath': backgroundRemovedPath,
+        'enhancedPath': enhancedPath,
         'filters': filters.toJson(),
       };
 
@@ -459,6 +472,8 @@ class DesignLayer {
       ),
       flipX: _asBool(json['flipX'], false),
       flipY: _asBool(json['flipY'], false),
+      backgroundRemovedPath: json['backgroundRemovedPath']?.toString(),
+      enhancedPath: json['enhancedPath']?.toString(),
       filters: FilterSettings.fromJson(filtersMap),
     );
   }

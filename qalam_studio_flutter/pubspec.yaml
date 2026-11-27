@@ -1,7 +1,7 @@
 name: qalam_studio
 description: Offline-first Android graphic design, Urdu/English document editor, layer overlay, and batch studio.
 publish_to: 'none'
-version: 1.0.26+27
+version: 1.0.27+28
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -14,6 +14,10 @@ dependencies:
   path: ^1.9.0
   image_picker: ^1.1.2
   google_mlkit_document_scanner: ^0.3.0
+  # Selfie segmentation 0.9.0 is the NEWEST line that builds with
+  # compileSdk 34 (CI Flutter 3.22.3): 0.10.0+ needs compileSdk 35 and
+  # 1.0.x needs compileSdk 36 + Flutter >=3.44. Caret ^0.9.0 stays <0.10.0.
+  google_mlkit_selfie_segmentation: ^0.9.0
   image: ^4.2.0
   pdf: ^3.11.1
   printing: ^5.13.1

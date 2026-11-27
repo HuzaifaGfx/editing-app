@@ -15,6 +15,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
+import '../engine/background_removal.dart';
+import '../engine/enhance.dart';
 import '../engine/filter_matrix.dart';
 import '../engine/layer_canvas.dart';
 import '../main.dart';
@@ -43,22 +45,39 @@ class StudioScreen extends StatefulWidget {
   State<StudioScreen> createState() => _StudioScreenState();
 }
 
-class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver {
+class _StudioScreenState extends State<StudioScreen>
+    with WidgetsBindingObserver {
   static const Color _brandNib = Color(0xFFF59E0B);
-  Color get _amber => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
-  Color get _inkPrimary => _brandNib;
+  Color get _amber =>
+      _isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
+  Color get _inkPrimary => _amber;
   Color get _onInkPrimary => const Color(0xFF1C1917);
-  Color get _brandNibInk => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
+  Color get _brandNibInk =>
+      _isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
   Color get _brandNibOnInk => const Color(0xFF1C1917);
-  Color get _amberTintBg => _isDark ? const Color(0xFFF59E0B).withOpacity(0.18) : const Color(0xFFFFF6E0);
-  Color get _amberTintBorder => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
-  Color get _scannerTeal => _isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
-  Color get _scannerTealBg => _isDark ? const Color(0xFF0D9488).withOpacity(0.18) : const Color(0xFFF0FDFA);
-  Color get _scannerTealBorder => _isDark ? const Color(0xFF2DD4BF).withOpacity(0.36) : const Color(0xFF99F6E4);
-  Color get _shareSky => _isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
-  Color get _shareSkyBg => _isDark ? const Color(0xFF0284C7).withOpacity(0.18) : const Color(0xFFE0F2FE);
-  Color get _shareSkyBorder => _isDark ? const Color(0xFF38BDF8).withOpacity(0.36) : const Color(0xFFBAE6FD);
-  static const MethodChannel _mediaChannel = MethodChannel('com.qalam.studio/media');
+  Color get _amberTintBg => _isDark
+      ? const Color(0xFFF59E0B).withOpacity(0.18)
+      : const Color(0xFFFFF6E0);
+  Color get _amberTintBorder =>
+      _isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
+  Color get _scannerTeal =>
+      _isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
+  Color get _scannerTealBg => _isDark
+      ? const Color(0xFF0D9488).withOpacity(0.18)
+      : const Color(0xFFF0FDFA);
+  Color get _scannerTealBorder => _isDark
+      ? const Color(0xFF2DD4BF).withOpacity(0.36)
+      : const Color(0xFF99F6E4);
+  Color get _shareSky =>
+      _isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
+  Color get _shareSkyBg => _isDark
+      ? const Color(0xFF0284C7).withOpacity(0.18)
+      : const Color(0xFFE0F2FE);
+  Color get _shareSkyBorder => _isDark
+      ? const Color(0xFF38BDF8).withOpacity(0.36)
+      : const Color(0xFFBAE6FD);
+  static const MethodChannel _mediaChannel =
+      MethodChannel('com.qalam.studio/media');
 
   final ImagePicker _picker = ImagePicker();
   final GlobalKey _canvasExportKey = GlobalKey();
@@ -67,7 +86,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
 
   List<DesignProject> _projects = [];
   String _projectSearchQuery = '';
-  final TextEditingController _projectSearchController = TextEditingController();
+  final TextEditingController _projectSearchController =
+      TextEditingController();
   String _projectSort = 'newest'; // 'newest' | 'oldest' | 'name'
   List<DesignProject> get _filteredProjects {
     final q = _projectSearchQuery.trim().toLowerCase();
@@ -80,7 +100,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         list.sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
         break;
       case 'name':
-        list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        list.sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
         break;
       case 'newest':
       default:
@@ -98,8 +119,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   (int, String)? _studioEntrySnapshot;
   int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Effects, 3=Layers
   bool _sheetExpanded = false;
-  bool _sheetAutoExpanded = false; // auto-expand the inspector sheet once, on first studio open
-  bool _sheetUserCollapsed = false; // user deliberately collapsed the sheet; stop auto-opening on layer select
+  bool _sheetAutoExpanded =
+      false; // auto-expand the inspector sheet once, on first studio open
+  bool _sheetUserCollapsed =
+      false; // user deliberately collapsed the sheet; stop auto-opening on layer select
   bool _sheetTall = false;
   Timer? _autosaveTimer;
   Timer? _signSealAutosaveTimer;
@@ -113,6 +136,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   int _activeScanIdx = 0;
   int _whiteRemovalSeq = 0;
   int _guillocheSeq = 0;
+  int _bgRemovalSeq = 0;
+  int _enhanceSeq = 0;
   bool _showLaunchSplash = true;
   double _launchSplashOpacity = 1.0;
   final List<(int, String)> _undoStack = [];
@@ -181,13 +206,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _cardBg => _isDark ? const Color(0xFF1E222B) : Colors.white;
   Color get _panelBg => _isDark ? const Color(0xFF1E222B) : Colors.white;
-  Color get _inputBg => _isDark ? const Color(0xFF12141A) : const Color(0xFFFAF8F4);
-  Color get _chipBg => _isDark ? const Color(0xFF262B36) : const Color(0xFFF3F0E9);
-  Color get _borderColor => _isDark ? const Color(0xFF2C313C) : const Color(0xFFE7E2D8);
-  Color get _textColor => _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF1C1917);
-  Color get _subColor => _isDark ? const Color(0xFF94A3B8) : const Color(0xFF57534E);
-  Color get _mutedColor => _isDark ? const Color(0xFF64748B) : const Color(0xFF78716C);
-  Color get _accentText => _isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
+  Color get _inputBg =>
+      _isDark ? const Color(0xFF12141A) : const Color(0xFFFAF8F4);
+  Color get _chipBg =>
+      _isDark ? const Color(0xFF262B36) : const Color(0xFFF3F0E9);
+  Color get _borderColor =>
+      _isDark ? const Color(0xFF2C313C) : const Color(0xFFE7E2D8);
+  Color get _textColor =>
+      _isDark ? const Color(0xFFF8FAFC) : const Color(0xFF1C1917);
+  Color get _subColor =>
+      _isDark ? const Color(0xFF94A3B8) : const Color(0xFF57534E);
+  Color get _mutedColor =>
+      _isDark ? const Color(0xFF64748B) : const Color(0xFF78716C);
+  Color get _accentText =>
+      _isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
 
   @override
   void initState() {
@@ -197,7 +229,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     _loadSavedProjects();
     _loadSignSealDraft();
     _loadInstalledCustomFonts();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkQuickTourOnFirstLaunch());
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _checkQuickTourOnFirstLaunch());
     Future<void>.delayed(const Duration(milliseconds: 1400), () {
       if (!mounted) return;
       setState(() => _launchSplashOpacity = 0.0);
@@ -275,7 +308,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     decoration: BoxDecoration(
                       color: isDark ? const Color(0xFF1E222B) : Colors.white,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: borderCol.withOpacity(0.75), width: 1.4),
+                      border: Border.all(
+                          color: borderCol.withOpacity(0.75), width: 1.4),
                       boxShadow: [
                         BoxShadow(
                           blurRadius: 20,
@@ -303,9 +337,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                       ),
                                     )
                                   : Icon(
-                                      isError ? Icons.error_outline_rounded : Icons.check_circle_rounded,
+                                      isError
+                                          ? Icons.error_outline_rounded
+                                          : Icons.check_circle_rounded,
                                       key: ValueKey(_saveHudPhase),
-                                      color: isError ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                                      color: isError
+                                          ? const Color(0xFFEF4444)
+                                          : const Color(0xFF10B981),
                                       size: 24,
                                     ),
                             ),
@@ -322,7 +360,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                     style: TextStyle(
                                       fontSize: 13.5,
                                       fontWeight: FontWeight.w800,
-                                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                      color: isDark
+                                          ? Colors.white
+                                          : const Color(0xFF0F172A),
                                     ),
                                   ),
                                   if (_saveHudSubtitle.isNotEmpty)
@@ -332,7 +372,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         fontSize: 11,
-                                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                                        color: isDark
+                                            ? const Color(0xFF94A3B8)
+                                            : const Color(0xFF475569),
                                       ),
                                     ),
                                 ],
@@ -390,7 +432,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       ]);
       final res = results[0] as T;
       if (mounted) {
-        _showSaveHud(phase: 'saved', title: savedTitle, subtitle: savedSubtitle);
+        _showSaveHud(
+            phase: 'saved', title: savedTitle, subtitle: savedSubtitle);
         _scheduleHideSaveHud(1450);
       }
       return res;
@@ -425,7 +468,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isScrollControlled: true,
       backgroundColor: _panelBg,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
         return SafeArea(
@@ -471,8 +514,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Qalamix — Quick Guide', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _textColor)),
-                          Text('Urdu Nastaliq & Business Design Suite (Offline)', style: TextStyle(fontSize: 11.5, color: _subColor)),
+                          Text('Qalamix — Quick Guide',
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  color: _textColor)),
+                          Text(
+                              'Urdu Nastaliq & Business Design Suite (Offline)',
+                              style:
+                                  TextStyle(fontSize: 11.5, color: _subColor)),
                         ],
                       ),
                     ),
@@ -542,10 +592,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     style: FilledButton.styleFrom(
                       backgroundColor: _inkPrimary,
                       foregroundColor: _onInkPrimary,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Start Designing', style: TextStyle(fontWeight: FontWeight.w700)),
+                    child: const Text('Start Designing',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
                   ),
                 ),
               ],
@@ -556,7 +608,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     );
   }
 
-  Widget _tourTile(IconData icon, String title, String subtitle, {required VoidCallback onTap}) {
+  Widget _tourTile(IconData icon, String title, String subtitle,
+      {required VoidCallback onTap}) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -577,9 +630,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _textColor)),
+                  Text(title,
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: _textColor)),
                   const SizedBox(height: 2),
-                  Text(subtitle, style: TextStyle(fontSize: 11.5, color: _subColor, height: 1.35)),
+                  Text(subtitle,
+                      style: TextStyle(
+                          fontSize: 11.5, color: _subColor, height: 1.35)),
                 ],
               ),
             ),
@@ -641,8 +700,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       final docsDir = await getApplicationDocumentsDirectory();
       final imgDir = Directory(p.join(docsDir.path, 'qalamix_images'));
       if (!imgDir.existsSync()) imgDir.createSync(recursive: true);
-      final ext = p.extension(sourcePath).isEmpty ? '.jpg' : p.extension(sourcePath);
-      final destPath = p.join(imgDir.path, 'img_${DateTime.now().microsecondsSinceEpoch}$ext');
+      final ext =
+          p.extension(sourcePath).isEmpty ? '.jpg' : p.extension(sourcePath);
+      final destPath = p.join(
+          imgDir.path, 'img_${DateTime.now().microsecondsSinceEpoch}$ext');
       await File(sourcePath).copy(destPath);
       return destPath;
     } catch (_) {
@@ -657,8 +718,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         if (l.type == LayerType.image &&
             l.localImagePath != null &&
             File(l.localImagePath!).existsSync()) {
-          if (l.filters.removeWhite > 0 && l.processedWhiteRemovedBytes == null) {
-            final bytes = await removeWhiteBackgroundOffline(l.localImagePath!, l.filters.removeWhite);
+          if (l.filters.removeWhite > 0 &&
+              l.processedWhiteRemovedBytes == null) {
+            final bytes = await removeWhiteBackgroundOffline(
+                l.localImagePath!, l.filters.removeWhite);
             if (bytes != null) {
               l.processedWhiteRemovedBytes = bytes;
               changed = true;
@@ -732,7 +795,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     for (final proj in list) {
       if (!mounted) return;
       final cachedStamp = _projectThumbStamp[proj.id];
-      if (_projectThumbCache.containsKey(proj.id) && cachedStamp == proj.updatedAt) {
+      if (_projectThumbCache.containsKey(proj.id) &&
+          cachedStamp == proj.updatedAt) {
         continue;
       }
       await _generateAndCacheProjectThumb(proj);
@@ -743,13 +807,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     if (proj.pages.isEmpty || _projectThumbGenerating.contains(proj.id)) return;
     _projectThumbGenerating.add(proj.id);
     try {
-      final bytes = await renderPageThumbnailBytes(proj.pages.first, maxSide: 180);
+      final bytes =
+          await renderPageThumbnailBytes(proj.pages.first, maxSide: 180);
       if (bytes == null || bytes.isEmpty) return;
       final docsDir = await getApplicationDocumentsDirectory();
       final thumbDir = Directory(p.join(docsDir.path, 'qalamix_thumbs'));
       if (!thumbDir.existsSync()) thumbDir.createSync(recursive: true);
       await File(p.join(thumbDir.path, '${proj.id}.png')).writeAsBytes(bytes);
-      await File(p.join(thumbDir.path, '${proj.id}.stamp')).writeAsString('${proj.updatedAt}');
+      await File(p.join(thumbDir.path, '${proj.id}.stamp'))
+          .writeAsString('${proj.updatedAt}');
       if (!mounted) return;
       setState(() {
         _projectThumbCache[proj.id] = bytes;
@@ -774,7 +840,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     } catch (_) {}
   }
 
-  void _scheduleAutosave({Duration delay = const Duration(milliseconds: 1200)}) {
+  void _scheduleAutosave(
+      {Duration delay = const Duration(milliseconds: 1200)}) {
     _autosaveTimer?.cancel();
     _autosaveTimer = Timer(delay, () {
       if (!mounted) return;
@@ -836,10 +903,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           _sigInkColor = Color((map['sigInkColor'] as num).toInt());
         }
         _sigFontSize = (map['sigFontSize'] ?? _sigFontSize).toDouble();
-        _sigLetterSpacing = (map['sigLetterSpacing'] ?? _sigLetterSpacing).toDouble();
+        _sigLetterSpacing =
+            (map['sigLetterSpacing'] ?? _sigLetterSpacing).toDouble();
         _sigSlanted = (map['sigSlanted'] ?? _sigSlanted) as bool;
         _sigBold = (map['sigBold'] ?? _sigBold) as bool;
-        _sigTransparentBg = (map['sigTransparentBg'] ?? _sigTransparentBg) as bool;
+        _sigTransparentBg =
+            (map['sigTransparentBg'] ?? _sigTransparentBg) as bool;
         _sigPenWidth = (map['sigPenWidth'] ?? _sigPenWidth).toDouble();
         _sigPenType = (map['sigPenType'] ?? _sigPenType).toString();
         _sigAutoSmooth = (map['sigAutoSmooth'] ?? _sigAutoSmooth) as bool;
@@ -875,8 +944,18 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       return 'Updated Yesterday · $timeStr';
     }
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return 'Updated ${months[dt.month - 1]} ${dt.day} · $timeStr';
   }
@@ -904,10 +983,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             style: FilledButton.styleFrom(
               backgroundColor: Colors.redAccent,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.w700)),
+            child: const Text('Delete',
+                style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -950,6 +1031,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         );
         await File(outPath).writeAsBytes(out.$1);
         if (!mounted) return;
+        final hadEnhance = layer.enhancedPath != null;
+        final hadBgRemoval = layer.backgroundRemovedPath != null;
         _pushUndoSnapshot();
         final cx = layer.x + layer.width / 2.0;
         final cy = layer.y + layer.height / 2.0;
@@ -959,6 +1042,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           layer.localImagePath = outPath;
           layer.processedWhiteRemovedBytes = null;
           layer.processedGuillocheBytes = null;
+          layer.backgroundRemovedPath = null;
+          layer.enhancedPath = null;
           if (layer.isCanvasBackground) {
             _page.width = nextW;
             _page.height = nextH;
@@ -980,6 +1065,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         if (layer.filters.guilloche) {
           await _applyGuillocheBlend(layer);
         }
+        // Same image, new pixels: re-derive the AI outputs from the
+        // rotated source (enhance first — background removal segments the
+        // enhanced image when one exists).
+        if (hadEnhance) {
+          await _applyEnhance(layer, silent: true);
+        }
+        if (hadBgRemoval) {
+          await _applyBackgroundRemoval(layer, silent: true);
+        }
         await _saveCurrentProject(showToast: false);
       },
     );
@@ -990,6 +1084,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     if (srcPath == null || !File(srcPath).existsSync()) return;
     final res = await showImageCropSheet(context, imagePath: srcPath);
     if (res == null || !mounted) return;
+    final hadEnhance = layer.enhancedPath != null;
+    final hadBgRemoval = layer.backgroundRemovedPath != null;
     _pushUndoSnapshot();
     final cx = layer.x + layer.width / 2.0;
     final cy = layer.y + layer.height / 2.0;
@@ -998,6 +1094,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       layer.localImagePath = res.filePath;
       layer.processedWhiteRemovedBytes = null;
       layer.processedGuillocheBytes = null;
+      layer.backgroundRemovedPath = null;
+      layer.enhancedPath = null;
       if (layer.isCanvasBackground) {
         final nextW = res.width.toDouble();
         final nextH = res.height.toDouble();
@@ -1009,7 +1107,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         layer.height = nextH;
       } else {
         final nextW = layer.width;
-        final nextH = (nextW / math.max(0.05, newRatio)).clamp(20.0, _page.height * 2.5);
+        final nextH =
+            (nextW / math.max(0.05, newRatio)).clamp(20.0, _page.height * 2.5);
         layer.width = nextW;
         layer.height = nextH;
         layer.x = cx - nextW / 2.0;
@@ -1023,10 +1122,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     if (layer.filters.guilloche) {
       await _applyGuillocheBlend(layer);
     }
+    // Same image, new pixels: re-derive the AI outputs from the cropped
+    // source (enhance first — background removal segments the enhanced
+    // image when one exists).
+    if (hadEnhance) {
+      await _applyEnhance(layer, silent: true);
+    }
+    if (hadBgRemoval) {
+      await _applyBackgroundRemoval(layer, silent: true);
+    }
     await _saveCurrentProject(showToast: false);
   }
 
-  DocumentPage get _page => _project.pages[_pageIndex.clamp(0, _project.pages.length - 1)];
+  DocumentPage get _page =>
+      _project.pages[_pageIndex.clamp(0, _project.pages.length - 1)];
 
   DesignLayer? get _activeLayer {
     for (final l in _page.layers) {
@@ -1071,10 +1180,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     for (final pg in _project.pages) {
       for (final l in pg.layers) {
         if (l.processedWhiteRemovedBytes != null) {
-          cache['${l.id}_${l.filters.removeWhite.round()}'] = l.processedWhiteRemovedBytes!;
+          cache['${l.id}_${l.filters.removeWhite.round()}'] =
+              l.processedWhiteRemovedBytes!;
         }
         if (l.processedGuillocheBytes != null && l.filters.guilloche) {
-          final gKey = '${l.id}_${l.filters.guillochePattern}_${l.filters.guillocheContrast.round()}_${l.filters.guillocheBend.toStringAsFixed(1)}_${l.filters.guillocheOpacity.round()}_${l.filters.removeWhite.round()}';
+          final gKey =
+              '${l.id}_${l.filters.guillochePattern}_${l.filters.guillocheContrast.round()}_${l.filters.guillocheBend.toStringAsFixed(1)}_${l.filters.guillocheOpacity.round()}_${l.filters.removeWhite.round()}';
           gCache[gKey] = l.processedGuillocheBytes!;
         }
       }
@@ -1087,7 +1198,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           l.processedWhiteRemovedBytes = cache[key];
         }
         if (l.filters.guilloche) {
-          final gKey = '${l.id}_${l.filters.guillochePattern}_${l.filters.guillocheContrast.round()}_${l.filters.guillocheBend.toStringAsFixed(1)}_${l.filters.guillocheOpacity.round()}_${l.filters.removeWhite.round()}';
+          final gKey =
+              '${l.id}_${l.filters.guillochePattern}_${l.filters.guillocheContrast.round()}_${l.filters.guillocheBend.toStringAsFixed(1)}_${l.filters.guillocheOpacity.round()}_${l.filters.removeWhite.round()}';
           if (gCache.containsKey(gKey)) {
             l.processedGuillocheBytes = gCache[gKey];
           }
@@ -1176,17 +1288,21 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'discard'),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
-            child: const Text("Don't Save", style: TextStyle(fontWeight: FontWeight.w700)),
+            style:
+                TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
+            child: const Text("Don't Save",
+                style: TextStyle(fontWeight: FontWeight.w700)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: _inkPrimary,
               foregroundColor: _onInkPrimary,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () => Navigator.pop(ctx, 'save'),
-            child: const Text('Save & Exit', style: TextStyle(fontWeight: FontWeight.w700)),
+            child: const Text('Save & Exit',
+                style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -1237,11 +1353,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       valueListenable: appThemeMode,
       builder: (context, current, _) {
         return Container(
-          height: 32,
+          height: 40,
           padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(
             color: _isDark ? const Color(0xFF262B36) : const Color(0xFFF3F0E9),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(color: _borderColor),
           ),
           child: Row(
@@ -1258,8 +1374,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     },
                     borderRadius: BorderRadius.circular(14),
                     child: Container(
-                      width: 30,
-                      height: 26,
+                      width: 36,
+                      height: 32,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: current == mode ? _amber : Colors.transparent,
@@ -1268,7 +1384,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       child: Icon(
                         icon,
                         size: 14,
-                        color: current == mode ? const Color(0xFF1C1917) : _subColor,
+                        color: current == mode
+                            ? const Color(0xFF1C1917)
+                            : _subColor,
                       ),
                     ),
                   ),
@@ -1287,16 +1405,19 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       builder: (ctx) => AlertDialog(
         backgroundColor: _cardBg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Rename Project', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+        title: const Text('Rename Project',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           decoration: const InputDecoration(labelText: 'Project Title'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
+            style: FilledButton.styleFrom(
+                backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
             child: const Text('Save'),
           ),
@@ -1343,7 +1464,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       builder: (ctx) => AlertDialog(
         backgroundColor: _cardBg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Rename Layer', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+        title: const Text('Rename Layer',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -1352,9 +1474,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
+            style: FilledButton.styleFrom(
+                backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
             child: const Text('Save'),
           ),
@@ -1412,6 +1536,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           layer.localImagePath = permanentPath;
           layer.processedWhiteRemovedBytes = null;
           layer.processedGuillocheBytes = null;
+          // New image, so the previous AI outputs do not apply to it and
+          // are dropped (unlike rotate/crop, which keep the same image).
+          layer.backgroundRemovedPath = null;
+          layer.enhancedPath = null;
         });
         if (layer.filters.removeWhite > 0) {
           await _applyWhiteRemoval(layer, layer.filters.removeWhite);
@@ -1424,17 +1552,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     );
   }
 
-  Future<String> _saveBytesToDeviceGallery(Uint8List bytes, String fileName) async {
+  Future<String> _saveBytesToDeviceGallery(
+      Uint8List bytes, String fileName) async {
     if (Platform.isAndroid) {
       try {
-        final saved = await _mediaChannel.invokeMethod<String>('saveImageToGallery', {
+        final saved =
+            await _mediaChannel.invokeMethod<String>('saveImageToGallery', {
           'bytes': bytes,
           'name': fileName,
         });
         if (saved != null && saved.isNotEmpty) return saved;
       } catch (_) {}
     }
-    final extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+    final extDir = await getExternalStorageDirectory() ??
+        await getApplicationDocumentsDirectory();
     final outDir = Directory(p.join(extDir.path, 'Qalamix'));
     if (!outDir.existsSync()) outDir.createSync(recursive: true);
     final outPath = p.join(outDir.path, fileName);
@@ -1469,7 +1600,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           pw.Page(
             pageFormat: PdfPageFormat(pg.width, pg.height),
             margin: pw.EdgeInsets.zero,
-            build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
+            build: (_) =>
+                pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
           ),
         );
       } else {
@@ -1497,7 +1629,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   }) async {
     if (asPdf) {
       final safeProj = _safeExportFilePart(_project.name);
-      final fileName = 'qalamix_${safeProj}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final fileName =
+          'qalamix_${safeProj}_${DateTime.now().millisecondsSinceEpoch}.pdf';
       if (printPdf) {
         await _runWithSavingHud(
           savingTitle: 'Preparing Print...',
@@ -1539,18 +1672,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         action: () async {
           final pdfBytes = await _buildProjectPdfBytes(scale);
           if (Platform.isAndroid) {
-            savedLoc = await _mediaChannel.invokeMethod<String>('savePdfToDownloads', {
-                  'bytes': pdfBytes,
-                  'name': fileName,
-                }) ??
-                '';
+            savedLoc =
+                await _mediaChannel.invokeMethod<String>('savePdfToDownloads', {
+                      'bytes': pdfBytes,
+                      'name': fileName,
+                    }) ??
+                    '';
           }
           final tmpDir = await getTemporaryDirectory();
           final tmpPath = p.join(tmpDir.path, fileName);
           await File(tmpPath).writeAsBytes(pdfBytes);
           shareTmpPath = tmpPath;
           if (savedLoc.isEmpty) {
-            final extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+            final extDir = await getExternalStorageDirectory() ??
+                await getApplicationDocumentsDirectory();
             final outDir = Directory(p.join(extDir.path, 'Qalamix'));
             if (!outDir.existsSync()) outDir.createSync(recursive: true);
             final outPath = p.join(outDir.path, fileName);
@@ -1569,7 +1704,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 : SnackBarAction(
                     label: 'Share PDF',
                     textColor: _amber,
-                    onPressed: () => Share.shareXFiles([XFile(shareTmpPath!)], text: _project.name),
+                    onPressed: () => Share.shareXFiles([XFile(shareTmpPath!)],
+                        text: _project.name),
                   ),
           ),
         );
@@ -1580,7 +1716,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     String? tmpPathForShare;
     String? savedLocation;
     await _runWithSavingHud(
-      savingTitle: shareOnly ? 'Preparing Share...' : 'Saving ${format.toUpperCase()}...',
+      savingTitle: shareOnly
+          ? 'Preparing Share...'
+          : 'Saving ${format.toUpperCase()}...',
       savingSubtitle: _project.name,
       savedTitle: shareOnly ? 'Ready to Share' : 'Saved to Gallery',
       savedSubtitle: '${format.toUpperCase()} · ${scale.toStringAsFixed(0)}x',
@@ -1607,7 +1745,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           outBytes = pngBytes;
         }
         final ext = format == 'jpg' ? 'jpg' : 'png';
-        final fileName = 'qalamix_export_${DateTime.now().millisecondsSinceEpoch}.$ext';
+        final fileName =
+            'qalamix_export_${DateTime.now().millisecondsSinceEpoch}.$ext';
         final tmpDir = await getTemporaryDirectory();
         final tmpPath = p.join(tmpDir.path, fileName);
         await File(tmpPath).writeAsBytes(outBytes);
@@ -1619,7 +1758,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         }
       },
     );
-    if (!shareOnly && savedLocation != null && tmpPathForShare != null && mounted) {
+    if (!shareOnly &&
+        savedLocation != null &&
+        tmpPathForShare != null &&
+        mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Saved to Gallery: $savedLocation'),
@@ -1627,7 +1769,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           action: SnackBarAction(
             label: 'Share',
             textColor: _amber,
-            onPressed: () => Share.shareXFiles([XFile(tmpPathForShare!)], text: _project.name),
+            onPressed: () => Share.shareXFiles([XFile(tmpPathForShare!)],
+                text: _project.name),
           ),
         ),
       );
@@ -1645,7 +1788,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     } else {
       bytes = px * 0.6; // PDF: very rough
     }
-    if (bytes >= 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes >= 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
     return '${bytes.toStringAsFixed(0)} B';
   }
@@ -1661,7 +1805,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isScrollControlled: true,
       backgroundColor: _cardBg,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
         return StatefulBuilder(
@@ -1693,17 +1837,22 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             color: _amber.withOpacity(0.16),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(Icons.download_rounded, color: _accentText, size: 20),
+                          child: Icon(Icons.download_rounded,
+                              color: _accentText, size: 20),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Export Options', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                              const Text('Export Options',
+                                  style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700)),
                               Text(
                                 '${_page.width.round()} × ${_page.height.round()} px · ${(scale).toInt()}x Output',
-                                style: TextStyle(fontSize: 12, color: _subColor),
+                                style:
+                                    TextStyle(fontSize: 12, color: _subColor),
                               ),
                             ],
                           ),
@@ -1711,7 +1860,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       ],
                     ),
                     const SizedBox(height: 16),
-                    Text('File Format', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                    Text('File Format',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: _subColor)),
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -1747,14 +1900,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       ],
                     ),
                     const SizedBox(height: 14),
-                    Text('Resolution Scale', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                    Text('Resolution Scale',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: _subColor)),
                     const SizedBox(height: 8),
                     Row(
                       children: [
                         for (final s in [1.0, 2.0, 3.0]) ...[
                           Expanded(
                             child: _optionTile(
-                              label: s == 1.0 ? '1x Std' : (s == 2.0 ? '2x HD' : '3x Ultra'),
+                              label: s == 1.0
+                                  ? '1x Std'
+                                  : (s == 2.0 ? '2x HD' : '3x Ultra'),
                               selected: scale == s,
                               onTap: () => setSheetState(() => scale = s),
                             ),
@@ -1770,16 +1929,25 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     ),
                     if (format == 'jpg') ...[
                       const SizedBox(height: 14),
-                      Text('JPG Quality', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                      Text('JPG Quality',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _subColor)),
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          for (final q in [(95, 'High 95'), (85, 'Balanced 85'), (70, 'Compact 70')]) ...[
+                          for (final q in [
+                            (95, 'High 95'),
+                            (85, 'Balanced 85'),
+                            (70, 'Compact 70')
+                          ]) ...[
                             Expanded(
                               child: _optionTile(
                                 label: q.$2,
                                 selected: jpgQuality == q.$1,
-                                onTap: () => setSheetState(() => jpgQuality = q.$1),
+                                onTap: () =>
+                                    setSheetState(() => jpgQuality = q.$1),
                               ),
                             ),
                             if (q.$1 != 70) const SizedBox(width: 8),
@@ -1797,11 +1965,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         ),
                         child: SwitchListTile(
                           dense: true,
-                          title: const Text('Transparent Background', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                          subtitle: Text('Export overlays without canvas fill', style: TextStyle(fontSize: 11, color: _subColor)),
+                          title: const Text('Transparent Background',
+                              style: TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.w600)),
+                          subtitle: Text('Export overlays without canvas fill',
+                              style: TextStyle(fontSize: 11, color: _subColor)),
                           value: transparent,
                           activeColor: _amber,
-                          onChanged: (v) => setSheetState(() => transparent = v),
+                          onChanged: (v) =>
+                              setSheetState(() => transparent = v),
                         ),
                       ),
                     ],
@@ -1813,7 +1985,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                           backgroundColor: _inkPrimary,
                           foregroundColor: _onInkPrimary,
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                         onPressed: () {
                           Navigator.pop(ctx);
@@ -1840,7 +2013,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 13),
                           side: BorderSide(color: _borderColor),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                         onPressed: () {
                           Navigator.pop(ctx);
@@ -1864,14 +2038,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           side: BorderSide(color: _borderColor),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                         onPressed: () {
                           Navigator.pop(ctx);
                           _shareProjectFile(_project);
                         },
-                        icon: Icon(Icons.folder_shared_outlined, size: 18, color: _accentText),
-                        label: const Text('Share Editable Project (.qalamix.json)'),
+                        icon: Icon(Icons.folder_shared_outlined,
+                            size: 18, color: _accentText),
+                        label: const Text(
+                            'Share Editable Project (.qalamix.json)'),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -1888,8 +2065,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             printPdf: true,
                           );
                         },
-                        icon: Icon(Icons.print_outlined, size: 16, color: _subColor),
-                        label: Text('Print', style: TextStyle(fontSize: 13, color: _subColor, fontWeight: FontWeight.w600)),
+                        icon: Icon(Icons.print_outlined,
+                            size: 16, color: _subColor),
+                        label: Text('Print',
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: _subColor,
+                                fontWeight: FontWeight.w600)),
                       ),
                     ),
                   ],
@@ -2013,7 +2195,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   }
 
   void _addTextLayer() {
-    final lightBg = _page.backgroundColor.alpha == 0 || _page.backgroundColor.computeLuminance() > 0.45;
+    final lightBg = _page.backgroundColor.alpha == 0 ||
+        _page.backgroundColor.computeLuminance() > 0.45;
     final layer = DesignLayer(
       id: 'txt_${DateTime.now().microsecondsSinceEpoch}',
       name: 'Urdu / English Text',
@@ -2071,7 +2254,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   const Expanded(
                     child: Text(
                       'Choose a Shape',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                     ),
                   ),
                   IconButton(
@@ -2224,8 +2408,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
 
   void _clampLayerInPage(DesignLayer layer) {
     if (layer.isCanvasBackground) return;
-    layer.width = layer.width.clamp(16.0, math.max(16.0, _page.width * 3.0)).toDouble();
-    layer.height = layer.height.clamp(16.0, math.max(16.0, _page.height * 3.0)).toDouble();
+    layer.width =
+        layer.width.clamp(16.0, math.max(16.0, _page.width * 3.0)).toDouble();
+    layer.height =
+        layer.height.clamp(16.0, math.max(16.0, _page.height * 3.0)).toDouble();
     const minOverlap = 24.0;
     final minX = -(layer.width - minOverlap);
     final maxX = _page.width - minOverlap;
@@ -2239,7 +2425,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     final l = _activeLayer;
     if (l == null) return;
     _pushUndoSnapshot();
-    final copy = l.cloneWithNewId('dup_${DateTime.now().microsecondsSinceEpoch}');
+    final copy =
+        l.cloneWithNewId('dup_${DateTime.now().microsecondsSinceEpoch}');
     _clampLayerInPage(copy);
     setState(() {
       _page.layers.add(copy);
@@ -2275,10 +2462,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             style: FilledButton.styleFrom(
               backgroundColor: Colors.redAccent,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.w700)),
+            child: const Text('Delete',
+                style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -2304,7 +2493,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     if (layer.isCanvasBackground) return;
     final idx = _page.layers.indexWhere((x) => x.id == layer.id);
     if (idx == -1) return;
-    final minIdx = _page.layers.isNotEmpty && _page.layers.first.isCanvasBackground ? 1 : 0;
+    final minIdx =
+        _page.layers.isNotEmpty && _page.layers.first.isCanvasBackground
+            ? 1
+            : 0;
     final target = (idx + delta).clamp(minIdx, _page.layers.length - 1);
     if (target == idx) return;
     _pushUndoSnapshot();
@@ -2328,7 +2520,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       return;
     }
     setState(() => layer.filters.removeWhite = tolerance);
-    final pngBytes = await removeWhiteBackgroundOffline(layer.localImagePath!, tolerance);
+    final pngBytes =
+        await removeWhiteBackgroundOffline(layer.localImagePath!, tolerance);
     if (!mounted || seq != _whiteRemovalSeq) return;
     setState(() => layer.processedWhiteRemovedBytes = pngBytes);
     if (layer.filters.guilloche) {
@@ -2357,6 +2550,133 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     if (!mounted || seq != _guillocheSeq) return;
     setState(() => layer.processedGuillocheBytes = pngBytes);
     await _saveCurrentProject(showToast: false);
+  }
+
+  /// AI background removal (ML Kit selfie segmentation, on-device).
+  ///
+  /// Segments the *person* out of the layer's current source — the enhanced
+  /// image when one exists, otherwise the original — and persists the
+  /// transparent PNG as `layer.backgroundRemovedPath`. The undo snapshot is
+  /// taken after segmentation succeeds but BEFORE the mutation, so Undo
+  /// restores the previous path (or lack of one). When [silent] is true no
+  /// HUD/SnackBar is shown: used by the rotate/crop/enhance re-apply chain,
+  /// where the caller already shows a HUD. Set [takeUndoSnapshot] false
+  /// when the caller already pushed a snapshot covering this mutation.
+  Future<void> _applyBackgroundRemoval(
+    DesignLayer layer, {
+    bool silent = false,
+    bool takeUndoSnapshot = true,
+  }) async {
+    final srcPath = layer.enhancedPath ?? layer.localImagePath;
+    if (srcPath == null || !File(srcPath).existsSync()) return;
+    final seq = ++_bgRemovalSeq;
+    if (!silent) {
+      _showSaveHud(
+        phase: 'saving',
+        title: 'Removing Background...',
+        subtitle: layer.name,
+      );
+    }
+    final result = await removeBackgroundOffline(srcPath);
+    if (!mounted || seq != _bgRemovalSeq) return;
+    if (result == null) {
+      if (!silent && mounted) {
+        _showSaveHud(
+          phase: 'error',
+          title: 'Background Removal Failed',
+          subtitle: 'Could not process this image.',
+        );
+        _scheduleHideSaveHud(2200);
+      }
+      return;
+    }
+    if (result.noPersonDetected || result.pngBytes == null) {
+      if (!silent && mounted) {
+        _showSaveHud(
+          phase: 'saved',
+          title: 'No Person Found',
+          subtitle: 'Try Remove White BG for logos & signatures.',
+        );
+        _scheduleHideSaveHud(2200);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No person found in this photo — Remove BG works on people and portraits. For logos & signatures, try Remove White BG.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    final docsDir = await getApplicationDocumentsDirectory();
+    final imgDir = Directory(p.join(docsDir.path, 'qalamix_images'));
+    if (!imgDir.existsSync()) imgDir.createSync(recursive: true);
+    final outPath = p.join(
+      imgDir.path,
+      'bgrem_${DateTime.now().microsecondsSinceEpoch}.png',
+    );
+    await File(outPath).writeAsBytes(result.pngBytes!);
+    if (!mounted || seq != _bgRemovalSeq) return;
+    if (takeUndoSnapshot) _pushUndoSnapshot();
+    setState(() => layer.backgroundRemovedPath = outPath);
+    await _saveCurrentProject(showToast: false);
+    if (!silent && mounted) {
+      _showSaveHud(
+        phase: 'saved',
+        title: 'Background Removed',
+        subtitle: layer.name,
+      );
+      _scheduleHideSaveHud(1450);
+    }
+  }
+
+  /// One-tap Enhance (local `image` pipeline, no ML / network).
+  ///
+  /// Persists the enhanced PNG as `layer.enhancedPath`. If background
+  /// removal was already applied, segmentation is re-run on the enhanced
+  /// image so the two compose (enhanced -> background-removed). When
+  /// [silent] is true no HUD is shown: used by the rotate/crop re-apply
+  /// chain, where the caller already shows a HUD.
+  Future<void> _applyEnhance(DesignLayer layer, {bool silent = false}) async {
+    final srcPath = layer.localImagePath;
+    if (srcPath == null || !File(srcPath).existsSync()) return;
+    final seq = ++_enhanceSeq;
+    Future<void> doEnhance() async {
+      final pngBytes = await enhanceImageOffline(srcPath);
+      if (pngBytes == null || !mounted || seq != _enhanceSeq) return;
+      final docsDir = await getApplicationDocumentsDirectory();
+      final imgDir = Directory(p.join(docsDir.path, 'qalamix_images'));
+      if (!imgDir.existsSync()) imgDir.createSync(recursive: true);
+      final outPath = p.join(
+        imgDir.path,
+        'enh_${DateTime.now().microsecondsSinceEpoch}.png',
+      );
+      await File(outPath).writeAsBytes(pngBytes);
+      if (!mounted || seq != _enhanceSeq) return;
+      final hadBgRemoval = layer.backgroundRemovedPath != null;
+      _pushUndoSnapshot();
+      setState(() => layer.enhancedPath = outPath);
+      await _saveCurrentProject(showToast: false);
+      if (hadBgRemoval) {
+        await _applyBackgroundRemoval(
+          layer,
+          silent: true,
+          takeUndoSnapshot: false,
+        );
+      }
+    }
+
+    if (silent) {
+      await doEnhance();
+      return;
+    }
+    await _runWithSavingHud(
+      savingTitle: 'Enhancing...',
+      savingSubtitle: layer.name,
+      savedTitle: 'Enhanced',
+      savedSubtitle: layer.name,
+      action: doEnhance,
+    );
   }
 
   Future<void> _openPdfForEditing() async {
@@ -2405,7 +2725,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       builder: (ctx) => AlertDialog(
         backgroundColor: _cardBg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Apply to all images', style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w700)),
+        title: const Text('Apply to all images',
+            style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w700)),
         content: Text(
           'Apply this look to ${targets.length} images?',
           style: TextStyle(fontSize: 13.5, color: _subColor),
@@ -2421,7 +2742,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               foregroundColor: _onInkPrimary,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.w700)),
+            child: const Text('Apply',
+                style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -2429,7 +2751,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     if (confirmed != true || !mounted) return;
 
     _pushUndoSnapshot();
-    final tol = _applyAllRemoveWhiteEnabled ? _applyAllRemoveWhite.clamp(5.0, 95.0).toDouble() : 0.0;
+    final tol = _applyAllRemoveWhiteEnabled
+        ? _applyAllRemoveWhite.clamp(5.0, 95.0).toDouble()
+        : 0.0;
     var appliedCount = 0;
 
     await _runWithSavingHud(
@@ -2440,7 +2764,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       action: () async {
         for (final l in targets) {
           final fp = l.localImagePath;
-          if (fp == null || fp.trim().isEmpty || !File(fp).existsSync()) continue;
+          if (fp == null || fp.trim().isEmpty || !File(fp).existsSync())
+            continue;
           if (mounted) {
             setState(() {
               l.filters.guilloche = _applyAllGuilloche;
@@ -2488,7 +2813,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Applied look to $appliedCount image${appliedCount == 1 ? '' : 's'}.')),
+        SnackBar(
+            content: Text(
+                'Applied look to $appliedCount image${appliedCount == 1 ? '' : 's'}.')),
       );
     }
   }
@@ -2497,7 +2824,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   Widget build(BuildContext context) {
     final stageBg = _isDark ? const Color(0xFF12141A) : const Color(0xFFE6E1D6);
 
-    const hubTitles = ['Projects', 'Quick Fill', 'Sign & Seal', 'Docs & Scanner'];
+    const hubTitles = [
+      'Projects',
+      'Quick Fill',
+      'Sign & Seal',
+      'Docs & Scanner'
+    ];
     return PopScope(
       canPop: !_inStudio,
       onPopInvoked: (didPop) {
@@ -2506,346 +2838,382 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         }
       },
       child: Stack(
-      children: [
-        Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 56,
-        automaticallyImplyLeading: false,
-        leadingWidth: _inStudio ? 48 : null,
-        leading: _inStudio
-            ? IconButton(
-                tooltip: 'Back to Projects',
-                icon: const Icon(Icons.arrow_back_rounded, size: 22),
-                onPressed: _confirmExitStudio,
-              )
-            : null,
-        titleSpacing: _inStudio ? 4 : 12,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: _borderColor),
-        ),
-        title: _inStudio
-            ? InkWell(
-                onTap: () => _renameProjectDialog(_project),
-                borderRadius: BorderRadius.circular(8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            _project.name,
+        children: [
+          Scaffold(
+            appBar: AppBar(
+              toolbarHeight: 56,
+              automaticallyImplyLeading: false,
+              leadingWidth: _inStudio ? 48 : null,
+              leading: _inStudio
+                  ? IconButton(
+                      tooltip: 'Back to Projects',
+                      icon: const Icon(Icons.arrow_back_rounded, size: 22),
+                      onPressed: _confirmExitStudio,
+                    )
+                  : null,
+              titleSpacing: _inStudio ? 4 : 12,
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(1),
+                child: Container(height: 1, color: _borderColor),
+              ),
+              title: _inStudio
+                  ? InkWell(
+                      onTap: () => _renameProjectDialog(_project),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  _project.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(Icons.edit_outlined,
+                                  size: 13, color: _mutedColor),
+                            ],
+                          ),
+                          Text(
+                            '${_page.title} · ${_page.width.round()}×${_page.height.round()}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                            style: TextStyle(fontSize: 12, color: _subColor),
+                          ),
+                        ],
+                      ),
+                    )
+                  : Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: _isDark
+                                ? const Color(0xFF16191E)
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: _borderColor),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Image.asset(
+                            _isDark
+                                ? 'assets/images/qalamix_logo_dark.png'
+                                : 'assets/images/qalamix_logo.jpg',
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.high,
+                            isAntiAlias: true,
                           ),
                         ),
-                        const SizedBox(width: 4),
-                        Icon(Icons.edit_outlined, size: 13, color: _mutedColor),
-                      ],
-                    ),
-                    Text(
-                      '${_page.title} · ${_page.width.round()}×${_page.height.round()}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, color: _subColor),
-                    ),
-                  ],
-                ),
-              )
-            : Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: _isDark ? const Color(0xFF16191E) : Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: _borderColor),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Image.asset(
-                      _isDark
-                          ? 'assets/images/qalamix_logo_dark.png'
-                          : 'assets/images/qalamix_logo.jpg',
-                      fit: BoxFit.contain,
-                      filterQuality: FilterQuality.high,
-                      isAntiAlias: true,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          'Qalamix',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
-                        ),
-                        Text(
-                          hubTitles[_navIndex.clamp(0, hubTitles.length - 1)],
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11, color: _subColor),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: _buildModernThemeToggle(),
-          ),
-          if (_inStudio) ...[
-            IconButton(
-              tooltip: 'Save Offline',
-              icon: const Icon(Icons.save_outlined, size: 20),
-              onPressed: _saveCurrentProject,
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'Studio Tools',
-              icon: const Icon(Icons.more_vert_rounded, size: 21),
-              onSelected: (val) {
-                if (val == 'fonts') _openFontsLibrarySheet();
-                if (val == 'scanner') _openDocumentScannerSheet();
-                if (val == 'guides') setState(() => _showGuides = !_showGuides);
-                if (val == 'guide') _showQuickTourSheet();
-              },
-              itemBuilder: (ctx) => [
-                const PopupMenuItem(
-                  value: 'fonts',
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.font_download_outlined, size: 20),
-                    title: Text('Fonts Library'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'scanner',
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.document_scanner_outlined, size: 20),
-                    title: Text('Document Scanner'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'guides',
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(_showGuides ? Icons.grid_on_rounded : Icons.grid_off_rounded, size: 20),
-                    title: Text(_showGuides ? 'Hide Margin Guides' : 'Show Margin Guides'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'guide',
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.help_outline_rounded, size: 20),
-                    title: Text('Quick Guide & Help'),
-                  ),
-                ),
-              ],
-            ),
-            Padding(
-              padding: const EdgeInsets.only(right: 10, left: 2),
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: _inkPrimary,
-                  foregroundColor: _onInkPrimary,
-                  minimumSize: const Size(0, 34),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                ),
-                onPressed: _showExportOptionsSheet,
-                icon: Icon(Icons.download_rounded, size: 17, color: _brandNibOnInk),
-                label: const Text('Export', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-              ),
-            ),
-          ] else ...[
-            PopupMenuButton<String>(
-              tooltip: 'Tools',
-              icon: const Icon(Icons.more_vert_rounded, size: 21),
-              onSelected: (val) {
-                if (val == 'fonts') _openFontsLibrarySheet();
-                if (val == 'scanner') _openDocumentScannerSheet();
-                if (val == 'guide') _showQuickTourSheet();
-              },
-              itemBuilder: (ctx) => const [
-                PopupMenuItem(
-                  value: 'fonts',
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.font_download_outlined, size: 20),
-                    title: Text('Fonts Library'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'scanner',
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.document_scanner_outlined, size: 20),
-                    title: Text('Document Scanner'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'guide',
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.help_outline_rounded, size: 20),
-                    title: Text('Quick Guide & Help'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 4),
-          ],
-        ],
-      ),
-      body: IndexedStack(
-        index: _inStudio ? 0 : (_navIndex.clamp(0, 3) + 1),
-        children: [
-          _buildStudioView(stageBg),
-          _buildProjectsView(),
-          (!_inStudio && _navIndex == 1) ? _buildQuickFillView() : const SizedBox.shrink(),
-          (!_inStudio && _navIndex == 2) ? _buildSignatureView() : const SizedBox.shrink(),
-          _buildPagesView(),
-        ],
-      ),
-      bottomNavigationBar: _inStudio
-          ? null
-          : Container(
-              decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: _borderColor)),
-              ),
-              child: NavigationBar(
-                selectedIndex: _navIndex.clamp(0, 3),
-                onDestinationSelected: (i) => setState(() {
-                  _navIndex = i.clamp(0, 3);
-                }),
-                destinations: const [
-                  NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder_rounded), label: 'Projects'),
-                  NavigationDestination(icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
-                  NavigationDestination(icon: Icon(Icons.draw_outlined), selectedIcon: Icon(Icons.draw_rounded), label: 'Sign/Seal'),
-                  NavigationDestination(icon: Icon(Icons.description_outlined), selectedIcon: Icon(Icons.description_rounded), label: 'Docs'),
-                ],
-              ),
-            ),
-        ),
-        if (_showLaunchSplash)
-          Positioned.fill(
-            child: IgnorePointer(
-              ignoring: _launchSplashOpacity == 0.0,
-              child: GestureDetector(
-                onTap: () => setState(() {
-                  _launchSplashOpacity = 0.0;
-                  _showLaunchSplash = false;
-                }),
-                child: AnimatedOpacity(
-                  opacity: _launchSplashOpacity,
-                  duration: const Duration(milliseconds: 420),
-                  curve: Curves.easeOutCubic,
-                  child: Material(
-                    color: _isDark ? const Color(0xFF0D0F12) : Colors.white,
-                    child: SafeArea(
-                      child: Stack(
-                        children: [
-                          Center(
-                            child: TweenAnimationBuilder<double>(
-                              tween: Tween(begin: 0.92, end: 1.0),
-                              duration: const Duration(milliseconds: 480),
-                              curve: Curves.easeOutCubic,
-                              builder: (context, scale, child) => Transform.scale(
-                                scale: scale,
-                                child: child,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Qalamix',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 15, fontWeight: FontWeight.w800),
                               ),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Image.asset(
-                                    _isDark
-                                        ? 'assets/images/qalamix_logo_dark.png'
-                                        : 'assets/images/qalamix_logo.jpg',
-                                    width: 112,
-                                    height: 112,
-                                    fit: BoxFit.contain,
-                                    filterQuality: FilterQuality.high,
-                                    isAntiAlias: true,
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'Qalamix',
-                                    style: TextStyle(
-                                      fontFamily: 'PlusJakartaSans',
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: -0.4,
-                                      color: _isDark
-                                          ? const Color(0xFFF8FAFC)
-                                          : const Color(0xFF1C1917),
+                              Text(
+                                hubTitles[
+                                    _navIndex.clamp(0, hubTitles.length - 1)],
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style:
+                                    TextStyle(fontSize: 12, color: _subColor),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: _buildModernThemeToggle(),
+                ),
+                if (_inStudio) ...[
+                  IconButton(
+                    tooltip: 'Save Offline',
+                    icon: const Icon(Icons.save_outlined, size: 20),
+                    onPressed: _saveCurrentProject,
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Studio Tools',
+                    icon: const Icon(Icons.more_vert_rounded, size: 21),
+                    onSelected: (val) {
+                      if (val == 'fonts') _openFontsLibrarySheet();
+                      if (val == 'scanner') _openDocumentScannerSheet();
+                      if (val == 'guides')
+                        setState(() => _showGuides = !_showGuides);
+                      if (val == 'guide') _showQuickTourSheet();
+                    },
+                    itemBuilder: (ctx) => [
+                      const PopupMenuItem(
+                        value: 'fonts',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.font_download_outlined, size: 20),
+                          title: Text('Fonts Library'),
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'scanner',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading:
+                              Icon(Icons.document_scanner_outlined, size: 20),
+                          title: Text('Document Scanner'),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'guides',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                              _showGuides
+                                  ? Icons.grid_on_rounded
+                                  : Icons.grid_off_rounded,
+                              size: 20),
+                          title: Text(_showGuides
+                              ? 'Hide Margin Guides'
+                              : 'Show Margin Guides'),
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'guide',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.help_outline_rounded, size: 20),
+                          title: Text('Quick Guide & Help'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 10, left: 2),
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _inkPrimary,
+                        foregroundColor: _onInkPrimary,
+                        minimumSize: const Size(0, 40),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: _showExportOptionsSheet,
+                      icon: Icon(Icons.download_rounded,
+                          size: 17, color: _brandNibOnInk),
+                      label: const Text('Export',
+                          style: TextStyle(
+                              fontSize: 12.5, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ] else ...[
+                  PopupMenuButton<String>(
+                    tooltip: 'Tools',
+                    icon: const Icon(Icons.more_vert_rounded, size: 21),
+                    onSelected: (val) {
+                      if (val == 'fonts') _openFontsLibrarySheet();
+                      if (val == 'scanner') _openDocumentScannerSheet();
+                      if (val == 'guide') _showQuickTourSheet();
+                    },
+                    itemBuilder: (ctx) => const [
+                      PopupMenuItem(
+                        value: 'fonts',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.font_download_outlined, size: 20),
+                          title: Text('Fonts Library'),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'scanner',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading:
+                              Icon(Icons.document_scanner_outlined, size: 20),
+                          title: Text('Document Scanner'),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'guide',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.help_outline_rounded, size: 20),
+                          title: Text('Quick Guide & Help'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 4),
+                ],
+              ],
+            ),
+            body: IndexedStack(
+              index: _inStudio ? 0 : (_navIndex.clamp(0, 3) + 1),
+              children: [
+                _buildStudioView(stageBg),
+                _buildProjectsView(),
+                (!_inStudio && _navIndex == 1)
+                    ? _buildQuickFillView()
+                    : const SizedBox.shrink(),
+                (!_inStudio && _navIndex == 2)
+                    ? _buildSignatureView()
+                    : const SizedBox.shrink(),
+                _buildPagesView(),
+              ],
+            ),
+            bottomNavigationBar: _inStudio
+                ? null
+                : Container(
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: _borderColor)),
+                    ),
+                    child: NavigationBar(
+                      selectedIndex: _navIndex.clamp(0, 3),
+                      onDestinationSelected: (i) => setState(() {
+                        _navIndex = i.clamp(0, 3);
+                      }),
+                      destinations: const [
+                        NavigationDestination(
+                            icon: Icon(Icons.folder_outlined),
+                            selectedIcon: Icon(Icons.folder_rounded),
+                            label: 'Projects'),
+                        NavigationDestination(
+                            icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
+                        NavigationDestination(
+                            icon: Icon(Icons.draw_outlined),
+                            selectedIcon: Icon(Icons.draw_rounded),
+                            label: 'Sign/Seal'),
+                        NavigationDestination(
+                            icon: Icon(Icons.description_outlined),
+                            selectedIcon: Icon(Icons.description_rounded),
+                            label: 'Docs'),
+                      ],
+                    ),
+                  ),
+          ),
+          if (_showLaunchSplash)
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: _launchSplashOpacity == 0.0,
+                child: GestureDetector(
+                  onTap: () => setState(() {
+                    _launchSplashOpacity = 0.0;
+                    _showLaunchSplash = false;
+                  }),
+                  child: AnimatedOpacity(
+                    opacity: _launchSplashOpacity,
+                    duration: const Duration(milliseconds: 420),
+                    curve: Curves.easeOutCubic,
+                    child: Material(
+                      color: _isDark ? const Color(0xFF0D0F12) : Colors.white,
+                      child: SafeArea(
+                        child: Stack(
+                          children: [
+                            Center(
+                              child: TweenAnimationBuilder<double>(
+                                tween: Tween(begin: 0.92, end: 1.0),
+                                duration: const Duration(milliseconds: 480),
+                                curve: Curves.easeOutCubic,
+                                builder: (context, scale, child) =>
+                                    Transform.scale(
+                                  scale: scale,
+                                  child: child,
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Image.asset(
+                                      _isDark
+                                          ? 'assets/images/qalamix_logo_dark.png'
+                                          : 'assets/images/qalamix_logo.jpg',
+                                      width: 112,
+                                      height: 112,
+                                      fit: BoxFit.contain,
+                                      filterQuality: FilterQuality.high,
+                                      isAntiAlias: true,
                                     ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Design · Docs · Security Blend',
-                                    style: TextStyle(
-                                      fontFamily: 'PlusJakartaSans',
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w500,
-                                      letterSpacing: 0.2,
-                                      color: _isDark
-                                          ? const Color(0xFF94A3B8)
-                                          : const Color(0xFF64748B),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      'Qalamix',
+                                      style: TextStyle(
+                                        fontFamily: 'PlusJakartaSans',
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: -0.4,
+                                        color: _isDark
+                                            ? const Color(0xFFF8FAFC)
+                                            : const Color(0xFF1C1917),
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Design · Docs · Security Blend',
+                                      style: TextStyle(
+                                        fontFamily: 'PlusJakartaSans',
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w500,
+                                        letterSpacing: 0.2,
+                                        color: _isDark
+                                            ? const Color(0xFF94A3B8)
+                                            : const Color(0xFF64748B),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 36,
-                            child: Center(
-                              child: SizedBox(
-                                width: 42,
-                                height: 3,
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(2),
-                                  child: LinearProgressIndicator(
-                                    backgroundColor: _isDark
-                                        ? const Color(0xFF2C313C)
-                                        : const Color(0xFFE7E2D8),
-                                    color: const Color(0xFFF59E0B),
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 36,
+                              child: Center(
+                                child: SizedBox(
+                                  width: 42,
+                                  height: 3,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(2),
+                                    child: LinearProgressIndicator(
+                                      backgroundColor: _isDark
+                                          ? const Color(0xFF2C313C)
+                                          : const Color(0xFFE7E2D8),
+                                      color: const Color(0xFFF59E0B),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-      ],
-    ),
+        ],
+      ),
     );
   }
 
@@ -2855,7 +3223,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final standardH = math.min(395.0, math.max(290.0, screenH * 0.41));
     final tallH = math.min(540.0, math.max(375.0, screenH * 0.56));
-    final expandedH = (_sheetTall ? tallH : standardH) + bottomInset * 0.5;
+    // Cap the sheet so at least 120px of canvas stays visible below the
+    // 56px quick strip and the 56px pages bar. (H2)
+    final maxSheetH = math.max(200.0, screenH - 56 - 56 - 120);
+    final cappedStandardH = math.min(standardH, maxSheetH);
+    final cappedTallH = math.min(tallH, maxSheetH);
+    // Full bottomInset (not half): SafeArea consumes the whole inset while
+    // the height only added half of it, clipping ~17px of the header on
+    // gesture-nav phones. (H1)
+    final expandedH =
+        (_sheetTall ? cappedTallH : cappedStandardH) + bottomInset;
 
     return Column(
       children: [
@@ -2934,25 +3311,60 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             color: _panelBg,
             border: Border(top: BorderSide(color: _borderColor)),
           ),
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Stack(
             children: [
-              _quickBtn(Icons.photo_size_select_large, 'Canvas Pic', _importCanvasImage, highlight: true),
-              _quickBtn(Icons.document_scanner_outlined, 'Scanner', _openDocumentScannerSheet, tealAccent: true),
-              _quickBtn(Icons.undo_rounded, 'Undo', _undoCanvas, enabled: _undoStack.isNotEmpty),
-              _quickBtn(Icons.redo_rounded, 'Redo', _redoCanvas, enabled: _redoStack.isNotEmpty),
-              _quickBtn(Icons.title_rounded, 'Add Text', _addTextLayer),
-              _quickBtn(Icons.font_download_outlined, 'Fonts', _openFontsLibrarySheet),
-              _quickBtn(Icons.add_photo_alternate_outlined, 'Overlay', _addOverlayImage),
-              _quickBtn(Icons.category_outlined, 'Shape', _openShapePickerSheet),
+              ListView(
+                scrollDirection: Axis.horizontal,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                children: [
+                  _quickBtn(Icons.photo_size_select_large, 'Canvas Pic',
+                      _importCanvasImage,
+                      highlight: true),
+                  _quickBtn(Icons.document_scanner_outlined, 'Scanner',
+                      _openDocumentScannerSheet,
+                      tealAccent: true),
+                  _quickBtn(Icons.undo_rounded, 'Undo', _undoCanvas,
+                      enabled: _undoStack.isNotEmpty),
+                  _quickBtn(Icons.redo_rounded, 'Redo', _redoCanvas,
+                      enabled: _redoStack.isNotEmpty),
+                  _quickBtn(Icons.title_rounded, 'Add Text', _addTextLayer),
+                  _quickBtn(Icons.font_download_outlined, 'Fonts',
+                      _openFontsLibrarySheet),
+                  _quickBtn(Icons.add_photo_alternate_outlined, 'Overlay',
+                      _addOverlayImage),
+                  _quickBtn(
+                      Icons.category_outlined, 'Shape', _openShapePickerSheet),
+                ],
+              ),
+              // End-fade: hints the strip scrolls for more actions. (M7)
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  child: Container(
+                    width: 28,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          _panelBg.withOpacity(0),
+                          _panelBg,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
         AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
-          height: _sheetExpanded ? expandedH : (52 + bottomInset * 0.5),
+          height: _sheetExpanded ? expandedH : (52 + bottomInset),
           decoration: BoxDecoration(
             color: _panelBg,
             border: Border(top: BorderSide(color: _borderColor)),
@@ -2986,17 +3398,19 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     }
                   },
                   child: Container(
-                    padding: const EdgeInsets.fromLTRB(10, 5, 6, 6),
+                    padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
                     decoration: BoxDecoration(
-                      border: _sheetExpanded ? Border(bottom: BorderSide(color: _borderColor)) : null,
+                      border: _sheetExpanded
+                          ? Border(bottom: BorderSide(color: _borderColor))
+                          : null,
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Container(
-                          width: 34,
-                          height: 3.5,
-                          margin: const EdgeInsets.only(bottom: 5),
+                          width: 48,
+                          height: 5,
+                          margin: const EdgeInsets.only(bottom: 8),
                           decoration: BoxDecoration(
                             color: _mutedColor.withOpacity(0.35),
                             borderRadius: BorderRadius.circular(2),
@@ -3010,9 +3424,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 child: Row(
                                   children: [
                                     _tabChip(0, 'Style', Icons.tune_rounded),
-                                    _tabChip(1, 'Photo', Icons.layers_outlined),
-                                    _tabChip(2, 'Adjust', Icons.auto_fix_high_rounded),
-                                    _tabChip(3, 'Layers (${_page.layers.length})', Icons.format_list_bulleted_rounded),
+                                    _tabChip(1, 'Photo', Icons.image_outlined),
+                                    _tabChip(2, 'Adjust',
+                                        Icons.auto_fix_high_rounded),
+                                    _tabChip(
+                                        3,
+                                        'Layers (${_page.layers.length})',
+                                        Icons.format_list_bulleted_rounded),
                                   ],
                                 ),
                               ),
@@ -3021,15 +3439,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               Padding(
                                 padding: const EdgeInsets.only(left: 4),
                                 child: InkWell(
-                                  onTap: () => setState(() => _sheetTall = !_sheetTall),
-                                  borderRadius: BorderRadius.circular(8),
+                                  onTap: () =>
+                                      setState(() => _sheetTall = !_sheetTall),
+                                  borderRadius: BorderRadius.circular(10),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 5),
                                     decoration: BoxDecoration(
-                                      color: _sheetTall ? _amberTintBg : _chipBg,
-                                      borderRadius: BorderRadius.circular(8),
+                                      color:
+                                          _sheetTall ? _amberTintBg : _chipBg,
+                                      borderRadius: BorderRadius.circular(10),
                                       border: Border.all(
-                                        color: _sheetTall ? _amberTintBorder : _borderColor,
+                                        color: _sheetTall
+                                            ? _amberTintBorder
+                                            : _borderColor,
                                       ),
                                     ),
                                     child: Text(
@@ -3037,7 +3460,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w700,
-                                        color: _sheetTall ? _brandNibInk : _textColor,
+                                        color: _sheetTall
+                                            ? _brandNibInk
+                                            : _textColor,
                                       ),
                                     ),
                                   ),
@@ -3045,9 +3470,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               ),
                             IconButton(
                               visualDensity: VisualDensity.compact,
-                              tooltip: _sheetExpanded ? 'Collapse Panel' : 'Expand Panel',
+                              tooltip: _sheetExpanded
+                                  ? 'Collapse Panel'
+                                  : 'Expand Panel',
                               icon: Icon(
-                                _sheetExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
+                                _sheetExpanded
+                                    ? Icons.keyboard_arrow_down_rounded
+                                    : Icons.keyboard_arrow_up_rounded,
                                 color: _subColor,
                               ),
                               onPressed: () => setState(() {
@@ -3096,18 +3525,21 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         ? _mutedColor
         : highlight
             ? _onInkPrimary
-            : (danger ? Colors.redAccent : (tealAccent ? _scannerTeal : _textColor));
-    final iconColor = !enabled ? _mutedColor : (highlight ? _brandNibOnInk : fg);
+            : (danger
+                ? Colors.redAccent
+                : (tealAccent ? _scannerTeal : _textColor));
+    final iconColor =
+        !enabled ? _mutedColor : (highlight ? _brandNibOnInk : fg);
     return Padding(
       padding: const EdgeInsets.only(right: 6),
       child: InkWell(
         onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(10),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 12),
           decoration: BoxDecoration(
             color: bg,
-            borderRadius: BorderRadius.circular(9),
+            borderRadius: BorderRadius.circular(10),
             border: highlight
                 ? null
                 : Border.all(
@@ -3121,7 +3553,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             children: [
               Icon(icon, size: 15, color: iconColor),
               const SizedBox(width: 5),
-              Text(label, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: fg)),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 12.5, fontWeight: FontWeight.w600, color: fg)),
             ],
           ),
         ),
@@ -3139,12 +3573,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           _sheetExpanded = true;
           _sheetUserCollapsed = false;
         }),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
           decoration: BoxDecoration(
             color: active ? _amberTintBg : _chipBg,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(color: active ? _amberTintBorder : _borderColor),
           ),
           child: Row(
@@ -3168,7 +3602,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   }
 
   Widget _buildInspectorBody(DesignLayer? layer) {
-    if (layer != null && layer.locked && layer.isCanvasBackground && _inspectorTab != 3) {
+    if (layer != null &&
+        layer.locked &&
+        layer.isCanvasBackground &&
+        _inspectorTab != 3) {
       return Padding(
         padding: const EdgeInsets.all(14),
         child: Text(
@@ -3182,8 +3619,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     if (_inspectorTab == 3) {
       if (_page.layers.isEmpty) {
         return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text('No layers yet. Use Add Text, Overlay, or Canvas Pic above.', style: TextStyle(color: _subColor)),
+          padding: const EdgeInsets.all(14),
+          child: Text(
+              'No layers yet. Use Add Text, Overlay, or Canvas Pic above.',
+              style: TextStyle(color: _subColor)),
         );
       }
       final reversed = _page.layers.reversed.toList();
@@ -3200,7 +3639,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           final total = _page.layers.length;
           final fromArr = total - 1 - oldIndex;
           var toArr = total - 1 - newIndex;
-          final minArr = _page.layers.isNotEmpty && _page.layers.first.isCanvasBackground ? 1 : 0;
+          final minArr =
+              _page.layers.isNotEmpty && _page.layers.first.isCanvasBackground
+                  ? 1
+                  : 0;
           toArr = toArr.clamp(minArr, total - 1);
           if (fromArr == toArr) return;
           _pushUndoSnapshot();
@@ -3217,7 +3659,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               ? Icons.wallpaper_rounded
               : (l.type == LayerType.text
                   ? Icons.title_rounded
-                  : (l.type == LayerType.image ? Icons.image_outlined : Icons.crop_square_rounded));
+                  : (l.type == LayerType.image
+                      ? Icons.image_outlined
+                      : Icons.crop_square_rounded));
           return Container(
             key: ValueKey('layer_row_${l.id}'),
             margin: const EdgeInsets.only(bottom: 8),
@@ -3225,7 +3669,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             decoration: BoxDecoration(
               color: isSel ? _amberTintBg : _cardBg,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: isSel ? _brandNib : _borderColor, width: isSel ? 1.5 : 1),
+              border: Border.all(
+                  color: isSel ? _brandNib : _borderColor,
+                  width: isSel ? 1.5 : 1),
             ),
             child: Column(
               children: [
@@ -3237,8 +3683,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         ReorderableDragStartListener(
                           index: index,
                           child: Padding(
-                            padding: const EdgeInsets.only(right: 6, top: 4, bottom: 4),
-                            child: Icon(Icons.drag_indicator_rounded, size: 20, color: _mutedColor),
+                            padding: const EdgeInsets.only(
+                                right: 6, top: 4, bottom: 4),
+                            child: Icon(Icons.drag_indicator_rounded,
+                                size: 20, color: _mutedColor),
                           ),
                         ),
                       Container(
@@ -3247,9 +3695,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         decoration: BoxDecoration(
                           color: isSel ? _amberTintBg : _chipBg,
                           borderRadius: BorderRadius.circular(8),
-                          border: isSel ? Border.all(color: _amberTintBorder) : null,
+                          border: isSel
+                              ? Border.all(color: _amberTintBorder)
+                              : null,
                         ),
-                        child: Icon(typeIcon, size: 16, color: isSel ? _accentText : _subColor),
+                        child: Icon(typeIcon,
+                            size: 16, color: isSel ? _accentText : _subColor),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -3257,13 +3708,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              l.isCanvasBackground ? '${l.name} (Fixed Canvas BG)' : l.name,
+                              l.isCanvasBackground
+                                  ? '${l.name} (Fixed Canvas BG)'
+                                  : l.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                              style: const TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.w600),
                             ),
                             Text(
-                              '${(l.opacity * 100).round()}% · ${l.blendMode.name} · ${l.width.round()}×${l.height.round()}',
+                              '${(l.opacity * 100).round()}% · ${l.blendMode.name} · ${l.width.round()}×${l.height.round()}${l.backgroundRemovedPath != null ? ' · BG Removed' : ''}${l.enhancedPath != null ? ' · Enhanced' : ''}',
                               style: TextStyle(fontSize: 12, color: _subColor),
                             ),
                           ],
@@ -3278,17 +3732,24 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 // of overflowing. All actions stay visible; nothing is hidden
                 // behind an overflow menu.
                 Wrap(
-                  alignment: WrapAlignment.end,
+                  alignment: WrapAlignment.start,
+                  spacing: 2,
                   children: [
                     if (!l.isCanvasBackground) ...[
-                      _compactLayerIcon(Icons.arrow_upward_rounded, 'Bring Forward', () => _moveLayerOrder(l, 1)),
-                      _compactLayerIcon(Icons.arrow_downward_rounded, 'Send Backward', () => _moveLayerOrder(l, -1)),
-                      _compactLayerIcon(Icons.vertical_align_top_rounded, 'Bring to Front', () => _moveLayerOrder(l, 999)),
-                      _compactLayerIcon(Icons.vertical_align_bottom_rounded, 'Send to Back', () => _moveLayerOrder(l, -999)),
+                      _compactLayerIcon(Icons.arrow_upward_rounded,
+                          'Bring Forward', () => _moveLayerOrder(l, 1)),
+                      _compactLayerIcon(Icons.arrow_downward_rounded,
+                          'Send Backward', () => _moveLayerOrder(l, -1)),
+                      _compactLayerIcon(Icons.vertical_align_top_rounded,
+                          'Bring to Front', () => _moveLayerOrder(l, 999)),
+                      _compactLayerIcon(Icons.vertical_align_bottom_rounded,
+                          'Send to Back', () => _moveLayerOrder(l, -999)),
                     ],
                     if (!(l.locked && l.isCanvasBackground))
-                      _compactLayerIcon(Icons.edit_outlined, 'Rename Layer', () => _renameLayerDialog(l)),
-                    if (l.type == LayerType.image && !(l.locked && l.isCanvasBackground))
+                      _compactLayerIcon(Icons.edit_outlined, 'Rename Layer',
+                          () => _renameLayerDialog(l)),
+                    if (l.type == LayerType.image &&
+                        !(l.locked && l.isCanvasBackground))
                       _compactLayerIcon(
                         Icons.swap_horiz_rounded,
                         'Replace Image',
@@ -3296,7 +3757,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         color: _accentText,
                       ),
                     _compactLayerIcon(
-                      l.visible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      l.visible
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
                       l.visible ? 'Hide' : 'Show',
                       () {
                         setState(() => l.visible = !l.visible);
@@ -3344,7 +3807,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           break;
         }
       }
-      final targetImg = (layer != null && layer.type == LayerType.image) ? layer : bgPhoto;
+      final targetImg =
+          (layer != null && layer.type == LayerType.image) ? layer : bgPhoto;
       if (targetImg == null) {
         return Padding(
           padding: const EdgeInsets.all(14),
@@ -3366,11 +3830,18 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       final editableImageCount = [
         for (final pg in _project.pages)
           for (final l in pg.layers)
-            if (l.type == LayerType.image && !(l.locked && l.isCanvasBackground)) l,
+            if (l.type == LayerType.image &&
+                !(l.locked && l.isCanvasBackground))
+              l,
       ].length;
       final isWhiteRemoved = targetImg.filters.removeWhite > 0;
+      final isBgRemoved = targetImg.backgroundRemovedPath != null;
+      final isEnhanced = targetImg.enhancedPath != null;
       final effectPresets = <(String, FilterSettings)>[
-        ('Original', FilterSettings(removeWhite: targetImg.filters.removeWhite)),
+        (
+          'Original',
+          FilterSettings(removeWhite: targetImg.filters.removeWhite)
+        ),
         (
           'Black & White',
           FilterSettings(
@@ -3421,7 +3892,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
         ),
         (
-          'Vivid Tone & PinkHaze Warm Silk',
+          'Warm Silk',
           FilterSettings(
             brightness: 1.06,
             contrast: 1.14,
@@ -3434,7 +3905,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
         ),
         (
-          'Rosy Haze & Freckles Out',
+          'Rosy Haze',
           FilterSettings(
             brightness: 1.08,
             contrast: 1.02,
@@ -3447,7 +3918,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
         ),
         (
-          'Glow Effect with Makeup',
+          'Soft Glow',
           FilterSettings(
             brightness: 1.09,
             contrast: 1.11,
@@ -3460,7 +3931,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
         ),
         (
-          'Portrait Blur V3',
+          'Portrait Blur',
           FilterSettings(
             brightness: 1.04,
             contrast: 1.12,
@@ -3560,7 +4031,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       : 'Image: ${targetImg.name}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12.5, color: _accentText, fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      color: _accentText,
+                      fontWeight: FontWeight.w700),
                 ),
               ),
               TextButton(
@@ -3577,6 +4051,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         targetImg.filters = FilterSettings();
                         targetImg.processedWhiteRemovedBytes = null;
                         targetImg.processedGuillocheBytes = null;
+                        targetImg.backgroundRemovedPath = null;
+                        targetImg.enhancedPath = null;
                       });
                       await _saveCurrentProject(showToast: false);
                     },
@@ -3592,16 +4068,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               Expanded(
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: isWhiteRemoved ? const Color(0xFF10B981) : _chipBg,
-                    foregroundColor: isWhiteRemoved ? Colors.black : _textColor,
+                    backgroundColor: isWhiteRemoved ? _inkPrimary : _chipBg,
+                    foregroundColor:
+                        isWhiteRemoved ? _onInkPrimary : _textColor,
                     padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
-                  onPressed: () => _applyWhiteRemoval(targetImg, isWhiteRemoved ? 0.0 : 35.0),
+                  onPressed: () => _applyWhiteRemoval(
+                      targetImg, isWhiteRemoved ? 0.0 : 35.0),
                   icon: const Icon(Icons.cleaning_services_outlined, size: 15),
                   label: Text(
                     isWhiteRemoved ? 'White BG Off ✓' : 'Remove White BG',
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w700),
                   ),
                 ),
               ),
@@ -3612,7 +4092,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     backgroundColor: isGuilloche ? _inkPrimary : _chipBg,
                     foregroundColor: isGuilloche ? _onInkPrimary : _textColor,
                     padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () async {
                     _pushUndoSnapshot();
@@ -3633,7 +4114,109 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   icon: const Icon(Icons.fingerprint_rounded, size: 16),
                   label: Text(
                     isGuilloche ? 'Guilloche ON ✓' : 'Guilloche Blend',
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: isBgRemoved ? _inkPrimary : _chipBg,
+                    foregroundColor: isBgRemoved ? _onInkPrimary : _textColor,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () async {
+                    if (isBgRemoved) {
+                      // Toggle off: restore the (possibly enhanced) source.
+                      _pushUndoSnapshot();
+                      setState(() => targetImg.backgroundRemovedPath = null);
+                      await _saveCurrentProject(showToast: false);
+                      return;
+                    }
+                    if (targetImg.isCanvasBackground) {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          backgroundColor: _cardBg,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16)),
+                          title: const Text('Remove canvas background?',
+                              style: TextStyle(
+                                  fontSize: 16.5, fontWeight: FontWeight.w700)),
+                          content: const Text(
+                            'This is the canvas photo — removing its background will punch a hole through the page and show what is behind it. Continue?',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: _inkPrimary,
+                                foregroundColor: _onInkPrimary,
+                              ),
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: const Text('Remove BG'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed != true || !mounted) return;
+                    }
+                    await _applyBackgroundRemoval(targetImg);
+                  },
+                  icon: const Icon(Icons.person_remove_outlined, size: 16),
+                  label: Text(
+                    isBgRemoved ? 'BG Removed ✓' : 'Remove BG (Person)',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: isEnhanced ? _inkPrimary : _chipBg,
+                    foregroundColor: isEnhanced ? _onInkPrimary : _textColor,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () async {
+                    if (isEnhanced) {
+                      // Toggle off: the background-removed PNG was derived
+                      // from the enhanced pixels, so re-segment the
+                      // original instead of keeping a stale cut-out.
+                      final hadBgRemoval =
+                          targetImg.backgroundRemovedPath != null;
+                      _pushUndoSnapshot();
+                      setState(() => targetImg.enhancedPath = null);
+                      await _saveCurrentProject(showToast: false);
+                      if (hadBgRemoval) {
+                        await _applyBackgroundRemoval(
+                          targetImg,
+                          takeUndoSnapshot: false,
+                        );
+                      }
+                      return;
+                    }
+                    await _applyEnhance(targetImg);
+                  },
+                  icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+                  label: Text(
+                    isEnhanced ? 'Enhanced ✓' : 'Enhance',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w700),
                   ),
                 ),
               ),
@@ -3652,7 +4235,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ],
           if (isGuilloche) ...[
             const SizedBox(height: 8),
-            Text('Security Texture', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _subColor)),
+            Text('Security Texture',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _subColor)),
             const SizedBox(height: 6),
             Row(
               children: [
@@ -3669,7 +4256,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       selected: sel,
                       onTap: () {
                         _pushUndoSnapshot();
-                        setState(() => targetImg.filters.guillochePattern = pat.$1);
+                        setState(
+                            () => targetImg.filters.guillochePattern = pat.$1);
                         _applyGuillocheBlend(targetImg);
                       },
                     ),
@@ -3687,7 +4275,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               onChangeEnd: (_) => _applyGuillocheBlend(targetImg),
             ),
             _sliderRow(
-              'Contour Bend',
+              'Bend',
               targetImg.filters.guillocheBend,
               0,
               6,
@@ -3704,7 +4292,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ),
           ],
           const SizedBox(height: 10),
-          Text('Studio Effects', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _subColor)),
+          Text('Studio Effects',
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -3715,23 +4305,37 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 final active = preset.guilloche
                     ? targetImg.filters.guilloche
                     : (!targetImg.filters.guilloche &&
-                        (targetImg.filters.brightness - preset.brightness).abs() < 0.02 &&
-                        (targetImg.filters.contrast - preset.contrast).abs() < 0.02 &&
+                        (targetImg.filters.brightness - preset.brightness)
+                                .abs() <
+                            0.02 &&
+                        (targetImg.filters.contrast - preset.contrast).abs() <
+                            0.02 &&
                         (targetImg.filters.sepia - preset.sepia).abs() < 0.02 &&
-                        (targetImg.filters.portraitBlur - preset.portraitBlur).abs() < 2.0 &&
-                        (targetImg.filters.softGlow - preset.softGlow).abs() < 2.0 &&
-                        (targetImg.filters.rosyTint - preset.rosyTint).abs() < 2.0 &&
-                        targetImg.filters.blackAndWhite == preset.blackAndWhite);
+                        (targetImg.filters.portraitBlur - preset.portraitBlur)
+                                .abs() <
+                            2.0 &&
+                        (targetImg.filters.softGlow - preset.softGlow).abs() <
+                            2.0 &&
+                        (targetImg.filters.rosyTint - preset.rosyTint).abs() <
+                            2.0 &&
+                        targetImg.filters.blackAndWhite ==
+                            preset.blackAndWhite);
                 return Padding(
                   padding: const EdgeInsets.only(right: 6),
                   child: ChoiceChip(
-                    label: Text(label, style: TextStyle(fontSize: 11.5, fontWeight: active ? FontWeight.w700 : FontWeight.w600)),
+                    label: Text(label,
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight:
+                                active ? FontWeight.w700 : FontWeight.w600)),
                     selected: active,
                     selectedColor: _amberTintBg,
                     backgroundColor: _chipBg,
                     checkmarkColor: _accentText,
-                    side: BorderSide(color: active ? _amberTintBorder : _borderColor),
-                    labelStyle: TextStyle(color: active ? _accentText : _textColor),
+                    side: BorderSide(
+                        color: active ? _amberTintBorder : _borderColor),
+                    labelStyle:
+                        TextStyle(color: active ? _accentText : _textColor),
                     onSelected: (_) {
                       _pushUndoSnapshot();
                       setState(() {
@@ -3804,7 +4408,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             onChangeEnd: (_) => _scheduleAutosave(),
           ),
           _sliderRow(
-            'PinkHaze Silk',
+            'Pink Haze',
             targetImg.filters.rosyTint,
             0,
             100,
@@ -3833,12 +4437,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 children: [
                   Text(
                     'Apply to all images',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _textColor),
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: _subColor),
                   ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     dense: true,
-                    title: const Text('Black & White', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    title: const Text('Black & White',
+                        style: TextStyle(
+                            fontSize: 12.5, fontWeight: FontWeight.w600)),
                     activeColor: _amber,
                     value: _applyAllBw,
                     onChanged: (v) => setState(() {
@@ -3849,7 +4458,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     dense: true,
-                    title: const Text('Guilloche', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    title: const Text('Guilloche',
+                        style: TextStyle(
+                            fontSize: 12.5, fontWeight: FontWeight.w600)),
                     activeColor: _amber,
                     value: _applyAllGuilloche,
                     onChanged: (v) => setState(() {
@@ -3872,7 +4483,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             child: _choicePill(
                               label: pat.$2,
                               selected: sel,
-                              onTap: () => setState(() => _applyAllGuillochePattern = pat.$1),
+                              onTap: () => setState(
+                                  () => _applyAllGuillochePattern = pat.$1),
                             ),
                           ),
                         );
@@ -3883,10 +4495,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     dense: true,
-                    title: const Text('Remove white', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    title: const Text('Remove white',
+                        style: TextStyle(
+                            fontSize: 12.5, fontWeight: FontWeight.w600)),
                     activeColor: _amber,
                     value: _applyAllRemoveWhiteEnabled,
-                    onChanged: (v) => setState(() => _applyAllRemoveWhiteEnabled = v),
+                    onChanged: (v) =>
+                        setState(() => _applyAllRemoveWhiteEnabled = v),
                   ),
                   if (_applyAllRemoveWhiteEnabled)
                     _sliderRow(
@@ -3902,10 +4517,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       backgroundColor: _inkPrimary,
                       foregroundColor: _onInkPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 11),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
                     ),
                     onPressed: _applyLookToAllImages,
-                    child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.w800)),
+                    child: const Text('Apply',
+                        style: TextStyle(fontWeight: FontWeight.w800)),
                   ),
                 ],
               ),
@@ -3944,7 +4561,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildSelectedLayerActionBar(layer),
-          if (layer.type == LayerType.image && layer.localImagePath != null) ...[
+          if (layer.type == LayerType.image &&
+              layer.localImagePath != null) ...[
             Row(
               children: [
                 Expanded(
@@ -3952,11 +4570,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     style: OutlinedButton.styleFrom(
                       side: BorderSide(color: _borderColor),
                       padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
                     ),
                     onPressed: () => _rotateSelectedImage90(layer),
-                    icon: const Icon(Icons.rotate_90_degrees_cw_rounded, size: 17),
-                    label: const Text('Rotate 90°', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                    icon: const Icon(Icons.rotate_90_degrees_cw_rounded,
+                        size: 17),
+                    label: const Text('Rotate 90°',
+                        style: TextStyle(
+                            fontSize: 12.5, fontWeight: FontWeight.w700)),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -3966,15 +4588,21 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       backgroundColor: _inkPrimary,
                       foregroundColor: _onInkPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
                     ),
                     onPressed: () => _cropSelectedImage(layer),
-                    icon: Icon(Icons.crop_rounded, size: 17, color: _brandNibOnInk),
-                    label: const Text('Crop Image', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                    icon: Icon(Icons.crop_rounded,
+                        size: 17, color: _brandNibOnInk),
+                    label: const Text('Crop Image',
+                        style: TextStyle(
+                            fontSize: 12.5, fontWeight: FontWeight.w700)),
                   ),
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            _buildFlipRow(layer),
             const SizedBox(height: 10),
           ],
           _buildExactSizeInputs(layer),
@@ -3996,7 +4624,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             onChangeEnd: (_) => _scheduleAutosave(),
           ),
           const SizedBox(height: 6),
-          Text('Blend Mode', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Blend Mode',
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 6,
@@ -4015,10 +4645,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
           const SizedBox(height: 10),
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: _inputBg,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(color: _borderColor),
             ),
             child: Column(
@@ -4027,7 +4657,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Align Layer on Canvas', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+                    Text('Align Layer on Canvas',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _subColor)),
                     GestureDetector(
                       onTap: () {
                         setState(() {
@@ -4037,7 +4671,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         });
                         _scheduleAutosave();
                       },
-                      child: Text('Center Both', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _accentText)),
+                      child: Text('Center Both',
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: _accentText)),
                     ),
                   ],
                 ),
@@ -4045,7 +4683,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 Row(
                   children: [
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_horizontal_left_rounded, 'Left', () {
+                      child: _canvasAlignBtn(
+                          Icons.align_horizontal_left_rounded, 'Left', () {
                         setState(() {
                           layer.x = 0;
                           _clampLayerInPage(layer);
@@ -4055,7 +4694,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_horizontal_center_rounded, 'Center', () {
+                      child: _canvasAlignBtn(
+                          Icons.align_horizontal_center_rounded, 'Center', () {
                         setState(() {
                           layer.x = (_page.width - layer.width) / 2;
                           _clampLayerInPage(layer);
@@ -4065,7 +4705,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_horizontal_right_rounded, 'Right', () {
+                      child: _canvasAlignBtn(
+                          Icons.align_horizontal_right_rounded, 'Right', () {
                         setState(() {
                           layer.x = _page.width - layer.width;
                           _clampLayerInPage(layer);
@@ -4079,7 +4720,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 Row(
                   children: [
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_vertical_top_rounded, 'Top', () {
+                      child: _canvasAlignBtn(
+                          Icons.align_vertical_top_rounded, 'Top', () {
                         setState(() {
                           layer.y = 0;
                           _clampLayerInPage(layer);
@@ -4089,7 +4731,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_vertical_center_rounded, 'Middle', () {
+                      child: _canvasAlignBtn(
+                          Icons.align_vertical_center_rounded, 'Middle', () {
                         setState(() {
                           layer.y = (_page.height - layer.height) / 2;
                           _clampLayerInPage(layer);
@@ -4099,7 +4742,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: _canvasAlignBtn(Icons.align_vertical_bottom_rounded, 'Bottom', () {
+                      child: _canvasAlignBtn(
+                          Icons.align_vertical_bottom_rounded, 'Bottom', () {
                         setState(() {
                           layer.y = _page.height - layer.height;
                           _clampLayerInPage(layer);
@@ -4114,16 +4758,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ),
           const SizedBox(height: 8),
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: _inputBg,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(color: _borderColor),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Nudge (5px)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+                Text('Nudge (5px)',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: _subColor)),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -4195,15 +4843,18 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               backgroundColor: _inkPrimary,
               foregroundColor: _onInkPrimary,
               padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: _importCanvasImage,
             icon: const Icon(Icons.upload_rounded, size: 18),
-            label: const Text('Import Canvas Image (Match Photo Size)', style: TextStyle(fontWeight: FontWeight.w700)),
+            label: const Text('Import Canvas Image (Match Photo Size)',
+                style: TextStyle(fontWeight: FontWeight.w700)),
           ),
           const SizedBox(height: 12),
-          const SizedBox(height: 12),
-          Text('Canvas Size Presets', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Canvas Size Presets',
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 6,
@@ -4217,7 +4868,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               ('Story 1080×1920', 1080.0, 1920.0),
               ('Wide 1280×720', 1280.0, 720.0),
             ].map((pItem) {
-              final sel = (_page.width - pItem.$2).abs() < 2 && (_page.height - pItem.$3).abs() < 2;
+              final sel = (_page.width - pItem.$2).abs() < 2 &&
+                  (_page.height - pItem.$3).abs() < 2;
               return _choicePill(
                 label: pItem.$1,
                 selected: sel,
@@ -4268,7 +4920,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ],
           ),
           const SizedBox(height: 12),
-          Text('Canvas Background', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Canvas Background',
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 10,
@@ -4297,7 +4951,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                           ? Icon(
                               Icons.check_rounded,
                               size: 18,
-                              color: c.computeLuminance() > 0.5 ? Colors.black : Colors.white,
+                              color: c.computeLuminance() > 0.5
+                                  ? Colors.black
+                                  : Colors.white,
                             )
                           : null),
                 ),
@@ -4346,7 +5002,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Text copied', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      content: Text('Text copied',
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                       duration: Duration(seconds: 2),
                     ),
                   );
@@ -4362,16 +5019,26 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Font Family (${fontItems.length})', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+              Text('Font Family (${fontItems.length})',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: _subColor)),
               TextButton.icon(
                 style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 onPressed: _openFontsLibrarySheet,
-                icon: Icon(Icons.font_download_outlined, size: 15, color: _accentText),
-                label: Text('Fonts Library (.TTF)', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _accentText)),
+                icon: Icon(Icons.font_download_outlined,
+                    size: 15, color: _accentText),
+                label: Text('Fonts Library (.TTF)',
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: _accentText)),
               ),
             ],
           ),
@@ -4389,7 +5056,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     layer.fontFamily = f.$1;
                     layer.isRtl = f.$3;
                     layer.lineHeight = f.$4;
-                    if (f.$1 == 'IBMPlexSansArabicSemiBold') layer.fontWeight = 600;
+                    if (f.$1 == 'IBMPlexSansArabicSemiBold')
+                      layer.fontWeight = 600;
                   });
                   _scheduleAutosave();
                 },
@@ -4448,9 +5116,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             children: [
               Expanded(
                 child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
+                  style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: _borderColor)),
                   onPressed: () {
-                    setState(() => layer.fontSize = (layer.fontSize - 6).clamp(12.0, 200.0));
+                    setState(() => layer.fontSize =
+                        (layer.fontSize - 6).clamp(12.0, 200.0));
                     _scheduleAutosave();
                   },
                   child: const Text('A− Smaller'),
@@ -4459,9 +5129,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
+                  style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: _borderColor)),
                   onPressed: () {
-                    setState(() => layer.fontSize = (layer.fontSize + 6).clamp(12.0, 200.0));
+                    setState(() => layer.fontSize =
+                        (layer.fontSize + 6).clamp(12.0, 200.0));
                     _scheduleAutosave();
                   },
                   child: const Text('A+ Larger'),
@@ -4470,7 +5142,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ],
           ),
           const SizedBox(height: 8),
-          Text('Text Alignment', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Text Alignment',
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
           Row(
             children: [
@@ -4478,7 +5152,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 child: _textAlignBtn(
                   Icons.format_align_left_rounded,
                   'Left',
-                  (layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left)) == TextAlign.left,
+                  (layer.textAlign ??
+                          (layer.isRtl ? TextAlign.right : TextAlign.left)) ==
+                      TextAlign.left,
                   () {
                     setState(() => layer.textAlign = TextAlign.left);
                     _scheduleAutosave();
@@ -4502,7 +5178,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 child: _textAlignBtn(
                   Icons.format_align_right_rounded,
                   'Right',
-                  (layer.textAlign ?? (layer.isRtl ? TextAlign.right : TextAlign.left)) == TextAlign.right,
+                  (layer.textAlign ??
+                          (layer.isRtl ? TextAlign.right : TextAlign.left)) ==
+                      TextAlign.right,
                   () {
                     setState(() => layer.textAlign = TextAlign.right);
                     _scheduleAutosave();
@@ -4526,7 +5204,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           const SizedBox(height: 8),
           Row(
             children: [
-              Text('Script Direction:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+              Text('Script Direction:',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: _subColor)),
               const SizedBox(width: 8),
               _choicePill(
                 label: 'RTL (Urdu/Arabic)',
@@ -4554,7 +5236,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ],
           ),
           const SizedBox(height: 10),
-          Text('Text Color', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Text Color',
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 10,
@@ -4575,6 +5259,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 child: Container(
                   width: 30,
                   height: 30,
+                  margin: const EdgeInsets.all(5),
                   decoration: BoxDecoration(
                     color: c,
                     shape: BoxShape.circle,
@@ -4588,7 +5273,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             }).toList(),
           ),
           const SizedBox(height: 10),
-          Text('Text Highlight Box', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+          Text('Text Highlight Box',
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 10,
@@ -4609,10 +5296,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 child: Container(
                   width: 30,
                   height: 30,
+                  margin: const EdgeInsets.all(5),
                   decoration: BoxDecoration(
                     color: c == Colors.transparent ? _chipBg : c,
                     shape: BoxShape.circle,
-                    border: Border.all(color: sel ? _amber : _borderColor, width: sel ? 3 : 1.2),
+                    border: Border.all(
+                        color: sel ? _amber : _borderColor,
+                        width: sel ? 3 : 1.2),
                   ),
                   child: c == Colors.transparent
                       ? Icon(Icons.block_rounded, size: 15, color: _subColor)
@@ -4634,7 +5324,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               children: [
                 Row(
                   children: [
-                    Text('Text Stroke (Outline)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _textColor)),
+                    Text('Text Stroke (Outline)',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _subColor)),
                     const Spacer(),
                     if (layer.textStrokeWidth > 0.05)
                       _choicePill(
@@ -4672,10 +5366,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       child: Container(
                         width: 26,
                         height: 26,
+                        margin: const EdgeInsets.all(7),
                         decoration: BoxDecoration(
                           color: c,
                           shape: BoxShape.circle,
-                          border: Border.all(color: sel ? _brandNib : _borderColor, width: sel ? 2.6 : 1.2),
+                          border: Border.all(
+                              color: sel ? _brandNib : _borderColor,
+                              width: sel ? 2.6 : 1.2),
                         ),
                       ),
                     );
@@ -4697,7 +5394,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               children: [
                 Row(
                   children: [
-                    Text('Soft Text Shadow', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _textColor)),
+                    Text('Soft Text Shadow',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _subColor)),
                     const Spacer(),
                     if (layer.textShadowBlur > 0.05 ||
                         layer.textShadowOffsetX.abs() > 0.1 ||
@@ -4760,10 +5461,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       child: Container(
                         width: 26,
                         height: 26,
+                        margin: const EdgeInsets.all(7),
                         decoration: BoxDecoration(
                           color: c.withOpacity(1.0),
                           shape: BoxShape.circle,
-                          border: Border.all(color: sel ? _brandNib : _borderColor, width: sel ? 2.6 : 1.2),
+                          border: Border.all(
+                              color: sel ? _brandNib : _borderColor,
+                              width: sel ? 2.6 : 1.2),
                         ),
                       ),
                     );
@@ -4777,7 +5481,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     }
 
     if (layer.type == LayerType.image) {
-      final curScale = ((layer.width / (_page.width <= 0 ? 1 : _page.width)) * 100.0).clamp(10.0, 250.0);
+      final curScale =
+          ((layer.width / (_page.width <= 0 ? 1 : _page.width)) * 100.0)
+              .clamp(10.0, 250.0);
       void applyImageScale(double pct) {
         final safePct = pct.clamp(10.0, 250.0);
         final ratio = layer.width / (layer.height <= 0 ? 1.0 : layer.height);
@@ -4785,7 +5491,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         setState(() {
           layer.width = nextW;
           if (layer.aspectLocked) {
-            layer.height = (nextW / (ratio <= 0.05 ? 1.0 : ratio)).clamp(24.0, 4000.0);
+            layer.height =
+                (nextW / (ratio <= 0.05 ? 1.0 : ratio)).clamp(24.0, 4000.0);
           }
           _clampLayerInPage(layer);
         });
@@ -4801,15 +5508,19 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
                     backgroundColor: layer.aspectLocked ? _inkPrimary : _chipBg,
-                    foregroundColor: layer.aspectLocked ? _onInkPrimary : _textColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    foregroundColor:
+                        layer.aspectLocked ? _onInkPrimary : _textColor,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () {
                     setState(() => layer.aspectLocked = !layer.aspectLocked);
                     _scheduleAutosave();
                   },
-                  icon: Icon(layer.aspectLocked ? Icons.lock : Icons.lock_open, size: 16),
-                  label: Text(layer.aspectLocked ? 'Ratio Locked' : 'Free Stretch',
+                  icon: Icon(layer.aspectLocked ? Icons.lock : Icons.lock_open,
+                      size: 16),
+                  label: Text(
+                      layer.aspectLocked ? 'Ratio Locked' : 'Free Stretch',
                       style: const TextStyle(fontWeight: FontWeight.w600)),
                 ),
               ),
@@ -4827,7 +5538,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             children: [
               Expanded(
                 child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
+                  style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: _borderColor)),
                   onPressed: () {
                     applyImageScale(curScale - 10);
                     _scheduleAutosave();
@@ -4838,7 +5550,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(side: BorderSide(color: _borderColor)),
+                  style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: _borderColor)),
                   onPressed: () {
                     applyImageScale(curScale + 10);
                     _scheduleAutosave();
@@ -4857,33 +5570,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             onChangeEnd: (_) => _scheduleAutosave(),
           ),
           const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(side: BorderSide(color: layer.flipX ? _amber : _borderColor)),
-                  onPressed: () {
-                    setState(() => layer.flipX = !layer.flipX);
-                    _scheduleAutosave();
-                  },
-                  icon: const Icon(Icons.flip_rounded, size: 16),
-                  label: const Text('Flip H'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(side: BorderSide(color: layer.flipY ? _amber : _borderColor)),
-                  onPressed: () {
-                    setState(() => layer.flipY = !layer.flipY);
-                    _scheduleAutosave();
-                  },
-                  icon: const Icon(Icons.flip_camera_android_rounded, size: 16),
-                  label: const Text('Flip V'),
-                ),
-              ),
-            ],
-          ),
+          _buildFlipRow(layer),
         ],
       );
     }
@@ -4911,7 +5598,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSelectedLayerActionBar(layer),
-        Text('Shape Style', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+        Text('Shape Style',
+            style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
         const SizedBox(height: 6),
         Wrap(
           spacing: 6,
@@ -4919,7 +5608,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           children: shapeTypes.map((st) {
             final sel = layer.shapeKind == st.$1;
             return ChoiceChip(
-              label: Text(st.$2, style: TextStyle(fontSize: 12, fontWeight: sel ? FontWeight.w700 : FontWeight.w600)),
+              label: Text(st.$2,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: sel ? FontWeight.w700 : FontWeight.w600)),
               selected: sel,
               selectedColor: _amberTintBg,
               backgroundColor: _chipBg,
@@ -4951,7 +5643,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           onChangeEnd: (_) => _scheduleAutosave(),
         ),
         const SizedBox(height: 6),
-        Text('Fill Color', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+        Text('Fill Color',
+            style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
         const SizedBox(height: 8),
         Wrap(
           spacing: 10,
@@ -4965,18 +5659,24 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               child: Container(
                 width: 30,
                 height: 30,
+                margin: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
                   color: c == Colors.transparent ? _chipBg : c,
                   shape: BoxShape.circle,
-                  border: Border.all(color: sel ? _amber : _borderColor, width: sel ? 3 : 1.2),
+                  border: Border.all(
+                      color: sel ? _amber : _borderColor, width: sel ? 3 : 1.2),
                 ),
-                child: c == Colors.transparent ? Icon(Icons.block_rounded, size: 15, color: _subColor) : null,
+                child: c == Colors.transparent
+                    ? Icon(Icons.block_rounded, size: 15, color: _subColor)
+                    : null,
               ),
             );
           }).toList(),
         ),
         const SizedBox(height: 10),
-        Text('Border Color', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
+        Text('Border Color',
+            style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w600, color: _subColor)),
         const SizedBox(height: 8),
         Wrap(
           spacing: 10,
@@ -4997,12 +5697,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               child: Container(
                 width: 30,
                 height: 30,
+                margin: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
                   color: c == Colors.transparent ? _chipBg : c,
                   shape: BoxShape.circle,
-                  border: Border.all(color: sel ? _amber : _borderColor, width: sel ? 3 : 1.2),
+                  border: Border.all(
+                      color: sel ? _amber : _borderColor, width: sel ? 3 : 1.2),
                 ),
-                child: c == Colors.transparent ? Icon(Icons.block_rounded, size: 15, color: _subColor) : null,
+                child: c == Colors.transparent
+                    ? Icon(Icons.block_rounded, size: 15, color: _subColor)
+                    : null,
               ),
             );
           }).toList(),
@@ -5027,18 +5731,19 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               layer.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _textColor),
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w700, color: _textColor),
             ),
           ),
           const SizedBox(width: 6),
           InkWell(
             onTap: _duplicateSelectedLayer,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(10),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 12),
               decoration: BoxDecoration(
                 color: _chipBg,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: _borderColor),
               ),
               child: Row(
@@ -5046,7 +5751,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 children: [
                   Icon(Icons.copy_rounded, size: 13.5, color: _textColor),
                   const SizedBox(width: 4),
-                  Text('Duplicate', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _textColor)),
+                  Text('Duplicate',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: _textColor)),
                 ],
               ),
             ),
@@ -5055,20 +5764,26 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             const SizedBox(width: 6),
             InkWell(
               onTap: _deleteSelectedLayer,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 9, vertical: 12),
                 decoration: BoxDecoration(
                   color: Colors.redAccent.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: Colors.redAccent.withOpacity(0.32)),
                 ),
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.delete_outline_rounded, size: 13.5, color: Colors.redAccent),
+                    Icon(Icons.delete_outline_rounded,
+                        size: 13.5, color: Colors.redAccent),
                     SizedBox(width: 4),
-                    Text('Delete', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.redAccent)),
+                    Text('Delete',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.redAccent)),
                   ],
                 ),
               ),
@@ -5076,6 +5791,40 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           ],
         ],
       ),
+    );
+  }
+
+  /// Flip H/V row, shared by the Design tab (image branch) and the Photo
+  /// tab (image branch) — previously Design-only. (H3)
+  Widget _buildFlipRow(DesignLayer layer) {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+                side: BorderSide(color: layer.flipX ? _amber : _borderColor)),
+            onPressed: () {
+              setState(() => layer.flipX = !layer.flipX);
+              _scheduleAutosave();
+            },
+            icon: const Icon(Icons.flip_rounded, size: 16),
+            label: const Text('Flip H'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+                side: BorderSide(color: layer.flipY ? _amber : _borderColor)),
+            onPressed: () {
+              setState(() => layer.flipY = !layer.flipY);
+              _scheduleAutosave();
+            },
+            icon: const Icon(Icons.flip_camera_android_rounded, size: 16),
+            label: const Text('Flip V'),
+          ),
+        ),
+      ],
     );
   }
 
@@ -5087,12 +5836,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
           color: selected ? _amberTintBg : _chipBg,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: selected ? _amberTintBorder : _borderColor),
         ),
         child: Text(
@@ -5111,12 +5860,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   Widget _canvasAlignBtn(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
         decoration: BoxDecoration(
           color: _cardBg,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: _borderColor),
         ),
         child: Row(
@@ -5129,7 +5878,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _textColor),
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _textColor),
               ),
             ),
           ],
@@ -5138,15 +5890,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     );
   }
 
-  Widget _textAlignBtn(IconData icon, String label, bool selected, VoidCallback onTap) {
+  Widget _textAlignBtn(
+      IconData icon, String label, bool selected, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
         decoration: BoxDecoration(
           color: selected ? _amberTintBg : _inputBg,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: selected ? _amberTintBorder : _borderColor),
         ),
         child: Row(
@@ -5172,7 +5925,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     );
   }
 
-  Widget _compactLayerIcon(IconData icon, String tooltip, VoidCallback onTap, {Color? color}) {
+  Widget _compactLayerIcon(IconData icon, String tooltip, VoidCallback onTap,
+      {Color? color}) {
     return Tooltip(
       message: tooltip,
       child: InkWell(
@@ -5198,7 +5952,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             labelText: 'Width (px)',
             onChanged: (nextW) {
               setState(() {
-                if (layer.type == LayerType.image && layer.aspectLocked && layer.width > 0 && layer.height > 0) {
+                if (layer.type == LayerType.image &&
+                    layer.aspectLocked &&
+                    layer.width > 0 &&
+                    layer.height > 0) {
                   final ratio = layer.width / layer.height;
                   layer.height = (nextW / ratio).clamp(1.0, 20000.0);
                 }
@@ -5219,7 +5976,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             labelText: 'Height (px)',
             onChanged: (nextH) {
               setState(() {
-                if (layer.type == LayerType.image && layer.aspectLocked && layer.width > 0 && layer.height > 0) {
+                if (layer.type == LayerType.image &&
+                    layer.aspectLocked &&
+                    layer.width > 0 &&
+                    layer.height > 0) {
                   final ratio = layer.width / layer.height;
                   layer.width = (nextH * ratio).clamp(1.0, 20000.0);
                 }
@@ -5250,12 +6010,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     return Row(
       children: [
         SizedBox(
-          width: 88,
+          width: 96,
           child: Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: _subColor),
+            style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w500, color: _subColor),
           ),
         ),
         Expanded(
@@ -5278,7 +6039,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               max: iMax,
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 12),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
               onChanged: onChanged,
             ),
           )
@@ -5288,7 +6050,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             child: Text(
               val.toStringAsFixed(val > 5 ? 0 : 2),
               textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _textColor),
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w600, color: _textColor),
             ),
           ),
       ],
@@ -5296,8 +6059,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   }
 
   Widget _buildQuickFillView() {
-    final fields = _page.layers.where((l) => l.type == LayerType.text || l.type == LayerType.image).toList();
-    final textFields = _page.layers.where((l) => l.type == LayerType.text).toList();
+    final fields = _page.layers
+        .where((l) => l.type == LayerType.text || l.type == LayerType.image)
+        .toList();
+    final textFields =
+        _page.layers.where((l) => l.type == LayerType.text).toList();
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -5308,7 +6074,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Quick Fill Form', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const Text('Quick Fill Form',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   Text(
                     'Update text & photos by Layer Name — exact coordinates & layout kept',
                     style: TextStyle(fontSize: 12, color: _subColor),
@@ -5318,7 +6086,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ),
             const SizedBox(width: 8),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
+              style: FilledButton.styleFrom(
+                  backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
               onPressed: () => _enterStudio(),
               icon: const Icon(Icons.brush_outlined, size: 16),
               label: const Text('Studio'),
@@ -5336,12 +6105,18 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 padding: const EdgeInsets.symmetric(vertical: 11),
               ),
               onPressed: () async {
-                final chosen = await showModalBottomSheet<(String, String, int, double)>(
+                final chosen =
+                    await showModalBottomSheet<(String, String, int, double)>(
                   context: context,
                   backgroundColor: _cardBg,
                   builder: (ctx) {
                     final presets = _availableTextFontOptions()
-                        .map((f) => (f.$1, f.$2, f.$1 == 'IBMPlexSansArabicSemiBold' ? 600 : 400, f.$4))
+                        .map((f) => (
+                              f.$1,
+                              f.$2,
+                              f.$1 == 'IBMPlexSansArabicSemiBold' ? 600 : 400,
+                              f.$4
+                            ))
                         .toList();
                     return SafeArea(
                       child: ListView(
@@ -5349,11 +6124,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         children: [
                           const Padding(
                             padding: EdgeInsets.all(8),
-                            child: Text('Pick 1 Font for ALL Text Layers', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                            child: Text('Pick 1 Font for ALL Text Layers',
+                                style: TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.bold)),
                           ),
                           ...presets.map((f) => ListTile(
-                                title: Text(f.$2, style: TextStyle(fontFamily: f.$1)),
-                                trailing: Icon(Icons.check_circle_outline, color: _accentText),
+                                title: Text(f.$2,
+                                    style: TextStyle(fontFamily: f.$1)),
+                                trailing: Icon(Icons.check_circle_outline,
+                                    color: _accentText),
                                 onTap: () => Navigator.pop(ctx, f),
                               )),
                         ],
@@ -5361,10 +6140,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     );
                   },
                 );
-                if (chosen != null) await _applyFontToAllTextLayers(chosen.$1, chosen.$3, chosen.$4);
+                if (chosen != null)
+                  await _applyFontToAllTextLayers(
+                      chosen.$1, chosen.$3, chosen.$4);
               },
               icon: const Icon(Icons.font_download_outlined, size: 17),
-              label: Text('Apply Same Font to All (${textFields.length} Text Layers)'),
+              label: Text(
+                  'Apply Same Font to All (${textFields.length} Text Layers)'),
             ),
           ),
         ],
@@ -5414,12 +6196,18 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.title_rounded, size: 16, color: _accentText),
+                            Icon(Icons.title_rounded,
+                                size: 16, color: _accentText),
                             const SizedBox(width: 6),
                             Expanded(
-                              child: Text(l.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                              child: Text(l.name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14)),
                             ),
-                            Text('X:${l.x.round()} Y:${l.y.round()}', style: TextStyle(fontSize: 11, color: _mutedColor)),
+                            Text('X:${l.x.round()} Y:${l.y.round()}',
+                                style: TextStyle(
+                                    fontSize: 11, color: _mutedColor)),
                             IconButton(
                               tooltip: 'Rename Field',
                               visualDensity: VisualDensity.compact,
@@ -5430,20 +6218,26 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         ),
                         const SizedBox(height: 6),
                         TextFormField(
-                          key: ValueKey('${_project.id}_${_page.id}_${l.id}_${l.name}'),
+                          key: ValueKey(
+                              '${_project.id}_${_page.id}_${l.id}_${l.name}'),
                           initialValue: l.text,
-                          textDirection: l.isRtl ? TextDirection.rtl : TextDirection.ltr,
+                          textDirection:
+                              l.isRtl ? TextDirection.rtl : TextDirection.ltr,
                           maxLines: null,
                           style: TextStyle(
                             fontFamily: l.fontFamily,
                             fontSize: 17,
-                            fontVariations: [ui.FontVariation('wght', l.fontWeight.toDouble())],
+                            fontVariations: [
+                              ui.FontVariation('wght', l.fontWeight.toDouble())
+                            ],
                           ),
-                          decoration: InputDecoration(hintText: 'Enter ${l.name}...'),
+                          decoration:
+                              InputDecoration(hintText: 'Enter ${l.name}...'),
                           onChanged: (val) {
                             setState(() {
                               l.text = val;
-                              if (_selectedLayerId == l.id) _textController.text = val;
+                              if (_selectedLayerId == l.id)
+                                _textController.text = val;
                             });
                             _scheduleAutosave();
                           },
@@ -5456,15 +6250,30 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             }
 
             final filterTags = <String>[
-              if (l.filters.guilloche) 'Guilloche Blend (${l.filters.guillochePattern})',
-              if (l.filters.removeWhite > 0) 'White BG Removed (${l.filters.removeWhite.round()}%)',
+              if (l.filters.guilloche)
+                'Guilloche Blend (${l.filters.guillochePattern})',
+              if (l.filters.removeWhite > 0)
+                'White BG Removed (${l.filters.removeWhite.round()}%)',
+              if (l.backgroundRemovedPath != null) 'Background Removed',
+              if (l.enhancedPath != null) 'Enhanced',
             ];
             Widget? thumb;
-            if (l.filters.guilloche && l.processedGuillocheBytes != null) {
-              thumb = Image.memory(l.processedGuillocheBytes!, fit: BoxFit.contain);
+            if (l.backgroundRemovedPath != null &&
+                File(l.backgroundRemovedPath!).existsSync()) {
+              thumb = Image.file(File(l.backgroundRemovedPath!),
+                  fit: BoxFit.contain);
+            } else if (l.enhancedPath != null &&
+                File(l.enhancedPath!).existsSync()) {
+              thumb = Image.file(File(l.enhancedPath!), fit: BoxFit.contain);
+            } else if (l.filters.guilloche &&
+                l.processedGuillocheBytes != null) {
+              thumb =
+                  Image.memory(l.processedGuillocheBytes!, fit: BoxFit.contain);
             } else if (l.processedWhiteRemovedBytes != null) {
-              thumb = Image.memory(l.processedWhiteRemovedBytes!, fit: BoxFit.contain);
-            } else if (l.localImagePath != null && File(l.localImagePath!).existsSync()) {
+              thumb = Image.memory(l.processedWhiteRemovedBytes!,
+                  fit: BoxFit.contain);
+            } else if (l.localImagePath != null &&
+                File(l.localImagePath!).existsSync()) {
               thumb = Image.file(File(l.localImagePath!), fit: BoxFit.contain);
             }
             return Padding(
@@ -5477,15 +6286,21 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.image_outlined, size: 16, color: _accentText),
+                          Icon(Icons.image_outlined,
+                              size: 16, color: _accentText),
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              l.isCanvasBackground ? '${l.name} (Canvas BG)' : l.name,
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                              l.isCanvasBackground
+                                  ? '${l.name} (Canvas BG)'
+                                  : l.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700, fontSize: 14),
                             ),
                           ),
-                          Text('${l.width.round()}×${l.height.round()}', style: TextStyle(fontSize: 11, color: _mutedColor)),
+                          Text('${l.width.round()}×${l.height.round()}',
+                              style:
+                                  TextStyle(fontSize: 11, color: _mutedColor)),
                           IconButton(
                             tooltip: 'Rename Field',
                             visualDensity: VisualDensity.compact,
@@ -5509,7 +6324,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 ? Icon(Icons.image_outlined, color: _mutedColor)
                                 : ClipRRect(
                                     borderRadius: BorderRadius.circular(9),
-                                    child: ColorFiltered(colorFilter: buildLayerColorFilter(l.filters), child: thumb),
+                                    child: ColorFiltered(
+                                        colorFilter:
+                                            buildLayerColorFilter(l.filters),
+                                        child: thumb),
                                   ),
                           ),
                           const SizedBox(width: 12),
@@ -5525,14 +6343,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                     fontSize: 11.5,
                                     color: filterTags.isEmpty
                                         ? _subColor
-                                        : (_isDark ? Colors.greenAccent : Colors.green.shade700),
+                                        : (_isDark
+                                            ? Colors.greenAccent
+                                            : Colors.green.shade700),
                                   ),
                                 ),
                                 const SizedBox(height: 8),
                                 FilledButton.icon(
-                                  style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
-                                  onPressed: () => _replaceLayerImageKeepingConfig(l),
-                                  icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                                  style: FilledButton.styleFrom(
+                                      backgroundColor: _inkPrimary,
+                                      foregroundColor: _onInkPrimary),
+                                  onPressed: () =>
+                                      _replaceLayerImageKeepingConfig(l),
+                                  icon: const Icon(Icons.swap_horiz_rounded,
+                                      size: 16),
                                   label: const Text('Replace Image'),
                                 ),
                               ],
@@ -5619,7 +6443,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 y: 248,
                 width: 880,
                 height: 76,
-                text: 'Bill No: #INV-1042      Date: 17 Nov 2025      Ph: 0300-1234567',
+                text:
+                    'Bill No: #INV-1042      Date: 17 Nov 2025      Ph: 0300-1234567',
                 fontFamily: 'PlusJakartaSans',
                 fontSize: 22,
                 fontWeight: 600,
@@ -5654,7 +6479,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 y: 468,
                 width: 880,
                 height: 460,
-                text: '1. Letterhead Printing (500 Sheets) — Rs. 4,500\n2. Business Rubber Stamp (گول مہر) — Rs. 1,200\n3. Custom Bill Books (10 Books) — Rs. 6,800\n4. Lamination & Binding — Rs. 1,500',
+                text:
+                    '1. Letterhead Printing (500 Sheets) — Rs. 4,500\n2. Business Rubber Stamp (گول مہر) — Rs. 1,200\n3. Custom Bill Books (10 Books) — Rs. 6,800\n4. Lamination & Binding — Rs. 1,500',
                 fontFamily: 'PlusJakartaSans',
                 fontSize: 25,
                 fontWeight: 500,
@@ -5750,7 +6576,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 y: 225,
                 width: 864,
                 height: 55,
-                text: 'Ref No: QE/2025/084                    Date: 17 / 11 / 2025',
+                text:
+                    'Ref No: QE/2025/084                    Date: 17 / 11 / 2025',
                 fontFamily: 'PlusJakartaSans',
                 fontSize: 21,
                 fontWeight: 600,
@@ -5766,7 +6593,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 y: 325,
                 width: 864,
                 height: 580,
-                text: 'بخدمت جناب مینیجر صاحب،\n\nگزارش ہے کہ ہمارے ادارے کی جانب سے تمام دستاویزات کی تصدیق مکمل ہو چکی ہے۔ آپ Fill tab سے نام اور تاریخ بدل کر پرنٹ کر سکتے ہیں اور Sign/Seal tab سے مہر شامل کر سکتے ہیں۔\n\nوالسلام',
+                text:
+                    'بخدمت جناب مینیجر صاحب،\n\nگزارش ہے کہ ہمارے ادارے کی جانب سے تمام دستاویزات کی تصدیق مکمل ہو چکی ہے۔ آپ Fill tab سے نام اور تاریخ بدل کر پرنٹ کر سکتے ہیں اور Sign/Seal tab سے مہر شامل کر سکتے ہیں۔\n\nوالسلام',
                 fontFamily: 'NotoNastaliqUrdu',
                 fontSize: 28,
                 textAlign: TextAlign.right,
@@ -5782,7 +6610,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 y: 1285,
                 width: 864,
                 height: 70,
-                text: 'Office 14, Shahrah-e-Quaid-e-Azam, Lahore · 042-3555-0192',
+                text:
+                    'Office 14, Shahrah-e-Quaid-e-Azam, Lahore · 042-3555-0192',
                 fontFamily: 'PlusJakartaSans',
                 fontSize: 20,
                 fontWeight: 600,
@@ -5827,7 +6656,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 y: 110,
                 width: 920,
                 height: 170,
-                text: 'سندِ اعزاز و امتیازی کارکردگی\nCERTIFICATE OF EXCELLENCE',
+                text:
+                    'سندِ اعزاز و امتیازی کارکردگی\nCERTIFICATE OF EXCELLENCE',
                 fontFamily: 'NotoNastaliqUrdu',
                 fontSize: 38,
                 fontWeight: 700,
@@ -5862,7 +6692,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 y: 505,
                 width: 940,
                 height: 165,
-                text: 'کو سالانہ امتحانات و نصابی سرگرمیوں میں شاندار کارکردگی کا مظاہرہ کرنے پر یہ سندِ اعزاز پیش کی جاتی ہے۔',
+                text:
+                    'کو سالانہ امتحانات و نصابی سرگرمیوں میں شاندار کارکردگی کا مظاہرہ کرنے پر یہ سندِ اعزاز پیش کی جاتی ہے۔',
                 fontFamily: 'NotoNastaliqUrdu',
                 fontSize: 28,
                 textAlign: TextAlign.center,
@@ -5878,7 +6709,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 y: 740,
                 width: 960,
                 height: 70,
-                text: 'Date: 17 Nov 2025                      Principal Sign & Official Seal',
+                text:
+                    'Date: 17 Nov 2025                      Principal Sign & Official Seal',
                 fontFamily: 'PlayfairDisplay',
                 fontSize: 22,
                 fontWeight: 700,
@@ -5950,7 +6782,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: _textColor),
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: _textColor),
                 ),
               ),
             ],
@@ -5970,10 +6805,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               style: FilledButton.styleFrom(
                 backgroundColor: _inkPrimary,
                 foregroundColor: _onInkPrimary,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9)),
               ),
               onPressed: onTap,
-              child: const Text('Use Template', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+              child: const Text('Use Template',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
             ),
           ),
         ],
@@ -6006,7 +6843,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: _scannerTealBorder),
                     ),
-                    child: Icon(Icons.document_scanner_rounded, color: _scannerTeal, size: 22),
+                    child: Icon(Icons.document_scanner_rounded,
+                        color: _scannerTeal, size: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -6015,7 +6853,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       children: [
                         Text(
                           'Document Scanner',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textColor),
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: _textColor),
                         ),
                         const SizedBox(height: 2),
                         Text(
@@ -6034,13 +6875,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     child: FilledButton.icon(
                       style: FilledButton.styleFrom(
                         backgroundColor: _scannerTeal,
-                        foregroundColor: _isDark ? const Color(0xFF0A0C0F) : Colors.white,
+                        foregroundColor:
+                            _isDark ? const Color(0xFF0A0C0F) : Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 11),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(11)),
                       ),
                       onPressed: _openDocumentScannerSheet,
-                      icon: const Icon(Icons.document_scanner_outlined, size: 17),
-                      label: const Text('Scan', style: TextStyle(fontWeight: FontWeight.w800)),
+                      icon:
+                          const Icon(Icons.document_scanner_outlined, size: 17),
+                      label: const Text('Scan',
+                          style: TextStyle(fontWeight: FontWeight.w800)),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -6050,11 +6895,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         foregroundColor: _accentText,
                         side: BorderSide(color: _amberTintBorder),
                         padding: const EdgeInsets.symmetric(vertical: 11),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(11)),
                       ),
                       onPressed: _openPdfForEditing,
                       icon: const Icon(Icons.picture_as_pdf_outlined, size: 17),
-                      label: const Text('Edit PDF', style: TextStyle(fontWeight: FontWeight.w800)),
+                      label: const Text('Edit PDF',
+                          style: TextStyle(fontWeight: FontWeight.w800)),
                     ),
                   ),
                 ],
@@ -6062,9 +6909,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ],
           ),
         ),
-        const Text('Urdu Business & Office Starters', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        const Text('Urdu Business & Office Starters',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         const SizedBox(height: 2),
-        Text('Quick-Fill ready invoices, letterheads & Urdu certificates', style: TextStyle(fontSize: 12, color: _subColor)),
+        Text('Quick-Fill ready invoices, letterheads & Urdu certificates',
+            style: TextStyle(fontSize: 12, color: _subColor)),
         const SizedBox(height: 10),
         SizedBox(
           height: 158,
@@ -6099,12 +6948,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Document Pages', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                Text('${_project.pages.length} page(s) in current project', style: TextStyle(fontSize: 12, color: _subColor)),
+                const Text('Document Pages',
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                Text('${_project.pages.length} page(s) in current project',
+                    style: TextStyle(fontSize: 12, color: _subColor)),
               ],
             ),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
+              style: FilledButton.styleFrom(
+                  backgroundColor: _inkPrimary, foregroundColor: _onInkPrimary),
               onPressed: () async {
                 setState(() {
                   _project.pages.add(DocumentPage(
@@ -6150,7 +7003,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 decoration: BoxDecoration(
                   color: _cardBg,
                   borderRadius: BorderRadius.circular(15),
-                  border: Border.all(color: active ? _brandNib : _borderColor, width: active ? 1.5 : 1),
+                  border: Border.all(
+                      color: active ? _brandNib : _borderColor,
+                      width: active ? 1.5 : 1),
                 ),
                 child: Row(
                   children: [
@@ -6158,7 +7013,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       width: 40,
                       height: 48,
                       decoration: BoxDecoration(
-                        color: pg.backgroundColor == Colors.transparent ? _chipBg : pg.backgroundColor,
+                        color: pg.backgroundColor == Colors.transparent
+                            ? _chipBg
+                            : pg.backgroundColor,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: _borderColor),
                       ),
@@ -6167,7 +7024,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         '${i + 1}',
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
-                          color: pg.backgroundColor.computeLuminance() > 0.5 ? Colors.black : Colors.white,
+                          color: pg.backgroundColor.computeLuminance() > 0.5
+                              ? Colors.black
+                              : Colors.white,
                         ),
                       ),
                     ),
@@ -6178,17 +7037,26 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         children: [
                           Row(
                             children: [
-                              Text(pg.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                              Text(pg.title,
+                                  style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700)),
                               if (active) ...[
                                 const SizedBox(width: 8),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 7, vertical: 2),
                                   decoration: BoxDecoration(
                                     color: _brandNib.withOpacity(0.15),
-                                    border: Border.all(color: _brandNib.withOpacity(0.45)),
+                                    border: Border.all(
+                                        color: _brandNib.withOpacity(0.45)),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
-                                  child: Text('ACTIVE', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: _brandNibInk)),
+                                  child: Text('ACTIVE',
+                                      style: TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: _brandNibInk)),
                                 ),
                               ],
                             ],
@@ -6203,14 +7071,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     ),
                     IconButton(
                       tooltip: 'Duplicate Page',
-                      icon: Icon(Icons.copy_rounded, size: 19, color: _subColor),
+                      icon:
+                          Icon(Icons.copy_rounded, size: 19, color: _subColor),
                       onPressed: () async {
                         _pushUndoSnapshot();
                         final clone = DocumentPage.fromJson(pg.toJson());
-                        clone.id = 'pg_${DateTime.now().microsecondsSinceEpoch}';
+                        clone.id =
+                            'pg_${DateTime.now().microsecondsSinceEpoch}';
                         clone.title = '${pg.title} Copy';
                         for (int k = 0; k < clone.layers.length; k++) {
-                          clone.layers[k].id = 'dup_${DateTime.now().microsecondsSinceEpoch}_$k';
+                          clone.layers[k].id =
+                              'dup_${DateTime.now().microsecondsSinceEpoch}_$k';
                         }
                         setState(() {
                           _project.pages.insert(i + 1, clone);
@@ -6230,7 +7101,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     ),
                     if (_project.pages.length > 1)
                       IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                        icon: const Icon(Icons.delete_outline,
+                            color: Colors.redAccent),
                         onPressed: () {
                           _pushUndoSnapshot();
                           setState(() {
@@ -6260,10 +7132,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         final embedded = <String, String>{};
         for (final pg in proj.pages) {
           for (final l in pg.layers) {
-            if (l.type == LayerType.image && l.localImagePath != null && l.localImagePath!.isNotEmpty) {
+            if (l.type == LayerType.image &&
+                l.localImagePath != null &&
+                l.localImagePath!.isNotEmpty) {
               final f = File(l.localImagePath!);
               if (f.existsSync() && !embedded.containsKey(l.localImagePath!)) {
-                embedded[l.localImagePath!] = base64Encode(await f.readAsBytes());
+                embedded[l.localImagePath!] =
+                    base64Encode(await f.readAsBytes());
               }
             }
           }
@@ -6278,7 +7153,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             .toLowerCase()
             .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
             .replaceAll(RegExp(r'^-|-$'), '');
-        final fileName = '${safeName.isEmpty ? "qalamix-project" : safeName}.qalamix.json';
+        final fileName =
+            '${safeName.isEmpty ? "qalamix-project" : safeName}.qalamix.json';
         final tmpDir = await getTemporaryDirectory();
         final outPath = p.join(tmpDir.path, fileName);
         await File(outPath).writeAsString(jsonEncode(bundle));
@@ -6291,7 +7167,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     );
   }
 
-  Future<String?> _writeBase64ToLocalImage(String b64OrDataUri, String prefix) async {
+  Future<String?> _writeBase64ToLocalImage(
+      String b64OrDataUri, String prefix) async {
     try {
       var raw = b64OrDataUri.trim();
       var ext = '.png';
@@ -6306,15 +7183,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       final docsDir = await getApplicationDocumentsDirectory();
       final imgDir = Directory(p.join(docsDir.path, 'qalamix_images'));
       if (!imgDir.existsSync()) imgDir.createSync(recursive: true);
-      final dest = p.join(imgDir.path, '${prefix}_${DateTime.now().microsecondsSinceEpoch}$ext');
+      final dest = p.join(imgDir.path,
+          '${prefix}_${DateTime.now().microsecondsSinceEpoch}$ext');
       await File(dest).writeAsBytes(bytes);
       return dest;
     } catch (_) {
       return null;
     }
   }
-
-
 
   String _blendLabel(BlendMode b) {
     switch (b) {
@@ -6510,7 +7386,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   ];
 
   Future<void> _pickCustomPreviewPhotoForEffects() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 92);
+    final picked = await ImagePicker()
+        .pickImage(source: ImageSource.gallery, imageQuality: 92);
     if (picked == null || !mounted) return;
     setState(() => _customEffectPreviewPath = picked.path);
   }
@@ -6526,16 +7403,19 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
 
         late final String targetPath;
-        if (_customEffectPreviewPath != null && File(_customEffectPreviewPath!).existsSync()) {
+        if (_customEffectPreviewPath != null &&
+            File(_customEffectPreviewPath!).existsSync()) {
           final ext = p.extension(_customEffectPreviewPath!).isEmpty
               ? '.jpg'
               : p.extension(_customEffectPreviewPath!);
-          targetPath = p.join(assetsDir.path, 'fx_${DateTime.now().microsecondsSinceEpoch}$ext');
+          targetPath = p.join(assetsDir.path,
+              'fx_${DateTime.now().microsecondsSinceEpoch}$ext');
           await File(_customEffectPreviewPath!).copy(targetPath);
         } else {
           final data = await rootBundle.load(spec.assetPath);
           final bytes = data.buffer.asUint8List();
-          targetPath = p.join(assetsDir.path, 'fx_${spec.id}_${DateTime.now().microsecondsSinceEpoch}.jpg');
+          targetPath = p.join(assetsDir.path,
+              'fx_${spec.id}_${DateTime.now().microsecondsSinceEpoch}.jpg');
           await File(targetPath).writeAsBytes(bytes);
         }
 
@@ -6593,7 +7473,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   }
 
   Widget _buildProjectsPhotoEffectsSection() {
-    final hasCustom = _customEffectPreviewPath != null && File(_customEffectPreviewPath!).existsSync();
+    final hasCustom = _customEffectPreviewPath != null &&
+        File(_customEffectPreviewPath!).existsSync();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -6609,26 +7490,32 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             ),
             if (hasCustom)
               TextButton(
-                onPressed: () => setState(() => _customEffectPreviewPath = null),
+                onPressed: () =>
+                    setState(() => _customEffectPreviewPath = null),
                 style: TextButton.styleFrom(
                   visualDensity: VisualDensity.compact,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                 ),
-                child: Text('Samples', style: TextStyle(fontSize: 12, color: _subColor)),
+                child: Text('Samples',
+                    style: TextStyle(fontSize: 12, color: _subColor)),
               ),
             OutlinedButton.icon(
               onPressed: _pickCustomPreviewPhotoForEffects,
               style: OutlinedButton.styleFrom(
                 side: BorderSide(color: _borderColor),
                 foregroundColor: _textColor,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 minimumSize: const Size(0, 32),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9)),
               ),
-              icon: Icon(Icons.photo_camera_outlined, size: 14, color: _brandNib),
+              icon:
+                  Icon(Icons.photo_camera_outlined, size: 14, color: _brandNib),
               label: Text(
                 hasCustom ? 'Change Photo' : 'My Photo',
-                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                    fontSize: 11.5, fontWeight: FontWeight.w700),
               ),
             ),
           ],
@@ -6675,7 +7562,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     ),
                     Container(
                       decoration: BoxDecoration(
-                        border: Border.all(color: _borderColor.withOpacity(0.5)),
+                        border:
+                            Border.all(color: _borderColor.withOpacity(0.5)),
                         borderRadius: BorderRadius.circular(14),
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
@@ -6777,431 +7665,496 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         constraints: const BoxConstraints(maxWidth: 700),
         child: ListView(
           padding: const EdgeInsets.all(16),
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Offline Projects', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                      Text('${_projects.length} saved locally · Tap a project to edit in Studio', style: TextStyle(fontSize: 12, color: _subColor)),
-                    ],
-                  ),
-                ),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: _borderColor),
-                    foregroundColor: _textColor,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: () => _enterStudio(),
-                  icon: const Icon(Icons.brush_outlined, size: 16),
-                  label: const Text('Open Studio', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _inkPrimary,
-                      foregroundColor: _onInkPrimary,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                    ),
-                    onPressed: _createNewProject,
-                    icon: Icon(Icons.add_rounded, size: 18, color: _brandNibOnInk),
-                    label: const Text('New Project', style: TextStyle(fontWeight: FontWeight.w700)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      side: BorderSide(color: _amber.withOpacity(0.7)),
-                      foregroundColor: _accentText,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                    ),
-                    onPressed: _importProjectFile,
-                    icon: const Icon(Icons.file_open_outlined, size: 18),
-                    label: const Text('Import .qalamix', style: TextStyle(fontWeight: FontWeight.w700)),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        Text(
-          'Saved Projects (${_projects.length})',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _textColor),
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _projectSearchController,
-          onChanged: (v) => setState(() => _projectSearchQuery = v),
-          decoration: InputDecoration(
-            hintText: 'Search projects...',
-            prefixIcon: const Icon(Icons.search_rounded, size: 18),
-            suffixIcon: _projectSearchQuery.isEmpty
-                ? null
-                : IconButton(
-                    tooltip: 'Clear search',
-                    icon: const Icon(Icons.clear_rounded, size: 18),
-                    onPressed: () {
-                      _projectSearchController.clear();
-                      setState(() => _projectSearchQuery = '');
-                    },
-                  ),
-            filled: true,
-            fillColor: _inputBg,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(11),
-              borderSide: BorderSide(color: _borderColor),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(11),
-              borderSide: BorderSide(color: _borderColor),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(11),
-              borderSide: BorderSide(color: _amber),
-            ),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          ),
-        ),
-        const SizedBox(height: 10),
-        if (_projects.isEmpty && _projectSearchQuery.trim().isEmpty)
-          Container(
-            width: double.infinity,
-            margin: const EdgeInsets.only(top: 6),
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 22),
-            decoration: BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _borderColor),
-            ),
-            child: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: _amberTintBg,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.design_services_outlined, size: 30, color: _accentText),
-                ),
-                const SizedBox(height: 14),
-                const Text(
-                  'Apna pehla design banao',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'New Project se shuru karo — text, photo aur layers add karo',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, color: _subColor, height: 1.4),
-                ),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _inkPrimary,
-                    foregroundColor: _onInkPrimary,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                  ),
-                  onPressed: _createNewProject,
-                  icon: Icon(Icons.add_rounded, size: 18, color: _brandNibOnInk),
-                  label: const Text('New Project', style: TextStyle(fontWeight: FontWeight.w700)),
-                ),
-              ],
-            ),
-          ),
-        if (_projects.isNotEmpty)
-          Row(
-            children: [
-              Icon(Icons.sort_rounded, size: 16, color: _subColor),
-              const SizedBox(width: 6),
-              Text('Sort:', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _subColor)),
-              const SizedBox(width: 4),
-              PopupMenuButton<String>(
-                tooltip: 'Sort projects',
-                padding: EdgeInsets.zero,
-                onSelected: (v) => setState(() => _projectSort = v),
-                itemBuilder: (ctx) => const [
-                  PopupMenuItem(value: 'newest', child: Text('Newest')),
-                  PopupMenuItem(value: 'oldest', child: Text('Oldest')),
-                  PopupMenuItem(value: 'name', child: Text('Name (A–Z)')),
-                ],
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: _chipBg,
-                    borderRadius: BorderRadius.circular(9),
-                    border: Border.all(color: _borderColor),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _projectSort == 'oldest'
-                            ? 'Oldest'
-                            : (_projectSort == 'name' ? 'Name (A–Z)' : 'Newest'),
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Offline Projects',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.w700)),
+                          Text(
+                              '${_projects.length} saved locally · Tap a project to edit in Studio',
+                              style: TextStyle(fontSize: 12, color: _subColor)),
+                        ],
                       ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.arrow_drop_down_rounded, size: 18),
-                    ],
-                  ),
+                    ),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: _borderColor),
+                        foregroundColor: _textColor,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () => _enterStudio(),
+                      icon: const Icon(Icons.brush_outlined, size: 16),
+                      label: const Text('Open Studio',
+                          style: TextStyle(
+                              fontSize: 12.5, fontWeight: FontWeight.w700)),
+                    ),
+                  ],
                 ),
-              ),
-            ],
-          ),
-        if (_projects.isNotEmpty) const SizedBox(height: 10),
-        if (_filteredProjects.isEmpty && _projects.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              'No projects match "$_projectSearchQuery".',
-              style: TextStyle(fontSize: 13, color: _subColor),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _inkPrimary,
+                          foregroundColor: _onInkPrimary,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(11)),
+                        ),
+                        onPressed: _createNewProject,
+                        icon: Icon(Icons.add_rounded,
+                            size: 18, color: _brandNibOnInk),
+                        label: const Text('New Project',
+                            style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          side: BorderSide(color: _amber.withOpacity(0.7)),
+                          foregroundColor: _accentText,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(11)),
+                        ),
+                        onPressed: _importProjectFile,
+                        icon: const Icon(Icons.file_open_outlined, size: 18),
+                        label: const Text('Import .qalamix',
+                            style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
-          ),
-        ..._filteredProjects.map((proj) {
-          final isCurrent = proj.id == _project.id;
-          final thumbBytes = _projectThumbCache[proj.id];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: InkWell(
-              onTap: () async {
-                setState(() {
-                  _project = proj;
-                  _pageIndex = 0;
-                  _selectedLayerId = null;
-                  _undoStack.clear();
-                  _redoStack.clear();
-                  _studioEntrySnapshot = (0, proj.encode());
-                  _inStudio = true;
-                  _sheetExpanded = _sheetExpandedOnStudioEntry();
-                  _sheetTall = false;
-                  _sheetUserCollapsed = false;
-                });
-                await _rehydrateProjectFilters(proj);
-              },
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                padding: const EdgeInsets.all(14),
+            const SizedBox(height: 18),
+            Text(
+              'Saved Projects (${_projects.length})',
+              style: TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w800, color: _textColor),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _projectSearchController,
+              onChanged: (v) => setState(() => _projectSearchQuery = v),
+              decoration: InputDecoration(
+                hintText: 'Search projects...',
+                prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                suffixIcon: _projectSearchQuery.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        icon: const Icon(Icons.clear_rounded, size: 18),
+                        onPressed: () {
+                          _projectSearchController.clear();
+                          setState(() => _projectSearchQuery = '');
+                        },
+                      ),
+                filled: true,
+                fillColor: _inputBg,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(11),
+                  borderSide: BorderSide(color: _borderColor),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(11),
+                  borderSide: BorderSide(color: _borderColor),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(11),
+                  borderSide: BorderSide(color: _amber),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (_projects.isEmpty && _projectSearchQuery.trim().isEmpty)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 22),
                 decoration: BoxDecoration(
                   color: _cardBg,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: isCurrent ? _brandNib : _borderColor,
-                    width: isCurrent ? 1.5 : 1,
-                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: _borderColor),
                 ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 52,
-                          height: 58,
-                          decoration: BoxDecoration(
-                            color: _amberTintBg,
-                            borderRadius: BorderRadius.circular(11),
-                            border: Border.all(
-                              color: isCurrent ? _brandNib : _amberTintBorder,
-                              width: isCurrent ? 1.5 : 1,
-                            ),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: thumbBytes != null
-                              ? Image.memory(
-                                  thumbBytes,
-                                  fit: BoxFit.cover,
-                                  gaplessPlayback: true,
-                                )
-                              : Icon(
-                                  isCurrent ? Icons.layers_rounded : Icons.folder_open_rounded,
-                                  color: _accentText,
-                                  size: 22,
-                                ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                proj.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: _textColor),
-                              ),
-                              const SizedBox(height: 3),
-                              Row(
-                                children: [
-                                  if (isCurrent) ...[
-                                    Container(
-                                      width: 6,
-                                      height: 6,
-                                      margin: const EdgeInsets.only(right: 5),
-                                      decoration: BoxDecoration(color: _brandNibInk, shape: BoxShape.circle),
-                                    ),
-                                    Text(
-                                      'Active · ',
-                                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _brandNibInk),
-                                    ),
-                                  ],
-                                  Flexible(
-                                    child: Text(
-                                      '${proj.pages.length} ${proj.pages.length == 1 ? 'page' : 'pages'} · Offline',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(fontSize: 11.5, color: _subColor),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                _formatUpdatedTime(proj.updatedAt),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 11, color: _mutedColor),
-                              ),
-                            ],
-                          ),
-                        ),
-                        _compactLayerIcon(Icons.edit_outlined, 'Rename Project', () => _renameProjectDialog(proj)),
-                        _compactLayerIcon(
-                          Icons.delete_outline_rounded,
-                          'Delete Project',
-                          () => _confirmDeleteProject(proj),
-                          color: Colors.redAccent,
-                        ),
-                      ],
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: _amberTintBg,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.design_services_outlined,
+                          size: 30, color: _accentText),
                     ),
-                    const SizedBox(height: 11),
-                    Divider(height: 1, thickness: 1, color: _borderColor),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: InkWell(
-                            onTap: () async {
-                              setState(() {
-                                _project = proj;
-                                _pageIndex = 0;
-                                _selectedLayerId = null;
-                                _undoStack.clear();
-                                _redoStack.clear();
-                                _studioEntrySnapshot = (0, proj.encode());
-                                _inStudio = true;
-                                _sheetExpanded = _sheetExpandedOnStudioEntry();
-                                _sheetTall = false;
-                                _sheetUserCollapsed = false;
-                              });
-                              await _rehydrateProjectFilters(proj);
-                            },
-                            borderRadius: BorderRadius.circular(10),
-                            child: Container(
-                              height: 36,
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
-                              decoration: BoxDecoration(
-                                color: _inkPrimary,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.brush_outlined, size: 15, color: _brandNibOnInk),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    isCurrent ? 'Open Studio' : 'Open',
-                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _onInkPrimary),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        InkWell(
-                          onTap: () => _shareProjectFile(proj),
-                          borderRadius: BorderRadius.circular(10),
-                          child: Container(
-                            height: 36,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: _shareSkyBg,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: _shareSkyBorder),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.share_outlined, size: 15, color: _shareSky),
-                                const SizedBox(width: 5),
-                                Text(
-                                  'Share',
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _shareSky),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        InkWell(
-                          onTap: () async {
-                            final dup = DesignProject.decode(proj.encode());
-                            dup.id = 'proj_dup_${DateTime.now().millisecondsSinceEpoch}';
-                            dup.name = '${proj.name} (Copy)';
-                            dup.updatedAt = DateTime.now().millisecondsSinceEpoch;
-                            await _runWithSavingHud(
-                              savingTitle: 'Duplicating Project...',
-                              savingSubtitle: dup.name,
-                              savedTitle: 'Project Duplicated',
-                              savedSubtitle: dup.name,
-                              action: () async {
-                                await LocalProjectStore.instance.saveProject(dup);
-                                final list = await LocalProjectStore.instance.loadAllProjects();
-                                if (mounted) setState(() => _projects = list);
-                              },
-                            );
-                          },
-                          borderRadius: BorderRadius.circular(10),
-                          child: Container(
-                            height: 36,
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            decoration: BoxDecoration(
-                              color: _chipBg,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: _borderColor),
-                            ),
-                            child: Icon(Icons.copy_rounded, size: 15, color: _subColor),
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Apna pehla design banao',
+                      textAlign: TextAlign.center,
+                      style:
+                          TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'New Project se shuru karo — text, photo aur layers add karo',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 13, color: _subColor, height: 1.4),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _inkPrimary,
+                        foregroundColor: _onInkPrimary,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(11)),
+                      ),
+                      onPressed: _createNewProject,
+                      icon: Icon(Icons.add_rounded,
+                          size: 18, color: _brandNibOnInk),
+                      label: const Text('New Project',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
                     ),
                   ],
                 ),
               ),
-            ),
-          );
-        }),
-        const SizedBox(height: 18),
-        _buildProjectsPhotoEffectsSection(),
+            if (_projects.isNotEmpty)
+              Row(
+                children: [
+                  Icon(Icons.sort_rounded, size: 16, color: _subColor),
+                  const SizedBox(width: 6),
+                  Text('Sort:',
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: _subColor)),
+                  const SizedBox(width: 4),
+                  PopupMenuButton<String>(
+                    tooltip: 'Sort projects',
+                    padding: EdgeInsets.zero,
+                    onSelected: (v) => setState(() => _projectSort = v),
+                    itemBuilder: (ctx) => const [
+                      PopupMenuItem(value: 'newest', child: Text('Newest')),
+                      PopupMenuItem(value: 'oldest', child: Text('Oldest')),
+                      PopupMenuItem(value: 'name', child: Text('Name (A–Z)')),
+                    ],
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _chipBg,
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(color: _borderColor),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _projectSort == 'oldest'
+                                ? 'Oldest'
+                                : (_projectSort == 'name'
+                                    ? 'Name (A–Z)'
+                                    : 'Newest'),
+                            style: const TextStyle(
+                                fontSize: 12.5, fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.arrow_drop_down_rounded, size: 18),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            if (_projects.isNotEmpty) const SizedBox(height: 10),
+            if (_filteredProjects.isEmpty && _projects.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  'No projects match "$_projectSearchQuery".',
+                  style: TextStyle(fontSize: 13, color: _subColor),
+                ),
+              ),
+            ..._filteredProjects.map((proj) {
+              final isCurrent = proj.id == _project.id;
+              final thumbBytes = _projectThumbCache[proj.id];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: InkWell(
+                  onTap: () async {
+                    setState(() {
+                      _project = proj;
+                      _pageIndex = 0;
+                      _selectedLayerId = null;
+                      _undoStack.clear();
+                      _redoStack.clear();
+                      _studioEntrySnapshot = (0, proj.encode());
+                      _inStudio = true;
+                      _sheetExpanded = _sheetExpandedOnStudioEntry();
+                      _sheetTall = false;
+                      _sheetUserCollapsed = false;
+                    });
+                    await _rehydrateProjectFilters(proj);
+                  },
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: _cardBg,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isCurrent ? _brandNib : _borderColor,
+                        width: isCurrent ? 1.5 : 1,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 52,
+                              height: 58,
+                              decoration: BoxDecoration(
+                                color: _amberTintBg,
+                                borderRadius: BorderRadius.circular(11),
+                                border: Border.all(
+                                  color:
+                                      isCurrent ? _brandNib : _amberTintBorder,
+                                  width: isCurrent ? 1.5 : 1,
+                                ),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: thumbBytes != null
+                                  ? Image.memory(
+                                      thumbBytes,
+                                      fit: BoxFit.cover,
+                                      gaplessPlayback: true,
+                                    )
+                                  : Icon(
+                                      isCurrent
+                                          ? Icons.layers_rounded
+                                          : Icons.folder_open_rounded,
+                                      color: _accentText,
+                                      size: 22,
+                                    ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    proj.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        color: _textColor),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Row(
+                                    children: [
+                                      if (isCurrent) ...[
+                                        Container(
+                                          width: 6,
+                                          height: 6,
+                                          margin:
+                                              const EdgeInsets.only(right: 5),
+                                          decoration: BoxDecoration(
+                                              color: _brandNibInk,
+                                              shape: BoxShape.circle),
+                                        ),
+                                        Text(
+                                          'Active · ',
+                                          style: TextStyle(
+                                              fontSize: 11.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: _brandNibInk),
+                                        ),
+                                      ],
+                                      Flexible(
+                                        child: Text(
+                                          '${proj.pages.length} ${proj.pages.length == 1 ? 'page' : 'pages'} · Offline',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                              fontSize: 11.5, color: _subColor),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _formatUpdatedTime(proj.updatedAt),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 11, color: _mutedColor),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            _compactLayerIcon(
+                                Icons.edit_outlined,
+                                'Rename Project',
+                                () => _renameProjectDialog(proj)),
+                            _compactLayerIcon(
+                              Icons.delete_outline_rounded,
+                              'Delete Project',
+                              () => _confirmDeleteProject(proj),
+                              color: Colors.redAccent,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 11),
+                        Divider(height: 1, thickness: 1, color: _borderColor),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: InkWell(
+                                onTap: () async {
+                                  setState(() {
+                                    _project = proj;
+                                    _pageIndex = 0;
+                                    _selectedLayerId = null;
+                                    _undoStack.clear();
+                                    _redoStack.clear();
+                                    _studioEntrySnapshot = (0, proj.encode());
+                                    _inStudio = true;
+                                    _sheetExpanded =
+                                        _sheetExpandedOnStudioEntry();
+                                    _sheetTall = false;
+                                    _sheetUserCollapsed = false;
+                                  });
+                                  await _rehydrateProjectFilters(proj);
+                                },
+                                borderRadius: BorderRadius.circular(10),
+                                child: Container(
+                                  height: 36,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12),
+                                  decoration: BoxDecoration(
+                                    color: _inkPrimary,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.brush_outlined,
+                                          size: 15, color: _brandNibOnInk),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        isCurrent ? 'Open Studio' : 'Open',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: _onInkPrimary),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            InkWell(
+                              onTap: () => _shareProjectFile(proj),
+                              borderRadius: BorderRadius.circular(10),
+                              child: Container(
+                                height: 36,
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                decoration: BoxDecoration(
+                                  color: _shareSkyBg,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: _shareSkyBorder),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.share_outlined,
+                                        size: 15, color: _shareSky),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      'Share',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: _shareSky),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            InkWell(
+                              onTap: () async {
+                                final dup = DesignProject.decode(proj.encode());
+                                dup.id =
+                                    'proj_dup_${DateTime.now().millisecondsSinceEpoch}';
+                                dup.name = '${proj.name} (Copy)';
+                                dup.updatedAt =
+                                    DateTime.now().millisecondsSinceEpoch;
+                                await _runWithSavingHud(
+                                  savingTitle: 'Duplicating Project...',
+                                  savingSubtitle: dup.name,
+                                  savedTitle: 'Project Duplicated',
+                                  savedSubtitle: dup.name,
+                                  action: () async {
+                                    await LocalProjectStore.instance
+                                        .saveProject(dup);
+                                    final list = await LocalProjectStore
+                                        .instance
+                                        .loadAllProjects();
+                                    if (mounted)
+                                      setState(() => _projects = list);
+                                  },
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(10),
+                              child: Container(
+                                height: 36,
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 10),
+                                decoration: BoxDecoration(
+                                  color: _chipBg,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: _borderColor),
+                                ),
+                                child: Icon(Icons.copy_rounded,
+                                    size: 15, color: _subColor),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+            const SizedBox(height: 18),
+            _buildProjectsPhotoEffectsSection(),
           ],
         ),
       ),
@@ -7235,7 +8188,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     final scale = math.min(sx, sy);
     final dx = (widgetSize.width - _sigCanvasSize.width * scale) / 2.0;
     final dy = (widgetSize.height - _sigCanvasSize.height * scale) / 2.0;
-    return Offset((localPos.dx - dx) / math.max(0.001, scale), (localPos.dy - dy) / math.max(0.001, scale));
+    return Offset((localPos.dx - dx) / math.max(0.001, scale),
+        (localPos.dy - dy) / math.max(0.001, scale));
   }
 
   void _undoSignatureStroke() {
@@ -7281,13 +8235,19 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 return Padding(
                   padding: const EdgeInsets.only(right: 6),
                   child: ChoiceChip(
-                    label: Text(p.$2, style: TextStyle(fontSize: 11.5, fontWeight: selected ? FontWeight.w700 : FontWeight.w600)),
+                    label: Text(p.$2,
+                        style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight:
+                                selected ? FontWeight.w700 : FontWeight.w600)),
                     selected: selected,
                     selectedColor: _amberTintBg,
                     backgroundColor: _chipBg,
                     checkmarkColor: _accentText,
-                    side: BorderSide(color: selected ? _amberTintBorder : _borderColor),
-                    labelStyle: TextStyle(color: selected ? _accentText : _textColor),
+                    side: BorderSide(
+                        color: selected ? _amberTintBorder : _borderColor),
+                    labelStyle:
+                        TextStyle(color: selected ? _accentText : _textColor),
                     onSelected: (_) {
                       setState(() => _sigPenType = p.$1);
                       onChanged?.call();
@@ -7298,14 +8258,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               ChoiceChip(
                 label: Text(
                   _sigAutoSmooth ? 'Auto Smooth: On' : 'Auto Smooth: Off',
-                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                      fontSize: 11.5, fontWeight: FontWeight.w700),
                 ),
                 selected: _sigAutoSmooth,
                 selectedColor: _amberTintBg,
                 backgroundColor: _chipBg,
                 checkmarkColor: _accentText,
-                side: BorderSide(color: _sigAutoSmooth ? _amberTintBorder : _borderColor),
-                labelStyle: TextStyle(color: _sigAutoSmooth ? _accentText : _subColor),
+                side: BorderSide(
+                    color: _sigAutoSmooth ? _amberTintBorder : _borderColor),
+                labelStyle:
+                    TextStyle(color: _sigAutoSmooth ? _accentText : _subColor),
                 onSelected: (_) {
                   setState(() => _sigAutoSmooth = !_sigAutoSmooth);
                   onChanged?.call();
@@ -7334,14 +8297,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
           return StatefulBuilder(
             builder: (ctx, setModalState) {
               return Scaffold(
-                backgroundColor: _isDark ? const Color(0xFF12141A) : const Color(0xFFF6F4EF),
+                backgroundColor:
+                    _isDark ? const Color(0xFF12141A) : const Color(0xFFF6F4EF),
                 appBar: AppBar(
                   backgroundColor: _cardBg,
                   leading: IconButton(
                     icon: const Icon(Icons.close_rounded),
                     onPressed: () => Navigator.pop(ctx),
                   ),
-                  title: const Text('Draw Signature', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  title: const Text('Draw Signature',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   actions: [
                     IconButton(
                       tooltip: 'Undo',
@@ -7371,7 +8337,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               _clearSignatureStrokes();
                               setModalState(() {});
                             },
-                      icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                      icon: const Icon(Icons.delete_outline_rounded,
+                          color: Colors.redAccent),
                     ),
                     Padding(
                       padding: const EdgeInsets.only(right: 10, left: 4),
@@ -7384,7 +8351,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         ),
                         onPressed: () => Navigator.pop(ctx),
                         icon: const Icon(Icons.check_rounded, size: 17),
-                        label: const Text('Done', style: TextStyle(fontWeight: FontWeight.w700)),
+                        label: const Text('Done',
+                            style: TextStyle(fontWeight: FontWeight.w700)),
                       ),
                     ),
                   ],
@@ -7397,7 +8365,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                           padding: const EdgeInsets.all(12),
                           child: LayoutBuilder(
                             builder: (context, constraints) {
-                              final padSize = Size(constraints.maxWidth, constraints.maxHeight);
+                              final padSize = Size(
+                                  constraints.maxWidth, constraints.maxHeight);
                               if (_sigStrokes.isEmpty) {
                                 _sigCanvasSize = padSize;
                               }
@@ -7407,9 +8376,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                   width: padSize.width,
                                   height: padSize.height,
                                   decoration: BoxDecoration(
-                                    color: _sigTransparentBg ? const Color(0xFFF8FAFC) : Colors.white,
+                                    color: _sigTransparentBg
+                                        ? const Color(0xFFF8FAFC)
+                                        : Colors.white,
                                     borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(color: _amber.withOpacity(0.75), width: 1.6),
+                                    border: Border.all(
+                                        color: _amber.withOpacity(0.75),
+                                        width: 1.6),
                                   ),
                                   child: Stack(
                                     children: [
@@ -7426,7 +8399,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                         const Center(
                                           child: Text(
                                             'Draw your signature freely with your finger',
-                                            style: TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
+                                            style: TextStyle(
+                                                fontSize: 14,
+                                                color: Color(0xFF94A3B8)),
                                           ),
                                         ),
                                       GestureDetector(
@@ -7435,8 +8410,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                           if (_sigStrokes.isEmpty) {
                                             _sigCanvasSize = padSize;
                                           }
-                                          final pt = _toCanonicalPadPoint(d.localPosition, padSize);
-                                          _sigCurrentStroke = [_SigPoint(pt, DateTime.now().millisecondsSinceEpoch)];
+                                          final pt = _toCanonicalPadPoint(
+                                              d.localPosition, padSize);
+                                          _sigCurrentStroke = [
+                                            _SigPoint(
+                                                pt,
+                                                DateTime.now()
+                                                    .millisecondsSinceEpoch)
+                                          ];
                                           _sigRedoStrokes.clear();
                                           _sigStrokes.add(_SigStroke(
                                             points: _sigCurrentStroke!,
@@ -7449,24 +8430,33 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                         },
                                         onPanUpdate: (d) {
                                           if (_sigCurrentStroke == null) return;
-                                          final pt = _toCanonicalPadPoint(d.localPosition, padSize);
-                                          final prev = _sigCurrentStroke!.last.pos;
-                                          if ((pt - prev).distance < 2.0) return;
-                                          _sigCurrentStroke!.add(_SigPoint(pt, DateTime.now().millisecondsSinceEpoch));
+                                          final pt = _toCanonicalPadPoint(
+                                              d.localPosition, padSize);
+                                          final prev =
+                                              _sigCurrentStroke!.last.pos;
+                                          if ((pt - prev).distance < 2.0)
+                                            return;
+                                          _sigCurrentStroke!.add(_SigPoint(
+                                              pt,
+                                              DateTime.now()
+                                                  .millisecondsSinceEpoch));
                                           setModalState(() {});
                                           setState(() {});
                                         },
                                         onPanEnd: (_) {
-                                          if (_sigAutoSmooth && _sigStrokes.isNotEmpty) {
+                                          if (_sigAutoSmooth &&
+                                              _sigStrokes.isNotEmpty) {
                                             final last = _sigStrokes.last;
-                                            last.points = _smoothSigPoints(last.points);
+                                            last.points =
+                                                _smoothSigPoints(last.points);
                                             setModalState(() {});
                                             setState(() {});
                                           }
                                           _sigCurrentStroke = null;
                                         },
                                         child: CustomPaint(
-                                          painter: _SignaturePadPainter(_sigStrokes, _sigCanvasSize),
+                                          painter: _SignaturePadPainter(
+                                              _sigStrokes, _sigCanvasSize),
                                           size: padSize,
                                         ),
                                       ),
@@ -7487,11 +8477,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            _buildSignaturePenSelector(onChanged: () => setModalState(() {})),
+                            _buildSignaturePenSelector(
+                                onChanged: () => setModalState(() {})),
                             const SizedBox(height: 8),
                             Row(
                               children: [
-                                Text('Ink:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                                Text('Ink:',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: _subColor)),
                                 const SizedBox(width: 8),
                                 ...inkSwatches.map(
                                   (c) => Padding(
@@ -7508,7 +8503,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                           color: c,
                                           shape: BoxShape.circle,
                                           border: Border.all(
-                                            color: _sigInkColor == c ? _amber : _borderColor,
+                                            color: _sigInkColor == c
+                                                ? _amber
+                                                : _borderColor,
                                             width: _sigInkColor == c ? 3 : 1.2,
                                           ),
                                         ),
@@ -7518,10 +8515,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 ),
                                 const Spacer(),
                                 _choicePill(
-                                  label: _sigTransparentBg ? 'Transparent' : 'White BG',
+                                  label: _sigTransparentBg
+                                      ? 'Transparent'
+                                      : 'White BG',
                                   selected: _sigTransparentBg,
                                   onTap: () {
-                                    setState(() => _sigTransparentBg = !_sigTransparentBg);
+                                    setState(() =>
+                                        _sigTransparentBg = !_sigTransparentBg);
                                     setModalState(() {});
                                   },
                                 ),
@@ -7531,7 +8531,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               children: [
                                 SizedBox(
                                   width: 68,
-                                  child: Text('Pen Size', style: TextStyle(fontSize: 12, color: _subColor)),
+                                  child: Text('Pen Size',
+                                      style: TextStyle(
+                                          fontSize: 12, color: _subColor)),
                                 ),
                                 Expanded(
                                   child: Slider(
@@ -7547,7 +8549,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 ),
                                 SizedBox(
                                   width: 32,
-                                  child: Text('${_sigPenWidth.round()}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                                  child: Text('${_sigPenWidth.round()}',
+                                      textAlign: TextAlign.right,
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700)),
                                 ),
                               ],
                             ),
@@ -7572,7 +8578,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, w, h));
     if (!useTransparent) {
-      canvas.drawRect(const Rect.fromLTWH(0, 0, w, h), Paint()..color = Colors.white);
+      canvas.drawRect(
+          const Rect.fromLTWH(0, 0, w, h), Paint()..color = Colors.white);
     }
     if (_sigMode == 0) {
       final raw = _sigTextController.text.trim();
@@ -7587,7 +8594,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             fontFamily: _sigFontFamily,
             fontSize: _sigFontSize * 1.35,
             fontWeight: _sigBold ? FontWeight.bold : FontWeight.normal,
-            fontStyle: (_sigSlanted && !isRtl) ? FontStyle.italic : FontStyle.normal,
+            fontStyle:
+                (_sigSlanted && !isRtl) ? FontStyle.italic : FontStyle.normal,
             color: _sigInkColor,
             letterSpacing: _sigLetterSpacing,
             height: isRtl ? 2.0 : 1.3,
@@ -7717,7 +8725,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     if (_sigMode == 1 && _sigStrokes.isEmpty) return;
     if (_sigMode == 2 && _sigScanRawPath == null) return;
     await _runWithSavingHud(
-      savingTitle: _sigMode == 2 ? 'Placing Scanned Signature...' : 'Saving Signature...',
+      savingTitle: _sigMode == 2
+          ? 'Placing Scanned Signature...'
+          : 'Saving Signature...',
       savedTitle: 'Signature Added',
       savedSubtitle: 'Placed on Studio Canvas',
       action: () async {
@@ -7739,7 +8749,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         final docsDir = await getApplicationDocumentsDirectory();
         final assetsDir = Directory(p.join(docsDir.path, 'qalamix_assets'));
         if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
-        final filePath = p.join(assetsDir.path, 'sig_${DateTime.now().microsecondsSinceEpoch}.png');
+        final filePath = p.join(
+            assetsDir.path, 'sig_${DateTime.now().microsecondsSinceEpoch}.png');
         await File(filePath).writeAsBytes(bytes);
 
         double targetW = _page.width * 0.55;
@@ -7792,7 +8803,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     if (_sigMode == 1 && _sigStrokes.isEmpty) return;
     if (_sigMode == 2 && _sigScanRawPath == null) return;
     await _runWithSavingHud(
-      savingTitle: shareOnly ? 'Preparing Signature...' : 'Saving Signature PNG...',
+      savingTitle:
+          shareOnly ? 'Preparing Signature...' : 'Saving Signature PNG...',
       savedTitle: shareOnly ? 'Ready to Share' : 'Signature Saved',
       savedSubtitle: shareOnly ? 'PNG ready' : 'Saved to Gallery',
       action: () async {
@@ -7808,7 +8820,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
               )
             : await _renderSignaturePngBytes();
         if (bytes == null) throw Exception('Signature render failed');
-        final fileName = 'qalamix_signature_${DateTime.now().millisecondsSinceEpoch}.png';
+        final fileName =
+            'qalamix_signature_${DateTime.now().millisecondsSinceEpoch}.png';
         final tmpDir = await getTemporaryDirectory();
         final tmpPath = p.join(tmpDir.path, fileName);
         await File(tmpPath).writeAsBytes(bytes);
@@ -7827,7 +8840,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, size, size));
     if (!useTransparent) {
-      canvas.drawRect(const Rect.fromLTWH(0, 0, size, size), Paint()..color = Colors.white);
+      canvas.drawRect(
+          const Rect.fromLTWH(0, 0, size, size), Paint()..color = Colors.white);
     }
     _StampPainter(
       shape: _stampShape,
@@ -7838,7 +8852,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       showDate: _stampShowDate,
       transparentBg: useTransparent,
     ).paint(canvas, const Size(size, size));
-    final uiImg = await recorder.endRecording().toImage(size.toInt(), size.toInt());
+    final uiImg =
+        await recorder.endRecording().toImage(size.toInt(), size.toInt());
     final byteData = await uiImg.toByteData(format: ui.ImageByteFormat.png);
     return byteData?.buffer.asUint8List();
   }
@@ -7849,13 +8864,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     final docsDir = await getApplicationDocumentsDirectory();
     final assetsDir = Directory(p.join(docsDir.path, 'qalamix_assets'));
     if (!assetsDir.existsSync()) assetsDir.createSync(recursive: true);
-    final filePath = p.join(assetsDir.path, 'stamp_${DateTime.now().microsecondsSinceEpoch}.png');
+    final filePath = p.join(
+        assetsDir.path, 'stamp_${DateTime.now().microsecondsSinceEpoch}.png');
     await File(filePath).writeAsBytes(bytes);
 
     final targetDim = math.min(_page.width, _page.height) * 0.32;
     final layer = DesignLayer(
       id: 'stamp_${DateTime.now().microsecondsSinceEpoch}',
-      name: 'Stamp: ${_stampStatusCtrl.text.trim().isEmpty ? 'Seal' : _stampStatusCtrl.text.trim()}',
+      name:
+          'Stamp: ${_stampStatusCtrl.text.trim().isEmpty ? 'Seal' : _stampStatusCtrl.text.trim()}',
       type: LayerType.image,
       x: (_page.width - targetDim) * 0.85,
       y: (_page.height - targetDim) * 0.82,
@@ -7889,7 +8906,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       action: () async {
         final bytes = await _renderStampPngBytes();
         if (bytes == null) throw Exception('Stamp render failed');
-        final fileName = 'qalamix_stamp_${DateTime.now().millisecondsSinceEpoch}.png';
+        final fileName =
+            'qalamix_stamp_${DateTime.now().millisecondsSinceEpoch}.png';
         final tmpDir = await getTemporaryDirectory();
         final tmpPath = p.join(tmpDir.path, fileName);
         await File(tmpPath).writeAsBytes(bytes);
@@ -7998,7 +9016,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       children: [
                         Text(
                           'Sign & Official Seal Studio',
-                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: _textColor),
+                          style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: _textColor),
                         ),
                         const SizedBox(height: 2),
                         Text(
@@ -8042,7 +9063,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 children: [
                   TextField(
                     controller: _sigTextController,
-                    textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+                    textDirection:
+                        isRtl ? TextDirection.rtl : TextDirection.ltr,
                     onChanged: (_) {
                       setState(() {});
                       _scheduleSignSealAutosave();
@@ -8069,12 +9091,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             fit: BoxFit.scaleDown,
                             child: Text(
                               previewText,
-                              textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+                              textDirection:
+                                  isRtl ? TextDirection.rtl : TextDirection.ltr,
                               style: TextStyle(
                                 fontFamily: _sigFontFamily,
                                 fontSize: _sigFontSize,
-                                fontWeight: _sigBold ? FontWeight.bold : FontWeight.normal,
-                                fontStyle: (_sigSlanted && !isRtl) ? FontStyle.italic : FontStyle.normal,
+                                fontWeight: _sigBold
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                fontStyle: (_sigSlanted && !isRtl)
+                                    ? FontStyle.italic
+                                    : FontStyle.normal,
                                 letterSpacing: _sigLetterSpacing,
                                 height: isRtl ? 2.0 : 1.3,
                                 color: _sigInkColor,
@@ -8086,14 +9113,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                           right: 0,
                           top: 0,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 3),
                             decoration: BoxDecoration(
                               color: Colors.black.withOpacity(0.06),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              _sigTransparentBg ? 'Transparent PNG' : 'White Paper',
-                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                              _sigTransparentBg
+                                  ? 'Transparent PNG'
+                                  : 'White Paper',
+                              style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF475569)),
                             ),
                           ),
                         ),
@@ -8103,7 +9136,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      Text('Ink Color:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                      Text('Ink Color:',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _subColor)),
                       const SizedBox(width: 10),
                       ...inkSwatches.map(
                         (c) => Padding(
@@ -8120,7 +9157,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 color: c,
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: _sigInkColor == c ? _amber : _borderColor,
+                                  color:
+                                      _sigInkColor == c ? _amber : _borderColor,
                                   width: _sigInkColor == c ? 3 : 1.2,
                                 ),
                               ),
@@ -8168,10 +9206,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         },
                       ),
                       _choicePill(
-                        label: _sigTransparentBg ? 'BG: Transparent' : 'BG: White Paper',
+                        label: _sigTransparentBg
+                            ? 'BG: Transparent'
+                            : 'BG: White Paper',
                         selected: _sigTransparentBg,
                         onTap: () {
-                          setState(() => _sigTransparentBg = !_sigTransparentBg);
+                          setState(
+                              () => _sigTransparentBg = !_sigTransparentBg);
                           _scheduleSignSealAutosave();
                         },
                       ),
@@ -8195,11 +9236,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         side: BorderSide(color: _amber.withOpacity(0.8)),
                         foregroundColor: _accentText,
                         padding: const EdgeInsets.symmetric(vertical: 11),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
                       ),
                       onPressed: _openFullScreenSignaturePad,
                       icon: const Icon(Icons.open_in_full_rounded, size: 17),
-                      label: const Text('Open Full-Screen Draw Pad (Easier Signing)', style: TextStyle(fontWeight: FontWeight.w700)),
+                      label: const Text(
+                          'Open Full-Screen Draw Pad (Easier Signing)',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -8217,7 +9261,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 color: c,
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: _sigInkColor == c ? _amber : _borderColor,
+                                  color:
+                                      _sigInkColor == c ? _amber : _borderColor,
                                   width: _sigInkColor == c ? 3 : 1.2,
                                 ),
                               ),
@@ -8228,23 +9273,29 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       const Spacer(),
                       IconButton(
                         tooltip: 'Undo',
-                        onPressed: _sigStrokes.isEmpty ? null : _undoSignatureStroke,
+                        onPressed:
+                            _sigStrokes.isEmpty ? null : _undoSignatureStroke,
                         icon: const Icon(Icons.undo_rounded),
                       ),
                       IconButton(
                         tooltip: 'Redo',
-                        onPressed: _sigRedoStrokes.isEmpty ? null : _redoSignatureStroke,
+                        onPressed: _sigRedoStrokes.isEmpty
+                            ? null
+                            : _redoSignatureStroke,
                         icon: const Icon(Icons.redo_rounded),
                       ),
                       IconButton(
                         tooltip: 'Clear',
-                        onPressed: _sigStrokes.isEmpty ? null : _clearSignatureStrokes,
-                        icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                        onPressed:
+                            _sigStrokes.isEmpty ? null : _clearSignatureStrokes,
+                        icon: const Icon(Icons.delete_outline_rounded,
+                            color: Colors.redAccent),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  _buildSignaturePenSelector(onChanged: _scheduleSignSealAutosave),
+                  _buildSignaturePenSelector(
+                      onChanged: _scheduleSignSealAutosave),
                   _sliderRow(
                     'Pen Size',
                     _sigPenWidth,
@@ -8267,9 +9318,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                           width: padW,
                           height: padH,
                           decoration: BoxDecoration(
-                            color: _sigTransparentBg ? paperPreviewBg : Colors.white,
+                            color: _sigTransparentBg
+                                ? paperPreviewBg
+                                : Colors.white,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: _amber.withOpacity(0.7), width: 1.4),
+                            border: Border.all(
+                                color: _amber.withOpacity(0.7), width: 1.4),
                           ),
                           child: Stack(
                             children: [
@@ -8280,7 +9334,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 child: IgnorePointer(
                                   child: Container(
                                     height: 1,
-                                    color: const Color(0xFF94A3B8).withOpacity(0.45),
+                                    color: const Color(0xFF94A3B8)
+                                        .withOpacity(0.45),
                                   ),
                                 ),
                               ),
@@ -8288,14 +9343,21 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 const Center(
                                   child: Text(
                                     'Sign above the line or open Big Pad',
-                                    style: TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
+                                    style: TextStyle(
+                                        fontSize: 12.5,
+                                        color: Color(0xFF94A3B8)),
                                   ),
                                 ),
                               GestureDetector(
                                 onPanStart: (d) => setState(() {
-                                  if (_sigStrokes.isEmpty) _sigCanvasSize = padSize;
-                                  final pt = _toCanonicalPadPoint(d.localPosition, padSize);
-                                  _sigCurrentStroke = [_SigPoint(pt, DateTime.now().millisecondsSinceEpoch)];
+                                  if (_sigStrokes.isEmpty)
+                                    _sigCanvasSize = padSize;
+                                  final pt = _toCanonicalPadPoint(
+                                      d.localPosition, padSize);
+                                  _sigCurrentStroke = [
+                                    _SigPoint(pt,
+                                        DateTime.now().millisecondsSinceEpoch)
+                                  ];
                                   _sigRedoStrokes.clear();
                                   _sigStrokes.add(_SigStroke(
                                     points: _sigCurrentStroke!,
@@ -8306,21 +9368,30 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 }),
                                 onPanUpdate: (d) {
                                   if (_sigCurrentStroke == null) return;
-                                  final pt = _toCanonicalPadPoint(d.localPosition, padSize);
+                                  final pt = _toCanonicalPadPoint(
+                                      d.localPosition, padSize);
                                   final prev = _sigCurrentStroke!.last.pos;
                                   if ((pt - prev).distance < 2.0) return;
-                                  setState(() => _sigCurrentStroke!.add(_SigPoint(pt, DateTime.now().millisecondsSinceEpoch)));
+                                  setState(() => _sigCurrentStroke!.add(
+                                      _SigPoint(
+                                          pt,
+                                          DateTime.now()
+                                              .millisecondsSinceEpoch)));
                                 },
                                 onPanEnd: (_) {
-                                  if (_sigAutoSmooth && _sigStrokes.isNotEmpty) {
+                                  if (_sigAutoSmooth &&
+                                      _sigStrokes.isNotEmpty) {
                                     setState(() {
-                                      _sigStrokes.last.points = _smoothSigPoints(_sigStrokes.last.points);
+                                      _sigStrokes.last.points =
+                                          _smoothSigPoints(
+                                              _sigStrokes.last.points);
                                     });
                                   }
                                   _sigCurrentStroke = null;
                                 },
                                 child: CustomPaint(
-                                  painter: _SignaturePadPainter(_sigStrokes, _sigCanvasSize),
+                                  painter: _SignaturePadPainter(
+                                      _sigStrokes, _sigCanvasSize),
                                   size: padSize,
                                 ),
                               ),
@@ -8331,7 +9402,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                   onTap: _openFullScreenSignaturePad,
                                   borderRadius: BorderRadius.circular(8),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 5),
                                     decoration: BoxDecoration(
                                       color: Colors.black.withOpacity(0.72),
                                       borderRadius: BorderRadius.circular(8),
@@ -8339,9 +9411,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                     child: const Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(Icons.fullscreen_rounded, size: 15, color: Colors.white),
+                                        Icon(Icons.fullscreen_rounded,
+                                            size: 15, color: Colors.white),
                                         SizedBox(width: 4),
-                                        Text('Big Pad', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.white)),
+                                        Text('Big Pad',
+                                            style: TextStyle(
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w600,
+                                                color: Colors.white)),
                                       ],
                                     ),
                                   ),
@@ -8355,7 +9432,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   ),
                   const SizedBox(height: 10),
                   _choicePill(
-                    label: _sigTransparentBg ? 'BG: Transparent PNG' : 'BG: White Paper',
+                    label: _sigTransparentBg
+                        ? 'BG: Transparent PNG'
+                        : 'BG: White Paper',
                     selected: _sigTransparentBg,
                     onTap: () {
                       setState(() => _sigTransparentBg = !_sigTransparentBg);
@@ -8375,7 +9454,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 children: [
                   Text(
                     'Paper Signature Scanner',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: _textColor),
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: _textColor),
                   ),
                   const SizedBox(height: 3),
                   Text(
@@ -8386,11 +9468,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   if (_sigScanRawPath == null)
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 22),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 22),
                       decoration: BoxDecoration(
                         color: _cardBg,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: _scannerTealBorder, width: 1.3),
+                        border:
+                            Border.all(color: _scannerTealBorder, width: 1.3),
                       ),
                       child: Column(
                         children: [
@@ -8402,12 +9486,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               borderRadius: BorderRadius.circular(15),
                               border: Border.all(color: _scannerTealBorder),
                             ),
-                            child: Icon(Icons.document_scanner_rounded, color: _scannerTeal, size: 26),
+                            child: Icon(Icons.document_scanner_rounded,
+                                color: _scannerTeal, size: 26),
                           ),
                           const SizedBox(height: 11),
                           Text(
                             'Scan Handwritten Signature',
-                            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: _textColor),
+                            style: TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w800,
+                                color: _textColor),
                           ),
                           const SizedBox(height: 4),
                           Text(
@@ -8423,11 +9511,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               style: FilledButton.styleFrom(
                                 backgroundColor: _inkPrimary,
                                 foregroundColor: _onInkPrimary,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(11)),
                               ),
                               onPressed: _scanSignatureWithDocScanner,
-                              icon: Icon(Icons.document_scanner_outlined, size: 18, color: _brandNibOnInk),
-                              label: const Text('Scan with Document Scanner', style: TextStyle(fontWeight: FontWeight.w700)),
+                              icon: Icon(Icons.document_scanner_outlined,
+                                  size: 18, color: _brandNibOnInk),
+                              label: const Text('Scan with Document Scanner',
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.w700)),
                             ),
                           ),
                           const SizedBox(height: 9),
@@ -8439,11 +9531,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                     backgroundColor: _amberTintBg,
                                     foregroundColor: _brandNibInk,
                                     side: BorderSide(color: _amberTintBorder),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(10)),
                                   ),
-                                  onPressed: () => _pickScannedSignatureImage(ImageSource.camera),
-                                  icon: Icon(Icons.camera_alt_outlined, size: 16, color: _brandNibInk),
-                                  label: const Text('Camera', style: TextStyle(fontWeight: FontWeight.w700)),
+                                  onPressed: () => _pickScannedSignatureImage(
+                                      ImageSource.camera),
+                                  icon: Icon(Icons.camera_alt_outlined,
+                                      size: 16, color: _brandNibInk),
+                                  label: const Text('Camera',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w700)),
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -8453,11 +9551,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                     backgroundColor: _scannerTealBg,
                                     foregroundColor: _scannerTeal,
                                     side: BorderSide(color: _scannerTealBorder),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(10)),
                                   ),
-                                  onPressed: () => _pickScannedSignatureImage(ImageSource.gallery),
-                                  icon: Icon(Icons.photo_library_outlined, size: 16, color: _scannerTeal),
-                                  label: const Text('Gallery', style: TextStyle(fontWeight: FontWeight.w700)),
+                                  onPressed: () => _pickScannedSignatureImage(
+                                      ImageSource.gallery),
+                                  icon: Icon(Icons.photo_library_outlined,
+                                      size: 16, color: _scannerTeal),
+                                  label: const Text('Gallery',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w700)),
                                 ),
                               ),
                             ],
@@ -8473,7 +9577,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       decoration: BoxDecoration(
                         color: _sigScanShowOriginal
                             ? _inputBg
-                            : (_sigTransparentBg ? paperPreviewBg : Colors.white),
+                            : (_sigTransparentBg
+                                ? paperPreviewBg
+                                : Colors.white),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: _borderColor),
                       ),
@@ -8481,7 +9587,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         children: [
                           Center(
                             child: _sigScanShowOriginal
-                                ? Image.file(File(_sigScanRawPath!), fit: BoxFit.contain)
+                                ? Image.file(File(_sigScanRawPath!),
+                                    fit: BoxFit.contain)
                                 : (_sigScanProcessedBytes != null
                                     ? Image.memory(
                                         _sigScanProcessedBytes!,
@@ -8495,14 +9602,18 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               right: 0,
                               top: 0,
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
                                   color: Colors.black.withOpacity(0.75),
                                   borderRadius: BorderRadius.circular(7),
                                 ),
                                 child: const Text(
                                   'Cleaning...',
-                                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.white),
+                                  style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white),
                                 ),
                               ),
                             ),
@@ -8522,12 +9633,16 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         _choicePill(
                           label: 'Gallery',
                           selected: false,
-                          onTap: () => _pickScannedSignatureImage(ImageSource.gallery),
+                          onTap: () =>
+                              _pickScannedSignatureImage(ImageSource.gallery),
                         ),
                         _choicePill(
-                          label: _sigScanShowOriginal ? 'Showing Original' : 'Compare Original',
+                          label: _sigScanShowOriginal
+                              ? 'Showing Original'
+                              : 'Compare Original',
                           selected: _sigScanShowOriginal,
-                          onTap: () => setState(() => _sigScanShowOriginal = !_sigScanShowOriginal),
+                          onTap: () => setState(() =>
+                              _sigScanShowOriginal = !_sigScanShowOriginal),
                         ),
                         _choicePill(
                           label: 'Clear',
@@ -8552,7 +9667,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Text('Ink:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                        Text('Ink:',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: _subColor)),
                         const SizedBox(width: 8),
                         _choicePill(
                           label: 'Original',
@@ -8578,7 +9697,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                   color: c,
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                    color: _sigScanRecolor == c ? _brandNib : _borderColor,
+                                    color: _sigScanRecolor == c
+                                        ? _brandNib
+                                        : _borderColor,
                                     width: _sigScanRecolor == c ? 2.8 : 1.2,
                                   ),
                                 ),
@@ -8594,18 +9715,24 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       runSpacing: 6,
                       children: [
                         _choicePill(
-                          label: _sigScanAutoTrim ? 'Auto-Trim: On' : 'Auto-Trim: Off',
+                          label: _sigScanAutoTrim
+                              ? 'Auto-Trim: On'
+                              : 'Auto-Trim: Off',
                           selected: _sigScanAutoTrim,
                           onTap: () {
-                            setState(() => _sigScanAutoTrim = !_sigScanAutoTrim);
+                            setState(
+                                () => _sigScanAutoTrim = !_sigScanAutoTrim);
                             _reprocessScannedSignature();
                           },
                         ),
                         _choicePill(
-                          label: _sigTransparentBg ? 'BG: Transparent PNG' : 'BG: White Paper',
+                          label: _sigTransparentBg
+                              ? 'BG: Transparent PNG'
+                              : 'BG: White Paper',
                           selected: _sigTransparentBg,
                           onTap: () {
-                            setState(() => _sigTransparentBg = !_sigTransparentBg);
+                            setState(
+                                () => _sigTransparentBg = !_sigTransparentBg);
                             _reprocessScannedSignature();
                           },
                         ),
@@ -8629,7 +9756,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       height: 210,
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: _stampTransparentBg ? paperPreviewBg : Colors.white,
+                        color:
+                            _stampTransparentBg ? paperPreviewBg : Colors.white,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: const Color(0xFFCBD5E1)),
                       ),
@@ -8711,7 +9839,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
-                    children: ['APPROVED', 'VERIFIED', 'ORIGINAL', 'منظور شدہ', 'وصول پایا']
+                    children: [
+                      'APPROVED',
+                      'VERIFIED',
+                      'ORIGINAL',
+                      'منظور شدہ',
+                      'وصول پایا'
+                    ]
                         .map(
                           (preset) => _choicePill(
                             label: preset,
@@ -8739,7 +9873,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      Text('Ink:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _subColor)),
+                      Text('Ink:',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _subColor)),
                       const SizedBox(width: 8),
                       ...[
                         const Color(0xFF1E3A8A),
@@ -8757,11 +9895,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             child: Container(
                               width: 26,
                               height: 26,
+                              margin: const EdgeInsets.all(7),
                               decoration: BoxDecoration(
                                 color: c,
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: _stampInkColor == c ? _amber : _borderColor,
+                                  color: _stampInkColor == c
+                                      ? _amber
+                                      : _borderColor,
                                   width: _stampInkColor == c ? 3 : 1.2,
                                 ),
                               ),
@@ -8783,7 +9924,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         label: _stampTransparentBg ? 'Clear PNG' : 'White',
                         selected: _stampTransparentBg,
                         onTap: () {
-                          setState(() => _stampTransparentBg = !_stampTransparentBg);
+                          setState(
+                              () => _stampTransparentBg = !_stampTransparentBg);
                           _scheduleSignSealAutosave();
                         },
                       ),
@@ -8801,12 +9943,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             style: FilledButton.styleFrom(
               backgroundColor: _inkPrimary,
               foregroundColor: _onInkPrimary,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: _sigMode == 3
                 ? _addStampToProjectCanvas
                 : ((_sigMode == 1 && _sigStrokes.isEmpty) ||
-                        (_sigMode == 2 && (_sigScanProcessedBytes == null || _sigScanProcessing)))
+                        (_sigMode == 2 &&
+                            (_sigScanProcessedBytes == null ||
+                                _sigScanProcessing)))
                     ? null
                     : _addSignatureToProjectCanvas,
             icon: const Icon(Icons.add_to_photos_outlined, size: 18),
@@ -8829,12 +9974,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(color: _borderColor),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: ((_sigMode == 1 && _sigStrokes.isEmpty) ||
-                          (_sigMode == 2 && (_sigScanProcessedBytes == null || _sigScanProcessing)))
+                          (_sigMode == 2 &&
+                              (_sigScanProcessedBytes == null ||
+                                  _sigScanProcessing)))
                       ? null
-                      : () => _sigMode == 3 ? _exportStampPng(shareOnly: false) : _exportSignaturePng(shareOnly: false),
+                      : () => _sigMode == 3
+                          ? _exportStampPng(shareOnly: false)
+                          : _exportSignaturePng(shareOnly: false),
                   icon: const Icon(Icons.save_alt_rounded, size: 18),
                   label: const Text('Save PNG'),
                 ),
@@ -8847,12 +9997,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(color: _borderColor),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: ((_sigMode == 1 && _sigStrokes.isEmpty) ||
-                          (_sigMode == 2 && (_sigScanProcessedBytes == null || _sigScanProcessing)))
+                          (_sigMode == 2 &&
+                              (_sigScanProcessedBytes == null ||
+                                  _sigScanProcessing)))
                       ? null
-                      : () => _sigMode == 3 ? _exportStampPng(shareOnly: true) : _exportSignaturePng(shareOnly: true),
+                      : () => _sigMode == 3
+                          ? _exportStampPng(shareOnly: true)
+                          : _exportSignaturePng(shareOnly: true),
                   icon: const Icon(Icons.share_outlined, size: 18),
                   label: const Text('Share'),
                 ),
@@ -8862,7 +10017,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         ),
         if (_sigMode == 0) ...[
           const SizedBox(height: 16),
-          const Text('Signature Fonts (18 Styles)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          const Text('Signature Fonts (18 Styles)',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           GridView.builder(
             shrinkWrap: true,
@@ -8885,7 +10041,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   decoration: BoxDecoration(
                     color: sel ? _amber.withOpacity(0.14) : _cardBg,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: sel ? _amber : _borderColor, width: sel ? 1.8 : 1),
+                    border: Border.all(
+                        color: sel ? _amber : _borderColor,
+                        width: sel ? 1.8 : 1),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -8912,7 +10070,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             fit: BoxFit.scaleDown,
                             child: Text(
                               previewText,
-                              textDirection: f.$4 ? TextDirection.rtl : TextDirection.ltr,
+                              textDirection:
+                                  f.$4 ? TextDirection.rtl : TextDirection.ltr,
                               style: TextStyle(
                                 fontFamily: f.$1,
                                 fontSize: f.$4 ? 22 : 28,
@@ -8990,7 +10149,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 2.3,
       bundled: true,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/notonastaliqurdu/NotoNastaliqUrdu%5Bwght%5D.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/notonastaliqurdu/NotoNastaliqUrdu%5Bwght%5D.ttf',
     ),
     _FontCatalogEntry(
       family: 'Gulzar',
@@ -9000,7 +10160,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 2.1,
       bundled: true,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/gulzar/Gulzar-Regular.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/gulzar/Gulzar-Regular.ttf',
     ),
     _FontCatalogEntry(
       family: 'NotoNaskhArabic',
@@ -9010,7 +10171,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 1.9,
       bundled: true,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf',
     ),
     _FontCatalogEntry(
       family: 'IBMPlexSansArabicSemiBold',
@@ -9020,7 +10182,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 1.8,
       bundled: true,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf',
     ),
     _FontCatalogEntry(
       family: 'Amiri',
@@ -9030,7 +10193,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 1.95,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf',
     ),
     _FontCatalogEntry(
       family: 'Lateef',
@@ -9040,7 +10204,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 1.9,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/lateef/Lateef-Regular.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/lateef/Lateef-Regular.ttf',
     ),
     _FontCatalogEntry(
       family: 'ScheherazadeNew',
@@ -9050,7 +10215,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 1.95,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/scheherazadenew/ScheherazadeNew-Regular.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/scheherazadenew/ScheherazadeNew-Regular.ttf',
     ),
     _FontCatalogEntry(
       family: 'Cairo',
@@ -9060,7 +10226,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 1.75,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/cairo/Cairo%5Bslnt%2Cwght%5D.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/cairo/Cairo%5Bslnt%2Cwght%5D.ttf',
     ),
     _FontCatalogEntry(
       family: 'Tajawal',
@@ -9070,7 +10237,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 1.75,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Regular.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Regular.ttf',
     ),
     _FontCatalogEntry(
       family: 'ReemKufi',
@@ -9080,7 +10248,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 1.85,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf',
     ),
     _FontCatalogEntry(
       family: 'ArefRuqaa',
@@ -9090,7 +10259,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: true,
       defaultLineHeight: 1.95,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf',
     ),
     _FontCatalogEntry(
       family: 'PlusJakartaSans',
@@ -9100,7 +10270,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: false,
       defaultLineHeight: 1.35,
       bundled: true,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/plusjakartasans/PlusJakartaSans%5Bwght%5D.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/plusjakartasans/PlusJakartaSans%5Bwght%5D.ttf',
     ),
     _FontCatalogEntry(
       family: 'PlayfairDisplay',
@@ -9110,7 +10281,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: false,
       defaultLineHeight: 1.3,
       bundled: true,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf',
     ),
     _FontCatalogEntry(
       family: 'Montserrat',
@@ -9120,7 +10292,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: false,
       defaultLineHeight: 1.3,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf',
     ),
     _FontCatalogEntry(
       family: 'Poppins',
@@ -9130,7 +10303,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: false,
       defaultLineHeight: 1.35,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf',
     ),
     _FontCatalogEntry(
       family: 'Lora',
@@ -9140,7 +10314,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: false,
       defaultLineHeight: 1.4,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/lora/Lora%5Bwght%5D.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/lora/Lora%5Bwght%5D.ttf',
     ),
     _FontCatalogEntry(
       family: 'Oswald',
@@ -9150,7 +10325,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: false,
       defaultLineHeight: 1.2,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/oswald/Oswald%5Bwght%5D.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/oswald/Oswald%5Bwght%5D.ttf',
     ),
     _FontCatalogEntry(
       family: 'BebasNeue',
@@ -9160,7 +10336,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isRtl: false,
       defaultLineHeight: 1.1,
       bundled: false,
-      ttfUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/bebasneue/BebasNeue-Regular.ttf',
+      ttfUrl:
+          'https://raw.githubusercontent.com/google/fonts/main/ofl/bebasneue/BebasNeue-Regular.ttf',
     ),
   ];
 
@@ -9197,10 +10374,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         final script = (item['script'] ?? 'Urdu').toString();
         final filePath = (item['filePath'] ?? '').toString();
         final isRtl = item['isRtl'] == true;
-        final lh = (item['defaultLineHeight'] as num?)?.toDouble() ?? (isRtl ? 2.0 : 1.35);
-        if (family.isEmpty || filePath.isEmpty || !File(filePath).existsSync()) continue;
+        final lh = (item['defaultLineHeight'] as num?)?.toDouble() ??
+            (isRtl ? 2.0 : 1.35);
+        if (family.isEmpty || filePath.isEmpty || !File(filePath).existsSync())
+          continue;
         final bytes = await File(filePath).readAsBytes();
-        final loader = FontLoader(family)..addFont(Future.value(ByteData.sublistView(bytes)));
+        final loader = FontLoader(family)
+          ..addFont(Future.value(ByteData.sublistView(bytes)));
         await loader.load();
         restored.add(_CustomInstalledFont(
           family: family,
@@ -9241,7 +10421,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   }
 
   Future<Uint8List> _downloadBytesRaw(String url) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15);
     try {
       final req = await client.getUrl(Uri.parse(url));
       final resp = await req.close();
@@ -9261,11 +10442,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
   }
 
   Future<String?> _resolveGoogleCssTtfUrl(String familyName) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 12);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 12);
     try {
-      final encoded = Uri.encodeComponent(familyName.trim()).replaceAll('%20', '+');
+      final encoded =
+          Uri.encodeComponent(familyName.trim()).replaceAll('%20', '+');
       final req = await client.getUrl(
-        Uri.parse('https://fonts.googleapis.com/css2?family=$encoded&display=swap'),
+        Uri.parse(
+            'https://fonts.googleapis.com/css2?family=$encoded&display=swap'),
       );
       req.headers.set(HttpHeaders.userAgentHeader, 'Dart/3.4 (dart:io)');
       final resp = await req.close();
@@ -9280,7 +10464,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     }
   }
 
-  Future<Uint8List> _fetchRemoteFontBytes(String primaryUrl, {String? fallbackFamilyName}) async {
+  Future<Uint8List> _fetchRemoteFontBytes(String primaryUrl,
+      {String? fallbackFamilyName}) async {
     if (primaryUrl.isNotEmpty) {
       try {
         final raw = await _downloadBytesRaw(primaryUrl);
@@ -9305,22 +10490,33 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       final familyName = (item['family'] ?? '').toString();
       if (id.isEmpty || familyName.isEmpty) continue;
       final subsetsRaw = item['subsets'];
-      final subsets = subsetsRaw is List ? subsetsRaw.map((e) => e.toString()).toList() : const ['latin'];
+      final subsets = subsetsRaw is List
+          ? subsetsRaw.map((e) => e.toString()).toList()
+          : const ['latin'];
       final weightsRaw = item['weights'];
-      final weights = weightsRaw is List ? weightsRaw.whereType<num>().map((e) => e.toInt()).toList() : [400];
-      final defSubset = (item['defSubset'] ?? (subsets.contains('latin') ? 'latin' : subsets.first)).toString();
-      final category = (item['category'] ?? 'sans-serif').toString().toLowerCase();
+      final weights = weightsRaw is List
+          ? weightsRaw.whereType<num>().map((e) => e.toInt()).toList()
+          : [400];
+      final defSubset = (item['defSubset'] ??
+              (subsets.contains('latin') ? 'latin' : subsets.first))
+          .toString();
+      final category =
+          (item['category'] ?? 'sans-serif').toString().toLowerCase();
       final lower = familyName.toLowerCase();
       final isArabic = subsets.contains('arabic');
       String script = 'English';
       if (isArabic) {
-        script = (lower.contains('nastaliq') || lower.contains('urdu') || lower.contains('gulzar'))
+        script = (lower.contains('nastaliq') ||
+                lower.contains('urdu') ||
+                lower.contains('gulzar'))
             ? 'Urdu'
             : 'Arabic';
       } else if (category == 'handwriting') {
         script = 'Calligraphy';
       }
-      final w = weights.contains(400) ? 400 : (weights.isNotEmpty ? weights.first : 400);
+      final w = weights.contains(400)
+          ? 400
+          : (weights.isNotEmpty ? weights.first : 400);
       final safeFamily = 'GF_${id.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
       result.add(_FontCatalogEntry(
         family: safeFamily,
@@ -9328,19 +10524,24 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         script: script,
         sample: isArabic
             ? 'خوش آمدید — اردو و عربی خطاطی'
-            : (script == 'Calligraphy' ? 'Signature & Handwritten Style' : 'Qalamix Studio — AaBbCc 123'),
+            : (script == 'Calligraphy'
+                ? 'Signature & Handwritten Style'
+                : 'Qalamix Studio — AaBbCc 123'),
         isRtl: isArabic,
-        defaultLineHeight: (lower.contains('nastaliq') || lower.contains('gulzar'))
-            ? 2.15
-            : (isArabic ? 1.75 : 1.35),
+        defaultLineHeight:
+            (lower.contains('nastaliq') || lower.contains('gulzar'))
+                ? 2.15
+                : (isArabic ? 1.75 : 1.35),
         bundled: false,
-        ttfUrl: 'https://cdn.jsdelivr.net/fontsource/fonts/$id@latest/$defSubset-$w-normal.ttf',
+        ttfUrl:
+            'https://cdn.jsdelivr.net/fontsource/fonts/$id@latest/$defSubset-$w-normal.ttf',
       ));
     }
     return result;
   }
 
-  Future<void> _ensureGoogleFontsDirectoryLoaded([void Function(void Function())? setModalState]) async {
+  Future<void> _ensureGoogleFontsDirectoryLoaded(
+      [void Function(void Function())? setModalState]) async {
     if (_googleDirectoryFonts.isNotEmpty || _loadingGoogleDirectory) return;
     _loadingGoogleDirectory = true;
     setModalState?.call(() {});
@@ -9360,7 +10561,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         }
       }
 
-      final bytes = await _downloadBytesRaw('https://api.fontsource.org/v1/fonts');
+      final bytes =
+          await _downloadBytesRaw('https://api.fontsource.org/v1/fonts');
       final decoded = jsonDecode(utf8.decode(bytes));
       if (decoded is List && decoded.isNotEmpty) {
         final slim = decoded
@@ -9396,7 +10598,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     }
     _previewLoadingFamilies.add(entry.family);
     try {
-      final raw = await _fetchRemoteFontBytes(entry.ttfUrl, fallbackFamilyName: entry.name);
+      final raw = await _fetchRemoteFontBytes(entry.ttfUrl,
+          fallbackFamilyName: entry.name);
       final loader = FontLoader(entry.family)
         ..addFont(Future.value(ByteData.sublistView(raw)));
       await loader.load();
@@ -9416,7 +10619,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
         savedTitle: '${entry.name} Ready',
         savedSubtitle: 'Installed & applied to Studio',
         action: () async {
-          final raw = await _fetchRemoteFontBytes(entry.ttfUrl, fallbackFamilyName: entry.name);
+          final raw = await _fetchRemoteFontBytes(entry.ttfUrl,
+              fallbackFamilyName: entry.name);
           final docsDir = await getApplicationDocumentsDirectory();
           final dir = Directory(p.join(docsDir.path, 'qalamix_fonts'));
           if (!dir.existsSync()) dir.createSync(recursive: true);
@@ -9485,16 +10689,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       savedSubtitle: '${entry.name} saved to Downloads/Qalamix/Fonts',
       action: () async {
         Uint8List bytes;
-        final existing = _customFonts.cast<_CustomInstalledFont?>().firstWhere((f) => f!.family == entry.family, orElse: () => null);
+        final existing = _customFonts
+            .cast<_CustomInstalledFont?>()
+            .firstWhere((f) => f!.family == entry.family, orElse: () => null);
         if (existing != null && File(existing.filePath).existsSync()) {
           bytes = await File(existing.filePath).readAsBytes();
         } else {
-          bytes = await _fetchRemoteFontBytes(entry.ttfUrl, fallbackFamilyName: entry.name);
+          bytes = await _fetchRemoteFontBytes(entry.ttfUrl,
+              fallbackFamilyName: entry.name);
         }
         final fname = '${entry.family}.ttf';
         if (Platform.isAndroid) {
           try {
-            savedPath = await _mediaChannel.invokeMethod<String>('saveFontToDownloads', {
+            savedPath = await _mediaChannel
+                .invokeMethod<String>('saveFontToDownloads', {
               'bytes': bytes,
               'name': fname,
             });
@@ -9508,16 +10716,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     if (!mounted || tmpPath == null) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(savedPath != null ? 'Saved: $savedPath' : '${entry.name}.ttf ready'),
+        content: Text(savedPath != null
+            ? 'Saved: $savedPath'
+            : '${entry.name}.ttf ready'),
         action: SnackBarAction(
           label: 'Share .TTF',
-          onPressed: () => Share.shareXFiles([XFile(tmpPath!)], text: '${entry.name} Font (.ttf)'),
+          onPressed: () => Share.shareXFiles([XFile(tmpPath!)],
+              text: '${entry.name} Font (.ttf)'),
         ),
       ),
     );
   }
 
-  Future<void> _importLocalFontFromDevice(void Function(void Function()) setModalState) async {
+  Future<void> _importLocalFontFromDevice(
+      void Function(void Function()) setModalState) async {
     try {
       final res = await _mediaChannel.invokeMethod<dynamic>('pickFontFile');
       if (res is! Map) return;
@@ -9529,15 +10741,21 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       if (!lower.endsWith('.ttf') && !lower.endsWith('.otf')) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Please pick a valid .ttf or .otf font file')),
+            const SnackBar(
+                content: Text('Please pick a valid .ttf or .otf font file')),
           );
         }
         return;
       }
 
-      final cleanLabel = p.basenameWithoutExtension(fileName).replaceAll(RegExp(r'[_-]+'), ' ').trim();
+      final cleanLabel = p
+          .basenameWithoutExtension(fileName)
+          .replaceAll(RegExp(r'[_-]+'), ' ')
+          .trim();
       final family = 'Custom_${DateTime.now().millisecondsSinceEpoch}';
-      final isUrduGuess = RegExp(r'urdu|nastaliq|jameel|noori|alvi|faiz|mehr|arabic|naskh', caseSensitive: false)
+      final isUrduGuess = RegExp(
+              r'urdu|nastaliq|jameel|noori|alvi|faiz|mehr|arabic|naskh',
+              caseSensitive: false)
           .hasMatch(fileName);
 
       await _runWithSavingHud<void>(
@@ -9582,7 +10800,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
     String filterTab = 'All';
     String searchQuery = '';
     double previewSize = 22.0;
-    final sampleCtrl = TextEditingController(text: 'خوش آمدید · Qalamix Typography');
+    final sampleCtrl =
+        TextEditingController(text: 'خوش آمدید · Qalamix Typography');
     bool triggeredDir = false;
 
     await showModalBottomSheet<void>(
@@ -9590,14 +10809,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isScrollControlled: true,
       backgroundColor: _panelBg,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
             if (!triggeredDir) {
               triggeredDir = true;
-              Future.microtask(() => _ensureGoogleFontsDirectoryLoaded(setModalState));
+              Future.microtask(
+                  () => _ensureGoogleFontsDirectoryLoaded(setModalState));
             }
             final seenNames = <String>{};
             final entries = <_FontCatalogEntry>[];
@@ -9608,11 +10828,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 family: c.family,
                 name: c.name,
                 script: c.script,
-                sample: c.isRtl ? 'خوش آمدید — قلمکس' : 'Installed Custom Font Preview',
+                sample: c.isRtl
+                    ? 'خوش آمدید — قلمکس'
+                    : 'Installed Custom Font Preview',
                 isRtl: c.isRtl,
                 defaultLineHeight: c.defaultLineHeight,
                 bundled: true,
-                ttfUrl: 'https://cdn.jsdelivr.net/fontsource/fonts/${c.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-')}@latest/latin-400-normal.ttf',
+                ttfUrl:
+                    'https://cdn.jsdelivr.net/fontsource/fonts/${c.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-')}@latest/latin-400-normal.ttf',
               ));
             }
             for (final k in _kFontsCatalog) {
@@ -9627,7 +10850,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
 
             final q = searchQuery.trim().toLowerCase();
             var matched = entries.where((e) {
-              if (q.isNotEmpty && !e.name.toLowerCase().contains(q) && !e.script.toLowerCase().contains(q)) {
+              if (q.isNotEmpty &&
+                  !e.name.toLowerCase().contains(q) &&
+                  !e.script.toLowerCase().contains(q)) {
                 return false;
               }
               if (filterTab == 'Installed') {
@@ -9646,8 +10871,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 final aRank = an == q ? 0 : (an.startsWith(q) ? 1 : 2);
                 final bRank = bn == q ? 0 : (bn.startsWith(q) ? 1 : 2);
                 if (aRank != bRank) return aRank - bRank;
-                final aReady = (a.bundled || _loadedFontFamilies.contains(a.family)) ? 0 : 1;
-                final bReady = (b.bundled || _loadedFontFamilies.contains(b.family)) ? 0 : 1;
+                final aReady =
+                    (a.bundled || _loadedFontFamilies.contains(a.family))
+                        ? 0
+                        : 1;
+                final bReady =
+                    (b.bundled || _loadedFontFamilies.contains(b.family))
+                        ? 0
+                        : 1;
                 return aReady.compareTo(bReady);
               });
             }
@@ -9655,7 +10886,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             var filtered = matched.take(60).toList();
             if (q.isNotEmpty && filtered.isEmpty) {
               final rawName = searchQuery.trim();
-              final slug = rawName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-|-$'), '');
+              final slug = rawName
+                  .toLowerCase()
+                  .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+                  .replaceAll(RegExp(r'^-|-$'), '');
               filtered = [
                 _FontCatalogEntry(
                   family: 'GF_${slug.replaceAll('-', '_')}',
@@ -9665,14 +10899,17 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   isRtl: false,
                   defaultLineHeight: 1.35,
                   bundled: false,
-                  ttfUrl: slug.isNotEmpty ? 'https://cdn.jsdelivr.net/fontsource/fonts/$slug@latest/latin-400-normal.ttf' : '',
+                  ttfUrl: slug.isNotEmpty
+                      ? 'https://cdn.jsdelivr.net/fontsource/fonts/$slug@latest/latin-400-normal.ttf'
+                      : '',
                 ),
               ];
             }
 
             if (q.length >= 2) {
               for (final topItem in filtered.take(3)) {
-                Future.microtask(() => _preloadPreviewFont(topItem, setModalState));
+                Future.microtask(
+                    () => _preloadPreviewFont(topItem, setModalState));
               }
             }
 
@@ -9707,19 +10944,24 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               color: _amber.withOpacity(0.16),
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: Icon(Icons.font_download_rounded, color: _accentText, size: 20),
+                            child: Icon(Icons.font_download_rounded,
+                                color: _accentText, size: 20),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Qalamix Fonts Library', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                                const Text('Qalamix Fonts Library',
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w800)),
                                 Text(
                                   _loadingGoogleDirectory
                                       ? 'Loading full Google Fonts directory...'
                                       : '${entries.length} Google Fonts · Search, Preview & Save .TTF',
-                                  style: TextStyle(fontSize: 11, color: _subColor),
+                                  style:
+                                      TextStyle(fontSize: 11, color: _subColor),
                                 ),
                               ],
                             ),
@@ -9736,11 +10978,14 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                           Expanded(
                             child: TextField(
                               decoration: const InputDecoration(
-                                hintText: 'Search any Google Font (e.g. Roboto, Poppins, Amiri)...',
-                                prefixIcon: Icon(Icons.search_rounded, size: 19),
+                                hintText:
+                                    'Search any Google Font (e.g. Roboto, Poppins, Amiri)...',
+                                prefixIcon:
+                                    Icon(Icons.search_rounded, size: 19),
                                 isDense: true,
                               ),
-                              onChanged: (v) => setModalState(() => searchQuery = v),
+                              onChanged: (v) =>
+                                  setModalState(() => searchQuery = v),
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -9748,12 +10993,18 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             style: FilledButton.styleFrom(
                               backgroundColor: _inkPrimary,
                               foregroundColor: _onInkPrimary,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 13),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10)),
                             ),
-                            onPressed: () => _importLocalFontFromDevice(setModalState),
-                            icon: const Icon(Icons.upload_file_rounded, size: 18),
-                            label: const Text('Import .TTF', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                            onPressed: () =>
+                                _importLocalFontFromDevice(setModalState),
+                            icon:
+                                const Icon(Icons.upload_file_rounded, size: 18),
+                            label: const Text('Import .TTF',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w800, fontSize: 12)),
                           ),
                         ],
                       ),
@@ -9766,18 +11017,27 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         ),
                         onChanged: (_) => setModalState(() {}),
                       ),
-                      _sliderRow('Preview Size', previewSize, 14, 38, (v) => setModalState(() => previewSize = v)),
+                      _sliderRow('Preview Size', previewSize, 14, 38,
+                          (v) => setModalState(() => previewSize = v)),
                       const SizedBox(height: 6),
                       SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: Row(
-                          children: ['All', 'Urdu', 'Arabic', 'Calligraphy', 'English', 'Installed'].map((tab) {
+                          children: [
+                            'All',
+                            'Urdu',
+                            'Arabic',
+                            'Calligraphy',
+                            'English',
+                            'Installed'
+                          ].map((tab) {
                             return Padding(
                               padding: const EdgeInsets.only(right: 6),
                               child: _choicePill(
                                 label: tab,
                                 selected: filterTab == tab,
-                                onTap: () => setModalState(() => filterTab = tab),
+                                onTap: () =>
+                                    setModalState(() => filterTab = tab),
                               ),
                             );
                           }).toList(),
@@ -9785,8 +11045,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                       ),
                       const SizedBox(height: 12),
                       ...filtered.map((entry) {
-                        final installed = entry.bundled || _loadedFontFamilies.contains(entry.family);
-                        final previewText = sampleCtrl.text.trim().isEmpty ? entry.sample : sampleCtrl.text;
+                        final installed = entry.bundled ||
+                            _loadedFontFamilies.contains(entry.family);
+                        final previewText = sampleCtrl.text.trim().isEmpty
+                            ? entry.sample
+                            : sampleCtrl.text;
                         return Container(
                           margin: const EdgeInsets.only(bottom: 10),
                           padding: const EdgeInsets.all(12),
@@ -9794,7 +11057,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             color: _inputBg,
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(
-                              color: installed ? _amber.withOpacity(0.45) : _borderColor,
+                              color: installed
+                                  ? _amber.withOpacity(0.45)
+                                  : _borderColor,
                             ),
                           ),
                           child: Column(
@@ -9805,21 +11070,31 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                   Expanded(
                                     child: Text(
                                       entry.name,
-                                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                                      style: const TextStyle(
+                                          fontSize: 13.5,
+                                          fontWeight: FontWeight.w700),
                                     ),
                                   ),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: installed ? const Color(0xFF10B981).withOpacity(0.16) : _chipBg,
+                                      color: installed
+                                          ? const Color(0xFF10B981)
+                                              .withOpacity(0.16)
+                                          : _chipBg,
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
-                                      installed ? '${entry.script} · Ready' : entry.script,
+                                      installed
+                                          ? '${entry.script} · Ready'
+                                          : entry.script,
                                       style: TextStyle(
                                         fontSize: 10.5,
                                         fontWeight: FontWeight.w700,
-                                        color: installed ? const Color(0xFF10B981) : _subColor,
+                                        color: installed
+                                            ? const Color(0xFF10B981)
+                                            : _subColor,
                                       ),
                                     ),
                                   ),
@@ -9828,7 +11103,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               const SizedBox(height: 8),
                               Container(
                                 width: double.infinity,
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 10),
                                 decoration: BoxDecoration(
                                   color: _cardBg,
                                   borderRadius: BorderRadius.circular(10),
@@ -9836,8 +11112,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 ),
                                 child: Text(
                                   previewText,
-                                  textDirection: entry.isRtl ? TextDirection.rtl : TextDirection.ltr,
-                                  textAlign: entry.isRtl ? TextAlign.right : TextAlign.left,
+                                  textDirection: entry.isRtl
+                                      ? TextDirection.rtl
+                                      : TextDirection.ltr,
+                                  textAlign: entry.isRtl
+                                      ? TextAlign.right
+                                      : TextAlign.left,
                                   style: TextStyle(
                                     fontFamily: installed ? entry.family : null,
                                     fontSize: previewSize,
@@ -9853,17 +11133,28 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                       style: FilledButton.styleFrom(
                                         backgroundColor: _inkPrimary,
                                         foregroundColor: _onInkPrimary,
-                                        padding: const EdgeInsets.symmetric(vertical: 9),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 9),
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(9)),
                                       ),
                                       onPressed: () async {
                                         await _installOrApplyCatalogFont(entry);
                                         if (ctx.mounted) Navigator.pop(ctx);
                                       },
-                                      icon: Icon(installed ? Icons.check_circle_outline : Icons.download_done_rounded, size: 16),
+                                      icon: Icon(
+                                          installed
+                                              ? Icons.check_circle_outline
+                                              : Icons.download_done_rounded,
+                                          size: 16),
                                       label: Text(
-                                        installed ? 'Use in Studio' : 'Install & Use',
-                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                                        installed
+                                            ? 'Use in Studio'
+                                            : 'Install & Use',
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800),
                                       ),
                                     ),
                                   ),
@@ -9872,12 +11163,20 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                     OutlinedButton.icon(
                                       style: OutlinedButton.styleFrom(
                                         side: BorderSide(color: _borderColor),
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 12, vertical: 9),
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(9)),
                                       ),
-                                      onPressed: () => _downloadFontFileToDevice(entry),
-                                      icon: const Icon(Icons.download_rounded, size: 16),
-                                      label: const Text('.TTF', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                                      onPressed: () =>
+                                          _downloadFontFileToDevice(entry),
+                                      icon: const Icon(Icons.download_rounded,
+                                          size: 16),
+                                      label: const Text('.TTF',
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700)),
                                     ),
                                   ],
                                 ],
@@ -9906,7 +11205,7 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       isScrollControlled: true,
       backgroundColor: _panelBg,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
         return StatefulBuilder(
@@ -9914,7 +11213,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
             final safeIdx = _scannedPages.isEmpty
                 ? 0
                 : _activeScanIdx.clamp(0, _scannedPages.length - 1);
-            final activePage = _scannedPages.isEmpty ? null : _scannedPages[safeIdx];
+            final activePage =
+                _scannedPages.isEmpty ? null : _scannedPages[safeIdx];
 
             Future<void> runDocumentScanner() async {
               setModalState(() => localBusy = true);
@@ -9935,7 +11235,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 final msg = e.message ?? '';
                 if (!msg.toLowerCase().contains('cancel') && mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Document Scanner: ${msg.isEmpty ? e.code : msg}')),
+                    SnackBar(
+                        content: Text(
+                            'Document Scanner: ${msg.isEmpty ? e.code : msg}')),
                   );
                 }
               } catch (e) {
@@ -9978,9 +11280,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 final pdfImg = pw.MemoryImage(pg.previewBytes);
                 doc.addPage(
                   pw.Page(
-                    pageFormat: PdfPageFormat(pg.width.toDouble(), pg.height.toDouble()),
+                    pageFormat: PdfPageFormat(
+                        pg.width.toDouble(), pg.height.toDouble()),
                     margin: pw.EdgeInsets.zero,
-                    build: (_) => pw.Center(child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
+                    build: (_) => pw.Center(
+                        child: pw.Image(pdfImg, fit: pw.BoxFit.contain)),
                   ),
                 );
               }
@@ -10000,10 +11304,12 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                   savedSubtitle: '${_scannedPages.length} page(s) saved',
                   action: () async {
                     final pdfBytes = await buildScannerPdfBytes();
-                    final fileName = 'qalamix_scan_${DateTime.now().millisecondsSinceEpoch}.pdf';
+                    final fileName =
+                        'qalamix_scan_${DateTime.now().millisecondsSinceEpoch}.pdf';
                     if (Platform.isAndroid) {
                       try {
-                        savedLoc = await _mediaChannel.invokeMethod<String>('savePdfToDownloads', {
+                        savedLoc = await _mediaChannel
+                                .invokeMethod<String>('savePdfToDownloads', {
                               'bytes': pdfBytes,
                               'name': fileName,
                             }) ??
@@ -10015,9 +11321,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     await File(tmpPath).writeAsBytes(pdfBytes);
                     shareTmpPath = tmpPath;
                     if (savedLoc.isEmpty) {
-                      final extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+                      final extDir = await getExternalStorageDirectory() ??
+                          await getApplicationDocumentsDirectory();
                       final outDir = Directory(p.join(extDir.path, 'Qalamix'));
-                      if (!outDir.existsSync()) outDir.createSync(recursive: true);
+                      if (!outDir.existsSync())
+                        outDir.createSync(recursive: true);
                       final outPath = p.join(outDir.path, fileName);
                       await File(outPath).writeAsBytes(pdfBytes);
                       savedLoc = outPath;
@@ -10031,7 +11339,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     duration: const Duration(seconds: 3),
                     action: SnackBarAction(
                       label: 'Share PDF',
-                      onPressed: () => Share.shareXFiles([XFile(shareTmpPath!)], text: 'Qalamix Scanned PDF'),
+                      onPressed: () => Share.shareXFiles([XFile(shareTmpPath!)],
+                          text: 'Qalamix Scanned PDF'),
                     ),
                   ),
                 );
@@ -10055,8 +11364,10 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     final tmpDir = await getTemporaryDirectory();
                     for (int i = 0; i < _scannedPages.length; i++) {
                       final pg = _scannedPages[i];
-                      final fname = 'qalamix_scan_${DateTime.now().millisecondsSinceEpoch}_p${i + 1}.jpg';
-                      lastSaved = await _saveBytesToDeviceGallery(pg.previewBytes, fname);
+                      final fname =
+                          'qalamix_scan_${DateTime.now().millisecondsSinceEpoch}_p${i + 1}.jpg';
+                      lastSaved = await _saveBytesToDeviceGallery(
+                          pg.previewBytes, fname);
                       lastTmp = p.join(tmpDir.path, fname);
                       await File(lastTmp).writeAsBytes(pg.previewBytes);
                     }
@@ -10065,11 +11376,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 if (!mounted || lastTmp.isEmpty) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('${_scannedPages.length} JPEG(s) Saved: $lastSaved'),
+                    content: Text(
+                        '${_scannedPages.length} JPEG(s) Saved: $lastSaved'),
                     duration: const Duration(seconds: 3),
                     action: SnackBarAction(
                       label: 'Share',
-                      onPressed: () => Share.shareXFiles([XFile(lastTmp)], text: 'Qalamix Scanned JPEG'),
+                      onPressed: () => Share.shareXFiles([XFile(lastTmp)],
+                          text: 'Qalamix Scanned JPEG'),
                     ),
                   ),
                 );
@@ -10085,7 +11398,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                 savedTitle: 'Added to Canvas',
                 savedSubtitle: 'Scanned Page ${safeIdx + 1}',
                 action: () async {
-                  final cleanName = 'scan_page_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                  final cleanName =
+                      'scan_page_${DateTime.now().millisecondsSinceEpoch}.jpg';
                   final docs = await getApplicationDocumentsDirectory();
                   final outDir = Directory(p.join(docs.path, 'qalamix_media'));
                   if (!outDir.existsSync()) outDir.createSync(recursive: true);
@@ -10111,7 +11425,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                     setState(() {
                       _page.width = activePage.width.toDouble();
                       _page.height = activePage.height.toDouble();
-                      if (_page.layers.isNotEmpty && _page.layers.first.isCanvasBackground) {
+                      if (_page.layers.isNotEmpty &&
+                          _page.layers.first.isCanvasBackground) {
                         _page.layers[0] = canvasLayer;
                       } else {
                         _page.layers.insert(0, canvasLayer);
@@ -10162,15 +11477,23 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               borderRadius: BorderRadius.circular(11),
                               border: Border.all(color: _scannerTealBorder),
                             ),
-                            child: Icon(Icons.document_scanner_rounded, color: _scannerTeal, size: 20),
+                            child: Icon(Icons.document_scanner_rounded,
+                                color: _scannerTeal, size: 20),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Document Scanner', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _textColor)),
-                                Text('Scan or Import Photos · Preview · PDF / JPEG', style: TextStyle(fontSize: 11, color: _subColor)),
+                                Text('Document Scanner',
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w800,
+                                        color: _textColor)),
+                                Text(
+                                    'Scan or Import Photos · Preview · PDF / JPEG',
+                                    style: TextStyle(
+                                        fontSize: 11, color: _subColor)),
                               ],
                             ),
                           ),
@@ -10188,11 +11511,15 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             backgroundColor: _inkPrimary,
                             foregroundColor: _onInkPrimary,
                             padding: const EdgeInsets.symmetric(vertical: 13),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(11)),
                           ),
                           onPressed: localBusy ? null : runDocumentScanner,
-                          icon: Icon(Icons.document_scanner_outlined, size: 19, color: _brandNibOnInk),
-                          label: const Text('Scan / Upload Document', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+                          icon: Icon(Icons.document_scanner_outlined,
+                              size: 19, color: _brandNibOnInk),
+                          label: const Text('Scan / Upload Document',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w800, fontSize: 13.5)),
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -10203,11 +11530,13 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         ),
                       if (activePage == null)
                         Container(
-                          padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 20),
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 34, horizontal: 20),
                           decoration: BoxDecoration(
                             color: _cardBg,
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: _scannerTealBorder, width: 1.2),
+                            border: Border.all(
+                                color: _scannerTealBorder, width: 1.2),
                           ),
                           child: Column(
                             children: [
@@ -10219,18 +11548,25 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(color: _scannerTealBorder),
                                 ),
-                                child: Icon(Icons.insert_drive_file_outlined, size: 30, color: _scannerTeal),
+                                child: Icon(Icons.insert_drive_file_outlined,
+                                    size: 30, color: _scannerTeal),
                               ),
                               const SizedBox(height: 12),
                               Text(
                                 'No Scanned Pages Yet',
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textColor),
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: _textColor),
                               ),
                               const SizedBox(height: 5),
                               Text(
                                 'Tap Scan / Upload Document to scan pages or import photos, preview them cleanly, and save as PDF or JPEG.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(fontSize: 12, color: _subColor, height: 1.4),
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: _subColor,
+                                    height: 1.4),
                               ),
                             ],
                           ),
@@ -10239,7 +11575,9 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                         Container(
                           height: 310,
                           decoration: BoxDecoration(
-                            color: _isDark ? const Color(0xFF0A0C0F) : const Color(0xFFF1F5F9),
+                            color: _isDark
+                                ? const Color(0xFF0A0C0F)
+                                : const Color(0xFFF1F5F9),
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(color: _borderColor),
                           ),
@@ -10257,14 +11595,18 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 top: 8,
                                 left: 8,
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 9, vertical: 4),
                                   decoration: BoxDecoration(
                                     color: Colors.black.withOpacity(0.7),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Text(
                                     'Page ${safeIdx + 1}/${_scannedPages.length} · ${activePage.width}×${activePage.height}',
-                                    style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600),
                                   ),
                                 ),
                               ),
@@ -10281,7 +11623,8 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               final pg = _scannedPages[i];
                               final sel = i == safeIdx;
                               return GestureDetector(
-                                onTap: () => setModalState(() => _activeScanIdx = i),
+                                onTap: () =>
+                                    setModalState(() => _activeScanIdx = i),
                                 child: Container(
                                   width: 58,
                                   margin: const EdgeInsets.only(right: 8),
@@ -10296,17 +11639,24 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                   child: Stack(
                                     fit: StackFit.expand,
                                     children: [
-                                      Image.memory(pg.previewBytes, fit: BoxFit.cover),
+                                      Image.memory(pg.previewBytes,
+                                          fit: BoxFit.cover),
                                       Positioned(
                                         bottom: 3,
                                         left: 3,
                                         child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 5, vertical: 1),
                                           decoration: BoxDecoration(
                                             color: Colors.black87,
-                                            borderRadius: BorderRadius.circular(4),
+                                            borderRadius:
+                                                BorderRadius.circular(4),
                                           ),
-                                          child: Text('${i + 1}', style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700)),
+                                          child: Text('${i + 1}',
+                                              style: const TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w700)),
                                         ),
                                       ),
                                       Positioned(
@@ -10315,15 +11665,21 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                         child: GestureDetector(
                                           onTap: () => setModalState(() {
                                             _scannedPages.removeAt(i);
-                                            if (_activeScanIdx >= _scannedPages.length && _activeScanIdx > 0) {
-                                              _activeScanIdx = _scannedPages.length - 1;
+                                            if (_activeScanIdx >=
+                                                    _scannedPages.length &&
+                                                _activeScanIdx > 0) {
+                                              _activeScanIdx =
+                                                  _scannedPages.length - 1;
                                             }
                                           }),
                                           child: Container(
                                             width: 18,
                                             height: 18,
-                                            decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
-                                            child: const Icon(Icons.close, size: 12, color: Colors.white),
+                                            decoration: const BoxDecoration(
+                                                color: Colors.redAccent,
+                                                shape: BoxShape.circle),
+                                            child: const Icon(Icons.close,
+                                                size: 12, color: Colors.white),
                                           ),
                                         ),
                                       ),
@@ -10340,15 +11696,22 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             Expanded(
                               child: OutlinedButton.icon(
                                 style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 10),
                                   side: BorderSide(color: _borderColor),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10)),
                                 ),
                                 onPressed: localBusy
                                     ? null
-                                    : () => rotateActivePage((activePage.rotationDeg + 90) % 360),
-                                icon: Icon(Icons.rotate_right_rounded, size: 18, color: _accentText),
-                                label: const Text('Rotate 90°', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                                    : () => rotateActivePage(
+                                        (activePage.rotationDeg + 90) % 360),
+                                icon: Icon(Icons.rotate_right_rounded,
+                                    size: 18, color: _accentText),
+                                label: const Text('Rotate 90°',
+                                    style: TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w600)),
                               ),
                             ),
                           ],
@@ -10361,14 +11724,21 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                 style: FilledButton.styleFrom(
                                   backgroundColor: _inkPrimary,
                                   foregroundColor: _onInkPrimary,
-                                  padding: const EdgeInsets.symmetric(vertical: 13),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 13),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(11)),
                                 ),
-                                onPressed: localBusy ? null : downloadScannerPdf,
-                                icon: Icon(Icons.picture_as_pdf_rounded, size: 18, color: _brandNibOnInk),
+                                onPressed:
+                                    localBusy ? null : downloadScannerPdf,
+                                icon: Icon(Icons.picture_as_pdf_rounded,
+                                    size: 18, color: _brandNibOnInk),
                                 label: Text(
-                                  _scannedPages.length > 1 ? 'Download PDF (${_scannedPages.length}p)' : 'Download PDF',
-                                  style: const TextStyle(fontWeight: FontWeight.w800),
+                                  _scannedPages.length > 1
+                                      ? 'Download PDF (${_scannedPages.length}p)'
+                                      : 'Download PDF',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w800),
                                 ),
                               ),
                             ),
@@ -10377,15 +11747,23 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                               child: FilledButton.icon(
                                 style: FilledButton.styleFrom(
                                   backgroundColor: _scannerTeal,
-                                  foregroundColor: _isDark ? const Color(0xFF0A0C0F) : Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 13),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                  foregroundColor: _isDark
+                                      ? const Color(0xFF0A0C0F)
+                                      : Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 13),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(11)),
                                 ),
                                 onPressed: localBusy ? null : saveScannerJpeg,
-                                icon: const Icon(Icons.download_rounded, size: 18),
+                                icon: const Icon(Icons.download_rounded,
+                                    size: 18),
                                 label: Text(
-                                  _scannedPages.length > 1 ? 'Save JPEGs (${_scannedPages.length})' : 'Save JPEG',
-                                  style: const TextStyle(fontWeight: FontWeight.w800),
+                                  _scannedPages.length > 1
+                                      ? 'Save JPEGs (${_scannedPages.length})'
+                                      : 'Save JPEG',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w800),
                                 ),
                               ),
                             ),
@@ -10397,9 +11775,11 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                             Expanded(
                               child: OutlinedButton.icon(
                                 style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 11),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 11),
                                   side: BorderSide(color: _borderColor),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(11)),
                                 ),
                                 onPressed: localBusy
                                     ? null
@@ -10408,28 +11788,39 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
                                           savingTitle: 'Preparing PDF...',
                                           savedTitle: 'PDF Ready',
                                           action: () async {
-                                            final bytes = await buildScannerPdfBytes();
-                                            await Printing.layoutPdf(onLayout: (_) async => bytes);
+                                            final bytes =
+                                                await buildScannerPdfBytes();
+                                            await Printing.layoutPdf(
+                                                onLayout: (_) async => bytes);
                                           },
                                         );
                                       },
-                                icon: const Icon(Icons.print_outlined, size: 17),
-                                label: const Text('Print / Preview PDF', style: TextStyle(fontSize: 12.5)),
+                                icon:
+                                    const Icon(Icons.print_outlined, size: 17),
+                                label: const Text('Print / Preview PDF',
+                                    style: TextStyle(fontSize: 12.5)),
                               ),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: OutlinedButton.icon(
                                 style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 11),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 11),
                                   backgroundColor: _amberTintBg,
                                   side: BorderSide(color: _amberTintBorder),
                                   foregroundColor: _brandNibInk,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(11)),
                                 ),
-                                onPressed: localBusy ? null : sendScannedToStudio,
-                                icon: Icon(Icons.brush_outlined, size: 17, color: _brandNibInk),
-                                label: const Text('Open in Studio', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                                onPressed:
+                                    localBusy ? null : sendScannedToStudio,
+                                icon: Icon(Icons.brush_outlined,
+                                    size: 17, color: _brandNibInk),
+                                label: const Text('Open in Studio',
+                                    style: TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700)),
                               ),
                             ),
                           ],
@@ -10445,7 +11836,6 @@ class _StudioScreenState extends State<StudioScreen> with WidgetsBindingObserver
       },
     );
   }
-
 }
 
 class _ScannedDocPage {
@@ -10626,11 +12016,13 @@ List<_SigPoint> _smoothSigPoints(List<_SigPoint> raw, {int passes = 3}) {
       final a = pts[i];
       final b = pts[i + 1];
       next.add(_SigPoint(
-        Offset(a.pos.dx * 0.75 + b.pos.dx * 0.25, a.pos.dy * 0.75 + b.pos.dy * 0.25),
+        Offset(a.pos.dx * 0.75 + b.pos.dx * 0.25,
+            a.pos.dy * 0.75 + b.pos.dy * 0.25),
         (a.timestampMs * 0.75 + b.timestampMs * 0.25).round(),
       ));
       next.add(_SigPoint(
-        Offset(a.pos.dx * 0.25 + b.pos.dx * 0.75, a.pos.dy * 0.25 + b.pos.dy * 0.75),
+        Offset(a.pos.dx * 0.25 + b.pos.dx * 0.75,
+            a.pos.dy * 0.25 + b.pos.dy * 0.75),
         (a.timestampMs * 0.25 + b.timestampMs * 0.75).round(),
       ));
     }
@@ -10648,13 +12040,15 @@ void _paintSignatureStrokeList(
   required double offsetY,
   double widthMultiplier = 1.0,
 }) {
-  Offset mapPt(Offset p) => Offset(p.dx * scale + offsetX, p.dy * scale + offsetY);
+  Offset mapPt(Offset p) =>
+      Offset(p.dx * scale + offsetX, p.dy * scale + offsetY);
 
   void drawUniformSmooth(_SigStroke stroke, double wFactor, double opacity) {
     final pts = stroke.points;
     final w = (stroke.width * widthMultiplier * wFactor).clamp(1.2, 28.0);
     final paint = Paint()
-      ..color = opacity < 0.99 ? stroke.color.withOpacity(opacity) : stroke.color
+      ..color =
+          opacity < 0.99 ? stroke.color.withOpacity(opacity) : stroke.color
       ..strokeWidth = w
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
@@ -10732,7 +12126,10 @@ void _paintSignatureStrokeList(
           canvas.translate(px, py);
           canvas.rotate(nibAngle);
           canvas.drawRect(
-            Rect.fromCenter(center: Offset.zero, width: nibHalfLen * 2, height: nibHalfThick * 2),
+            Rect.fromCenter(
+                center: Offset.zero,
+                width: nibHalfLen * 2,
+                height: nibHalfThick * 2),
             fillPaint,
           );
           canvas.restore();
@@ -10809,7 +12206,6 @@ class _SignaturePadPainter extends CustomPainter {
   bool shouldRepaint(covariant _SignaturePadPainter oldDelegate) => true;
 }
 
-
 class _StampPainter extends CustomPainter {
   final String shape;
   final String org;
@@ -10833,7 +12229,20 @@ class _StampPainter extends CustomPainter {
 
   String _todayBadge() {
     final now = DateTime.now();
-    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const months = [
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC'
+    ];
     final d = now.day.toString().padLeft(2, '0');
     return '$d ${months[now.month - 1]} ${now.year}';
   }
@@ -10856,7 +12265,8 @@ class _StampPainter extends CustomPainter {
           color: color ?? inkColor,
           fontSize: fontSize,
           fontWeight: weight,
-          fontFamily: fontFamily ?? (rtl ? 'NotoNaskhArabic' : 'PlusJakartaSans'),
+          fontFamily:
+              fontFamily ?? (rtl ? 'NotoNaskhArabic' : 'PlusJakartaSans'),
         ),
       ),
       textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
@@ -10864,10 +12274,12 @@ class _StampPainter extends CustomPainter {
       maxLines: 1,
       ellipsis: '…',
     )..layout(maxWidth: maxW);
-    tp.paint(canvas, Offset(center.dx - tp.width / 2, center.dy - tp.height / 2));
+    tp.paint(
+        canvas, Offset(center.dx - tp.width / 2, center.dy - tp.height / 2));
   }
 
-  void _paintArcLatin(Canvas canvas, String text, Offset center, double radius, bool isTop, double fontSize) {
+  void _paintArcLatin(Canvas canvas, String text, Offset center, double radius,
+      bool isTop, double fontSize) {
     final chars = text.trim().toUpperCase().split('');
     if (chars.isEmpty) return;
     final painters = <TextPainter>[];
@@ -10876,7 +12288,11 @@ class _StampPainter extends CustomPainter {
       final tp = TextPainter(
         text: TextSpan(
           text: ch,
-          style: TextStyle(color: inkColor, fontSize: fontSize, fontWeight: FontWeight.w800, fontFamily: 'PlusJakartaSans'),
+          style: TextStyle(
+              color: inkColor,
+              fontSize: fontSize,
+              fontWeight: FontWeight.w800,
+              fontFamily: 'PlusJakartaSans'),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
@@ -10885,13 +12301,15 @@ class _StampPainter extends CustomPainter {
     }
     final totalAngle = math.min(math.pi * 1.15, totalW / math.max(1.0, radius));
     final stepScale = totalAngle / math.max(1.0, totalW);
-    double cursor = isTop ? -math.pi / 2 - totalAngle / 2 : math.pi / 2 + totalAngle / 2;
+    double cursor =
+        isTop ? -math.pi / 2 - totalAngle / 2 : math.pi / 2 + totalAngle / 2;
 
     for (final tp in painters) {
       final half = ((tp.width + 2.0) * stepScale) / 2;
       cursor += isTop ? half : -half;
       canvas.save();
-      canvas.translate(center.dx + math.cos(cursor) * radius, center.dy + math.sin(cursor) * radius);
+      canvas.translate(center.dx + math.cos(cursor) * radius,
+          center.dy + math.sin(cursor) * radius);
       canvas.rotate(isTop ? cursor + math.pi / 2 : cursor - math.pi / 2);
       tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
       canvas.restore();
@@ -10927,12 +12345,14 @@ class _StampPainter extends CustomPainter {
 
       final textR = (rOuter - w * 0.02 + rInner) / 2;
       if (_isRtl(orgText)) {
-        _paintCenteredText(canvas, orgText, Offset(center.dx, center.dy - textR + 2), rInner * 1.4, w * 0.045);
+        _paintCenteredText(canvas, orgText,
+            Offset(center.dx, center.dy - textR + 2), rInner * 1.4, w * 0.045);
       } else {
         _paintArcLatin(canvas, orgText, center, textR, true, w * 0.042);
       }
       if (_isRtl(subText)) {
-        _paintCenteredText(canvas, subText, Offset(center.dx, center.dy + textR - 2), rInner * 1.4, w * 0.04);
+        _paintCenteredText(canvas, subText,
+            Offset(center.dx, center.dy + textR - 2), rInner * 1.4, w * 0.04);
       } else {
         _paintArcLatin(canvas, subText, center, textR, false, w * 0.036);
       }
@@ -10940,8 +12360,17 @@ class _StampPainter extends CustomPainter {
       final bw = rInner * 2.25;
       final bh = w * 0.14;
       final rect = Rect.fromCenter(center: center, width: bw, height: bh);
-      canvas.drawRect(rect, Paint()..color = transparentBg ? Colors.white.withOpacity(0.92) : Colors.white);
-      canvas.drawRect(rect, Paint()..color = inkColor..style = PaintingStyle.stroke..strokeWidth = w * 0.007);
+      canvas.drawRect(
+          rect,
+          Paint()
+            ..color =
+                transparentBg ? Colors.white.withOpacity(0.92) : Colors.white);
+      canvas.drawRect(
+          rect,
+          Paint()
+            ..color = inkColor
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = w * 0.007);
       _paintCenteredText(
         canvas,
         statusText,
@@ -10951,22 +12380,49 @@ class _StampPainter extends CustomPainter {
         weight: FontWeight.w800,
       );
       if (showDate) {
-        _paintCenteredText(canvas, today, Offset(center.dx, center.dy + w * 0.034), bw - 16, w * 0.028);
+        _paintCenteredText(canvas, today,
+            Offset(center.dx, center.dy + w * 0.034), bw - 16, w * 0.028);
       }
     } else if (shape == 'oval') {
       final rx = w * 0.44;
       final ry = h * 0.34;
-      canvas.drawOval(Rect.fromCenter(center: center, width: rx * 2, height: ry * 2), outerStroke);
-      canvas.drawOval(Rect.fromCenter(center: center, width: (rx - w * 0.022) * 2, height: (ry - w * 0.022) * 2), thinStroke);
+      canvas.drawOval(
+          Rect.fromCenter(center: center, width: rx * 2, height: ry * 2),
+          outerStroke);
+      canvas.drawOval(
+          Rect.fromCenter(
+              center: center,
+              width: (rx - w * 0.022) * 2,
+              height: (ry - w * 0.022) * 2),
+          thinStroke);
 
-      canvas.drawLine(Offset(center.dx - rx * 0.7, center.dy - ry * 0.28), Offset(center.dx + rx * 0.7, center.dy - ry * 0.28), thinStroke);
-      canvas.drawLine(Offset(center.dx - rx * 0.7, center.dy + ry * 0.28), Offset(center.dx + rx * 0.7, center.dy + ry * 0.28), thinStroke);
+      canvas.drawLine(Offset(center.dx - rx * 0.7, center.dy - ry * 0.28),
+          Offset(center.dx + rx * 0.7, center.dy - ry * 0.28), thinStroke);
+      canvas.drawLine(Offset(center.dx - rx * 0.7, center.dy + ry * 0.28),
+          Offset(center.dx + rx * 0.7, center.dy + ry * 0.28), thinStroke);
 
-      _paintCenteredText(canvas, _isRtl(orgText) ? orgText : orgText.toUpperCase(), Offset(center.dx, center.dy - ry * 0.54), rx * 1.35, w * 0.042);
-      _paintCenteredText(canvas, _isRtl(subText) ? subText : subText.toUpperCase(), Offset(center.dx, center.dy + ry * 0.54), rx * 1.35, w * 0.036);
-      _paintCenteredText(canvas, statusText, Offset(center.dx, showDate ? center.dy - w * 0.02 : center.dy), rx * 1.5, w * 0.056, weight: FontWeight.w800);
+      _paintCenteredText(
+          canvas,
+          _isRtl(orgText) ? orgText : orgText.toUpperCase(),
+          Offset(center.dx, center.dy - ry * 0.54),
+          rx * 1.35,
+          w * 0.042);
+      _paintCenteredText(
+          canvas,
+          _isRtl(subText) ? subText : subText.toUpperCase(),
+          Offset(center.dx, center.dy + ry * 0.54),
+          rx * 1.35,
+          w * 0.036);
+      _paintCenteredText(
+          canvas,
+          statusText,
+          Offset(center.dx, showDate ? center.dy - w * 0.02 : center.dy),
+          rx * 1.5,
+          w * 0.056,
+          weight: FontWeight.w800);
       if (showDate) {
-        _paintCenteredText(canvas, today, Offset(center.dx, center.dy + w * 0.036), rx * 1.25, w * 0.028);
+        _paintCenteredText(canvas, today,
+            Offset(center.dx, center.dy + w * 0.036), rx * 1.25, w * 0.028);
       }
     } else {
       final bw = w * 0.84;
@@ -10975,12 +12431,30 @@ class _StampPainter extends CustomPainter {
       canvas.drawRect(rect, outerStroke);
       canvas.drawRect(rect.deflate(w * 0.02), thinStroke);
 
-      _paintCenteredText(canvas, _isRtl(orgText) ? orgText : orgText.toUpperCase(), Offset(center.dx, rect.top + bh * 0.2), bw - 28, w * 0.04);
-      _paintCenteredText(canvas, statusText, Offset(center.dx, showDate ? center.dy - w * 0.01 : center.dy + w * 0.01), bw - 28, w * 0.068, weight: FontWeight.w800);
-      canvas.drawLine(Offset(rect.left + w * 0.04, rect.bottom - bh * 0.25), Offset(rect.right - w * 0.04, rect.bottom - bh * 0.25), thinStroke);
+      _paintCenteredText(
+          canvas,
+          _isRtl(orgText) ? orgText : orgText.toUpperCase(),
+          Offset(center.dx, rect.top + bh * 0.2),
+          bw - 28,
+          w * 0.04);
+      _paintCenteredText(
+          canvas,
+          statusText,
+          Offset(center.dx,
+              showDate ? center.dy - w * 0.01 : center.dy + w * 0.01),
+          bw - 28,
+          w * 0.068,
+          weight: FontWeight.w800);
+      canvas.drawLine(Offset(rect.left + w * 0.04, rect.bottom - bh * 0.25),
+          Offset(rect.right - w * 0.04, rect.bottom - bh * 0.25), thinStroke);
 
       final botText = showDate ? '$subText · $today' : subText;
-      _paintCenteredText(canvas, _isRtl(botText) ? botText : botText.toUpperCase(), Offset(center.dx, rect.bottom - bh * 0.14), bw - 32, w * 0.032);
+      _paintCenteredText(
+          canvas,
+          _isRtl(botText) ? botText : botText.toUpperCase(),
+          Offset(center.dx, rect.bottom - bh * 0.14),
+          bw - 32,
+          w * 0.032);
     }
   }
 

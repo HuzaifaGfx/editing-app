@@ -38,7 +38,8 @@ class LayerCanvas extends StatefulWidget {
 }
 
 class _LayerCanvasState extends State<LayerCanvas> {
-  final TransformationController _transformController = TransformationController();
+  final TransformationController _transformController =
+      TransformationController();
   final GlobalKey _canvasStackKey = GlobalKey();
 
   final Map<String, ui.Image> _decodedImages = {};
@@ -91,7 +92,42 @@ class _LayerCanvasState extends State<LayerCanvas> {
     super.dispose();
   }
 
+  /// Effective display source for an image layer, highest priority first:
+  /// AI background-removed file -> enhanced file -> guilloche bytes ->
+  /// white-removed bytes -> original file. A file tier whose file is missing
+  /// (deleted from storage) falls through to the next tier. Keep in sync
+  /// with the top-level [_effectiveLayerImageSource] used by export.
   String _imageSourceKey(DesignLayer layer) {
+    String? fileKey(String tier, String path) {
+      var stamp = _fileMtimeCache[path];
+      if (stamp == null) {
+        try {
+          final f = File(path);
+          if (f.existsSync()) {
+            stamp =
+                '${f.lengthSync()}_${f.lastModifiedSync().millisecondsSinceEpoch}';
+          } else {
+            stamp = 'missing';
+          }
+        } catch (_) {
+          stamp = 'err';
+        }
+        _fileMtimeCache[path] = stamp;
+      }
+      if (stamp == 'missing' || stamp == 'err') return null;
+      return '$tier:$path:$stamp';
+    }
+
+    final bg = layer.backgroundRemovedPath;
+    if (bg != null) {
+      final k = fileKey('b', bg);
+      if (k != null) return k;
+    }
+    final enh = layer.enhancedPath;
+    if (enh != null) {
+      final k = fileKey('e', enh);
+      if (k != null) return k;
+    }
     if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
       final b = layer.processedGuillocheBytes!;
       return 'g:${layer.id}:${identityHashCode(b)}:${b.length}';
@@ -101,22 +137,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
       return 'w:${layer.id}:${identityHashCode(b)}:${b.length}';
     }
     if (layer.localImagePath != null) {
-      final path = layer.localImagePath!;
-      var stamp = _fileMtimeCache[path];
-      if (stamp == null) {
-        try {
-          final f = File(path);
-          if (f.existsSync()) {
-            stamp = '${f.lengthSync()}_${f.lastModifiedSync().millisecondsSinceEpoch}';
-          } else {
-            stamp = 'missing';
-          }
-        } catch (_) {
-          stamp = 'err';
-        }
-        _fileMtimeCache[path] = stamp;
-      }
-      return 'f:$path:$stamp';
+      final k = fileKey('f', layer.localImagePath!);
+      if (k != null) return k;
     }
     return '';
   }
@@ -128,13 +150,15 @@ class _LayerCanvasState extends State<LayerCanvas> {
       final key = _imageSourceKey(layer);
       if (key.isEmpty) continue;
       activeKeys.add(key);
-      if (!_decodedImages.containsKey(key) && !_loadingImageKeys.contains(key)) {
+      if (!_decodedImages.containsKey(key) &&
+          !_loadingImageKeys.contains(key)) {
         _loadingImageKeys.add(key);
         unawaited(_decodeLayerImage(layer, key));
       }
     }
 
-    final staleKeys = _decodedImages.keys.where((k) => !activeKeys.contains(k)).toList();
+    final staleKeys =
+        _decodedImages.keys.where((k) => !activeKeys.contains(k)).toList();
     if (staleKeys.isNotEmpty) {
       final toDispose = <ui.Image>[];
       for (final k in staleKeys) {
@@ -154,12 +178,11 @@ class _LayerCanvasState extends State<LayerCanvas> {
   Future<void> _decodeLayerImage(DesignLayer layer, String key) async {
     try {
       Uint8List? bytes;
-      if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
-        bytes = layer.processedGuillocheBytes;
-      } else if (layer.processedWhiteRemovedBytes != null) {
-        bytes = layer.processedWhiteRemovedBytes;
-      } else if (layer.localImagePath != null) {
-        final file = File(layer.localImagePath!);
+      final src = _effectiveLayerImageSource(layer);
+      if (src.bytes != null) {
+        bytes = src.bytes;
+      } else if (src.filePath != null) {
+        final file = File(src.filePath!);
         if (await file.exists()) {
           bytes = await file.readAsBytes();
         }
@@ -197,7 +220,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
   }
 
   Offset _globalToCanvas(Offset globalPos) {
-    final box = _canvasStackKey.currentContext?.findRenderObject() as RenderBox?;
+    final box =
+        _canvasStackKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return Offset.zero;
     return box.globalToLocal(globalPos);
   }
@@ -220,7 +244,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
 
   void _restorePreDragIfRecent() {
     final l = _preDragLayer;
-    if (l != null && DateTime.now().difference(_preDragAt).inMilliseconds < 420) {
+    if (l != null &&
+        DateTime.now().difference(_preDragAt).inMilliseconds < 420) {
       l.x = _preDragX;
       l.y = _preDragY;
       l.width = _preDragW;
@@ -258,9 +283,11 @@ class _LayerCanvasState extends State<LayerCanvas> {
   }
 
   Offset _layerCenterGlobal(DesignLayer layer) {
-    final box = _canvasStackKey.currentContext?.findRenderObject() as RenderBox?;
+    final box =
+        _canvasStackKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return Offset.zero;
-    return box.localToGlobal(Offset(layer.x + layer.width / 2, layer.y + layer.height / 2));
+    return box.localToGlobal(
+        Offset(layer.x + layer.width / 2, layer.y + layer.height / 2));
   }
 
   @override
@@ -293,7 +320,9 @@ class _LayerCanvasState extends State<LayerCanvas> {
         DesignLayer? selectedLayer;
         if (widget.showSelectionHandles && widget.selectedLayerId != null) {
           for (final l in page.layers) {
-            if (l.visible && !l.isCanvasBackground && l.id == widget.selectedLayerId) {
+            if (l.visible &&
+                !l.isCanvasBackground &&
+                l.id == widget.selectedLayerId) {
               selectedLayer = l;
               break;
             }
@@ -316,7 +345,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 if (_activePointers.length >= 2) {
                   _restorePreDragIfRecent();
                   final pts = _activePointers.values.take(2).toList();
-                  _pinchStartDistance = math.max(12.0, (pts[1] - pts[0]).distance);
+                  _pinchStartDistance =
+                      math.max(12.0, (pts[1] - pts[0]).distance);
                   _pinchStartFocal = (pts[0] + pts[1]) / 2.0;
                   _pinchStartMatrix = _transformController.value.clone();
                   setState(() {
@@ -334,7 +364,10 @@ class _LayerCanvasState extends State<LayerCanvas> {
                   final focal = (pts[0] + pts[1]) / 2.0;
                   final startScale = _pinchStartMatrix.getMaxScaleOnAxis();
                   final safeStartScale = startScale <= 0 ? 1.0 : startScale;
-                  final targetScale = (safeStartScale * (dist / _pinchStartDistance)).clamp(0.4, 4.0).toDouble();
+                  final targetScale =
+                      (safeStartScale * (dist / _pinchStartDistance))
+                          .clamp(0.4, 4.0)
+                          .toDouble();
                   final appliedRatio = targetScale / safeStartScale;
                   final nextMatrix = Matrix4.identity()
                     ..translate(focal.dx, focal.dy)
@@ -368,20 +401,24 @@ class _LayerCanvasState extends State<LayerCanvas> {
               },
               child: InteractiveViewer(
                 transformationController: _transformController,
-                panEnabled: _activePointers.length <= 1 && !_isPinching && _currentZoom > 1.02,
+                panEnabled: _activePointers.length <= 1 &&
+                    !_isPinching &&
+                    _currentZoom > 1.02,
                 scaleEnabled: false,
                 minScale: 0.4,
                 maxScale: 4.0,
                 boundaryMargin: const EdgeInsets.all(220),
                 onInteractionUpdate: (_) {
                   if (_isPinching) return;
-                  final nextZoom = _transformController.value.getMaxScaleOnAxis();
+                  final nextZoom =
+                      _transformController.value.getMaxScaleOnAxis();
                   if ((nextZoom - _currentZoom).abs() > 0.02) {
                     setState(() => _currentZoom = nextZoom);
                   }
                 },
                 onInteractionEnd: (_) {
-                  final nextZoom = _transformController.value.getMaxScaleOnAxis();
+                  final nextZoom =
+                      _transformController.value.getMaxScaleOnAxis();
                   setState(() {
                     _currentZoom = nextZoom;
                     if (_isPinching && _activePointers.length <= 1) {
@@ -436,7 +473,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                       painter: _ArtboardPainter(
                                         page: page,
                                         layerImages: layerImages,
-                                        forceTransparentBackground: widget.forceTransparentBackground,
+                                        forceTransparentBackground:
+                                            widget.forceTransparentBackground,
                                       ),
                                     ),
                                   ),
@@ -449,34 +487,53 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                         children: [
                                           Positioned.fill(
                                             child: GestureDetector(
-                                              behavior: HitTestBehavior.translucent,
+                                              behavior:
+                                                  HitTestBehavior.translucent,
                                               onTap: () {
-                                                if (_blockLayerInteraction) return;
+                                                if (_blockLayerInteraction)
+                                                  return;
                                                 widget.onSelectLayer(null);
                                               },
                                             ),
                                           ),
-                                          ...page.layers.where((l) => l.visible).map((layer) {
-                                            final selected = !widget.hideOverlaysForExport &&
+                                          ...page.layers
+                                              .where((l) => l.visible)
+                                              .map((layer) {
+                                            final selected = !widget
+                                                    .hideOverlaysForExport &&
                                                 widget.showSelectionHandles &&
                                                 !layer.isCanvasBackground &&
-                                                layer.id == widget.selectedLayerId;
+                                                layer.id ==
+                                                    widget.selectedLayerId;
 
                                             final hitChild = Transform.rotate(
-                                              angle: layer.rotation * math.pi / 180.0,
+                                              angle: layer.rotation *
+                                                  math.pi /
+                                                  180.0,
                                               child: selected
                                                   ? IgnorePointer(
                                                       child: Container(
-                                                        decoration: BoxDecoration(
+                                                        decoration:
+                                                            BoxDecoration(
                                                           border: Border.all(
-                                                            color: const Color(0xFF111317),
-                                                            width: (2.5 * invScale).clamp(2.0, 20.0),
+                                                            color: const Color(
+                                                                0xFF111317),
+                                                            width: (2.5 *
+                                                                    invScale)
+                                                                .clamp(
+                                                                    2.0, 20.0),
                                                           ),
                                                           boxShadow: [
                                                             BoxShadow(
-                                                              color: Colors.white.withOpacity(0.55),
+                                                              color: Colors
+                                                                  .white
+                                                                  .withOpacity(
+                                                                      0.55),
                                                               blurRadius: 0,
-                                                              spreadRadius: (1.0 * invScale).clamp(0.8, 4.0),
+                                                              spreadRadius: (1.0 *
+                                                                      invScale)
+                                                                  .clamp(
+                                                                      0.8, 4.0),
                                                             ),
                                                           ],
                                                         ),
@@ -491,40 +548,103 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                               width: layer.width,
                                               height: layer.height,
                                               child: layer.isCanvasBackground
-                                                  ? IgnorePointer(ignoring: true, child: hitChild)
+                                                  ? IgnorePointer(
+                                                      ignoring: true,
+                                                      child: hitChild)
                                                   : GestureDetector(
-                                                      behavior: HitTestBehavior.opaque,
+                                                      behavior: HitTestBehavior
+                                                          .opaque,
                                                       onTap: () {
-                                                        if (_blockLayerInteraction) return;
-                                                        widget.onSelectLayer(layer.id);
+                                                        if (_blockLayerInteraction)
+                                                          return;
+                                                        widget.onSelectLayer(
+                                                            layer.id);
                                                       },
                                                       onPanStart: (d) {
-                                                        if (_blockLayerInteraction) return;
+                                                        if (_blockLayerInteraction)
+                                                          return;
                                                         _capturePreDrag(layer);
-                                                        _panStartCanvas = _globalToCanvas(d.globalPosition);
-                                                        widget.onSelectLayer(layer.id);
-                                                        if (!layer.locked) widget.onInteractionStart?.call();
+                                                        _panStartCanvas =
+                                                            _globalToCanvas(d
+                                                                .globalPosition);
+                                                        widget.onSelectLayer(
+                                                            layer.id);
+                                                        if (!layer.locked)
+                                                          widget
+                                                              .onInteractionStart
+                                                              ?.call();
                                                       },
                                                       onPanUpdate: layer.locked
                                                           ? null
                                                           : (d) {
-                                                              if (_blockLayerInteraction) return;
-                                                              final curCanvas = _globalToCanvas(d.globalPosition);
-                                                              final totalDelta = curCanvas - _panStartCanvas;
-                                                              const minOverlap = 24.0;
-                                                              final minX = -(layer.width - minOverlap);
-                                                              final maxX = page.width - minOverlap;
-                                                              final minY = -(layer.height - minOverlap);
-                                                              final maxY = page.height - minOverlap;
-                                                              var nextX = (_preDragX + totalDelta.dx).clamp(minX, maxX).toDouble();
-                                                              var nextY = (_preDragY + totalDelta.dy).clamp(minY, maxY).toDouble();
-                                                              final cx = nextX + layer.width / 2;
-                                                              final cy = nextY + layer.height / 2;
-                                                              const snapTol = 10.0;
-                                                              final hitX = (cx - page.width / 2).abs() <= snapTol;
-                                                              final hitY = (cy - page.height / 2).abs() <= snapTol;
-                                                              if (hitX) nextX = (page.width / 2 - layer.width / 2).clamp(minX, maxX).toDouble();
-                                                              if (hitY) nextY = (page.height / 2 - layer.height / 2).clamp(minY, maxY).toDouble();
+                                                              if (_blockLayerInteraction)
+                                                                return;
+                                                              final curCanvas =
+                                                                  _globalToCanvas(
+                                                                      d.globalPosition);
+                                                              final totalDelta =
+                                                                  curCanvas -
+                                                                      _panStartCanvas;
+                                                              const minOverlap =
+                                                                  24.0;
+                                                              final minX = -(layer
+                                                                      .width -
+                                                                  minOverlap);
+                                                              final maxX = page
+                                                                      .width -
+                                                                  minOverlap;
+                                                              final minY = -(layer
+                                                                      .height -
+                                                                  minOverlap);
+                                                              final maxY = page
+                                                                      .height -
+                                                                  minOverlap;
+                                                              var nextX = (_preDragX +
+                                                                      totalDelta
+                                                                          .dx)
+                                                                  .clamp(minX,
+                                                                      maxX)
+                                                                  .toDouble();
+                                                              var nextY = (_preDragY +
+                                                                      totalDelta
+                                                                          .dy)
+                                                                  .clamp(minY,
+                                                                      maxY)
+                                                                  .toDouble();
+                                                              final cx = nextX +
+                                                                  layer.width /
+                                                                      2;
+                                                              final cy = nextY +
+                                                                  layer.height /
+                                                                      2;
+                                                              const snapTol =
+                                                                  10.0;
+                                                              final hitX = (cx -
+                                                                          page.width /
+                                                                              2)
+                                                                      .abs() <=
+                                                                  snapTol;
+                                                              final hitY = (cy -
+                                                                          page.height /
+                                                                              2)
+                                                                      .abs() <=
+                                                                  snapTol;
+                                                              if (hitX)
+                                                                nextX = (page.width /
+                                                                            2 -
+                                                                        layer.width /
+                                                                            2)
+                                                                    .clamp(minX,
+                                                                        maxX)
+                                                                    .toDouble();
+                                                              if (hitY)
+                                                                nextY = (page.height /
+                                                                            2 -
+                                                                        layer.height /
+                                                                            2)
+                                                                    .clamp(minY,
+                                                                        maxY)
+                                                                    .toDouble();
                                                               setState(() {
                                                                 layer.x = nextX;
                                                                 layer.y = nextY;
@@ -539,7 +659,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                             _snapY = false;
                                                           });
                                                         }
-                                                        widget.onUpdateLayer(layer);
+                                                        widget.onUpdateLayer(
+                                                            layer);
                                                       },
                                                       onPanCancel: () {
                                                         if (_snapX || _snapY) {
@@ -548,17 +669,20 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                                             _snapY = false;
                                                           });
                                                         }
-                                                        widget.onUpdateLayer(layer);
+                                                        widget.onUpdateLayer(
+                                                            layer);
                                                       },
                                                       child: hitChild,
                                                     ),
                                             );
                                           }),
-                                          if (widget.showGuides && !widget.hideOverlaysForExport)
+                                          if (widget.showGuides &&
+                                              !widget.hideOverlaysForExport)
                                             Positioned.fill(
                                               child: IgnorePointer(
                                                 child: CustomPaint(
-                                                  painter: _MarginGuidesPainter(invScale: invScale),
+                                                  painter: _MarginGuidesPainter(
+                                                      invScale: invScale),
                                                 ),
                                               ),
                                             ),
@@ -573,7 +697,9 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                       bottom: 0,
                                       width: 2.0 * invScale,
                                       child: IgnorePointer(
-                                        child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
+                                        child: Container(
+                                            color: const Color(0xFFF59E0B)
+                                                .withOpacity(0.85)),
                                       ),
                                     ),
                                   if (_snapY && !widget.hideOverlaysForExport)
@@ -583,11 +709,16 @@ class _LayerCanvasState extends State<LayerCanvas> {
                                       right: 0,
                                       height: 2.0 * invScale,
                                       child: IgnorePointer(
-                                        child: Container(color: const Color(0xFFF59E0B).withOpacity(0.85)),
+                                        child: Container(
+                                            color: const Color(0xFFF59E0B)
+                                                .withOpacity(0.85)),
                                       ),
                                     ),
-                                  if (!widget.hideOverlaysForExport && selectedLayer != null && !selectedLayer.locked)
-                                    _buildSelectionHandlesOverlay(selectedLayer, invScale),
+                                  if (!widget.hideOverlaysForExport &&
+                                      selectedLayer != null &&
+                                      !selectedLayer.locked)
+                                    _buildSelectionHandlesOverlay(
+                                        selectedLayer, invScale),
                                 ],
                               ),
                             ),
@@ -607,28 +738,65 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 child: IgnorePointer(
                   child: Center(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color: (isDark ? const Color(0xFF1A1E26) : Colors.white).withOpacity(0.92),
+                        color: (isDark ? const Color(0xFF1A1E26) : Colors.white)
+                            .withOpacity(0.92),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: isDark ? const Color(0xFF2D3340) : const Color(0xFFE2E8F0),
+                          color: isDark
+                              ? const Color(0xFF2D3340)
+                              : const Color(0xFFE2E8F0),
                         ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF111317), shape: BoxShape.circle)),
+                          Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                  color: Color(0xFF111317),
+                                  shape: BoxShape.circle)),
                           const SizedBox(width: 4),
-                          Text('Scale', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87)),
+                          Text('Scale',
+                              style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black87)),
                           const SizedBox(width: 10),
-                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF0EA5E9), shape: BoxShape.circle)),
+                          Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                  color: Color(0xFF0EA5E9),
+                                  shape: BoxShape.circle)),
                           const SizedBox(width: 4),
-                          Text('Rotate', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87)),
+                          Text('Rotate',
+                              style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black87)),
                           const SizedBox(width: 10),
-                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
+                          Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                  color: Color(0xFF10B981),
+                                  shape: BoxShape.circle)),
                           const SizedBox(width: 4),
-                          Text('Box Width', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87)),
+                          Text('Box Width',
+                              style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black87)),
                         ],
                       ),
                     ),
@@ -650,7 +818,9 @@ class _LayerCanvasState extends State<LayerCanvas> {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: isDark ? const Color(0xFF2D3340) : const Color(0xFFE2E8F0),
+                      color: isDark
+                          ? const Color(0xFF2D3340)
+                          : const Color(0xFFE2E8F0),
                     ),
                   ),
                   child: Row(
@@ -674,13 +844,16 @@ class _LayerCanvasState extends State<LayerCanvas> {
                       InkWell(
                         onTap: _resetZoom,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 12),
                           child: Text(
                             '${(_currentZoom * 100).round()}%',
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w700,
-                              color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                              color: isDark
+                                  ? const Color(0xFFF1F5F9)
+                                  : const Color(0xFF0F172A),
                             ),
                           ),
                         ),
@@ -747,16 +920,26 @@ class _LayerCanvasState extends State<LayerCanvas> {
     final isUnrotated = layer.rotation.abs() < 0.5;
     final visLeft = isUnrotated
         ? layer.x.clamp(0.0, math.max(0.0, page.width - minVis)).toDouble()
-        : layer.x.clamp(-page.width * 0.35, math.max(0.0, page.width - minVis)).toDouble();
+        : layer.x
+            .clamp(-page.width * 0.35, math.max(0.0, page.width - minVis))
+            .toDouble();
     final visTop = isUnrotated
         ? layer.y.clamp(0.0, math.max(0.0, page.height - minVis)).toDouble()
-        : layer.y.clamp(-page.height * 0.35, math.max(0.0, page.height - minVis)).toDouble();
+        : layer.y
+            .clamp(-page.height * 0.35, math.max(0.0, page.height - minVis))
+            .toDouble();
     final visRight = isUnrotated
         ? (layer.x + layer.width).clamp(visLeft + minVis, page.width).toDouble()
-        : (layer.x + layer.width).clamp(visLeft + minVis, page.width * 1.35).toDouble();
+        : (layer.x + layer.width)
+            .clamp(visLeft + minVis, page.width * 1.35)
+            .toDouble();
     final visBottom = isUnrotated
-        ? (layer.y + layer.height).clamp(visTop + minVis, page.height).toDouble()
-        : (layer.y + layer.height).clamp(visTop + minVis, page.height * 1.35).toDouble();
+        ? (layer.y + layer.height)
+            .clamp(visTop + minVis, page.height)
+            .toDouble()
+        : (layer.y + layer.height)
+            .clamp(visTop + minVis, page.height * 1.35)
+            .toDouble();
     final visW = math.max(minVis, visRight - visLeft);
     final visH = math.max(minVis, visBottom - visTop);
 
@@ -793,7 +976,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                     d.globalPosition.dy - _rotateCenterGlobal.dy,
                     d.globalPosition.dx - _rotateCenterGlobal.dx,
                   );
-                  var deg = _rotateStartDeg + (curAngle - _rotateStartAngle) * 180.0 / math.pi;
+                  var deg = _rotateStartDeg +
+                      (curAngle - _rotateStartAngle) * 180.0 / math.pi;
                   while (deg > 180.0) {
                     deg -= 360.0;
                   }
@@ -818,7 +1002,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                       decoration: BoxDecoration(
                         color: const Color(0xFF0EA5E9),
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: ringWidth),
+                        border:
+                            Border.all(color: Colors.white, width: ringWidth),
                         boxShadow: [
                           BoxShadow(
                             blurRadius: 6.0 * invScale,
@@ -827,7 +1012,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                           ),
                         ],
                       ),
-                      child: Icon(Icons.rotate_right_rounded, size: iconSize, color: Colors.white),
+                      child: Icon(Icons.rotate_right_rounded,
+                          size: iconSize, color: Colors.white),
                     ),
                   ),
                 ),
@@ -848,13 +1034,20 @@ class _LayerCanvasState extends State<LayerCanvas> {
                   },
                   onPanUpdate: (d) {
                     if (_blockLayerInteraction) return;
-                    final total = _globalToCanvas(d.globalPosition) - _panStartCanvas;
+                    final total =
+                        _globalToCanvas(d.globalPosition) - _panStartCanvas;
                     final rad = _preDragRot * math.pi / 180.0;
-                    final localDx = total.dx * math.cos(-rad) - total.dy * math.sin(-rad);
-                    final localDy = total.dx * math.sin(-rad) + total.dy * math.cos(-rad);
+                    final localDx =
+                        total.dx * math.cos(-rad) - total.dy * math.sin(-rad);
+                    final localDy =
+                        total.dx * math.sin(-rad) + total.dy * math.cos(-rad);
 
-                    final nextW = (_preDragW - localDx).clamp(60.0, page.width * 2.5).toDouble();
-                    final nextH = (_preDragH + localDy).clamp(40.0, page.height * 2.5).toDouble();
+                    final nextW = (_preDragW - localDx)
+                        .clamp(60.0, page.width * 2.5)
+                        .toDouble();
+                    final nextH = (_preDragH + localDy)
+                        .clamp(40.0, page.height * 2.5)
+                        .toDouble();
                     final shiftLeft = _preDragW - nextW;
                     const minOverlap = 24.0;
                     setState(() {
@@ -862,7 +1055,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                           .clamp(-(nextW - minOverlap), page.width - minOverlap)
                           .toDouble();
                       layer.y = (_preDragY + shiftLeft * math.sin(rad))
-                          .clamp(-(nextH - minOverlap), page.height - minOverlap)
+                          .clamp(
+                              -(nextH - minOverlap), page.height - minOverlap)
                           .toDouble();
                       layer.width = nextW;
                       layer.height = nextH;
@@ -880,7 +1074,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                         decoration: BoxDecoration(
                           color: const Color(0xFF10B981),
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: ringWidth),
+                          border:
+                              Border.all(color: Colors.white, width: ringWidth),
                           boxShadow: [
                             BoxShadow(
                               blurRadius: 6.0 * invScale,
@@ -889,7 +1084,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                             ),
                           ],
                         ),
-                        child: Icon(Icons.aspect_ratio_rounded, size: iconSize * 0.92, color: Colors.white),
+                        child: Icon(Icons.aspect_ratio_rounded,
+                            size: iconSize * 0.92, color: Colors.white),
                       ),
                     ),
                   ),
@@ -909,35 +1105,52 @@ class _LayerCanvasState extends State<LayerCanvas> {
                 },
                 onPanUpdate: (d) {
                   if (_blockLayerInteraction) return;
-                  final total = _globalToCanvas(d.globalPosition) - _panStartCanvas;
+                  final total =
+                      _globalToCanvas(d.globalPosition) - _panStartCanvas;
                   final rad = -_preDragRot * math.pi / 180.0;
-                  final dx = total.dx * math.cos(rad) - total.dy * math.sin(rad);
-                  final dy = total.dx * math.sin(rad) + total.dy * math.cos(rad);
+                  final dx =
+                      total.dx * math.cos(rad) - total.dy * math.sin(rad);
+                  final dy =
+                      total.dx * math.sin(rad) + total.dy * math.cos(rad);
 
                   final availW = page.width * 3.0;
                   final availH = page.height * 3.0;
                   setState(() {
                     if (layer.type == LayerType.image && layer.aspectLocked) {
                       final ratio = _preDragW / math.max(1.0, _preDragH);
-                      final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
+                      final delta =
+                          dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
                       final maxW = math.min(availW, availH * ratio);
-                      final nextW = (_preDragW + delta).clamp(20.0, math.max(20.0, maxW)).toDouble();
-                      final nextH = (nextW / ratio).clamp(20.0, math.max(20.0, availH)).toDouble();
+                      final nextW = (_preDragW + delta)
+                          .clamp(20.0, math.max(20.0, maxW))
+                          .toDouble();
+                      final nextH = (nextW / ratio)
+                          .clamp(20.0, math.max(20.0, availH))
+                          .toDouble();
                       layer.width = nextW;
                       layer.height = nextH;
                     } else if (layer.type == LayerType.text) {
                       final ratio = _preDragW / math.max(1.0, _preDragH);
-                      final delta = dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
+                      final delta =
+                          dx.abs() >= (dy * ratio).abs() ? dx : dy * ratio;
                       final prevW = math.max(1.0, _preDragW);
                       final maxW = math.min(availW, availH * ratio);
-                      final nextW = (_preDragW + delta).clamp(40.0, math.max(40.0, maxW)).toDouble();
-                      final nextH = (nextW / ratio).clamp(24.0, math.max(24.0, availH)).toDouble();
-                      layer.fontSize = (_preDragFontSize * (nextW / prevW)).clamp(8.0, 600.0).toDouble();
+                      final nextW = (_preDragW + delta)
+                          .clamp(40.0, math.max(40.0, maxW))
+                          .toDouble();
+                      final nextH = (nextW / ratio)
+                          .clamp(24.0, math.max(24.0, availH))
+                          .toDouble();
+                      layer.fontSize = (_preDragFontSize * (nextW / prevW))
+                          .clamp(8.0, 600.0)
+                          .toDouble();
                       layer.width = nextW;
                       layer.height = nextH;
                     } else {
-                      layer.width = (_preDragW + dx).clamp(20.0, availW).toDouble();
-                      layer.height = (_preDragH + dy).clamp(20.0, availH).toDouble();
+                      layer.width =
+                          (_preDragW + dx).clamp(20.0, availW).toDouble();
+                      layer.height =
+                          (_preDragH + dy).clamp(20.0, availH).toDouble();
                     }
                   });
                 },
@@ -953,7 +1166,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                       decoration: BoxDecoration(
                         color: const Color(0xFF111317),
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: ringWidth),
+                        border:
+                            Border.all(color: Colors.white, width: ringWidth),
                         boxShadow: [
                           BoxShadow(
                             blurRadius: 6.0 * invScale,
@@ -962,7 +1176,8 @@ class _LayerCanvasState extends State<LayerCanvas> {
                           ),
                         ],
                       ),
-                      child: Icon(Icons.open_in_full_rounded, size: iconSize * 0.92, color: Colors.white),
+                      child: Icon(Icons.open_in_full_rounded,
+                          size: iconSize * 0.92, color: Colors.white),
                     ),
                   ),
                 ),
@@ -1043,8 +1258,10 @@ class _ArtboardPainter extends CustomPainter {
         final effectPad = 16.0 +
             layer.textStrokeWidth +
             layer.textShadowBlur * 2.0 +
-            math.max(layer.textShadowOffsetX.abs(), layer.textShadowOffsetY.abs());
-        final maxH = math.max(layer.height, preparedTextPainter.height + textPadY * 2);
+            math.max(
+                layer.textShadowOffsetX.abs(), layer.textShadowOffsetY.abs());
+        final maxH =
+            math.max(layer.height, preparedTextPainter.height + textPadY * 2);
         localBounds = Rect.fromLTWH(
           -layer.width / 2 - effectPad,
           -layer.height / 2 - effectPad,
@@ -1069,7 +1286,8 @@ class _ArtboardPainter extends CustomPainter {
       }
 
       canvas.save();
-      canvas.translate(layer.x + layer.width / 2.0, layer.y + layer.height / 2.0);
+      canvas.translate(
+          layer.x + layer.width / 2.0, layer.y + layer.height / 2.0);
       if (layer.rotation.abs() > 0.0001) {
         canvas.rotate(layer.rotation * math.pi / 180.0);
       }
@@ -1116,10 +1334,12 @@ class _ArtboardPainter extends CustomPainter {
   }
 
   void _paintImageLayer(Canvas canvas, DesignLayer layer, ui.Image? uiImg) {
-    final rect = Rect.fromLTWH(-layer.width / 2.0, -layer.height / 2.0, layer.width, layer.height);
+    final rect = Rect.fromLTWH(
+        -layer.width / 2.0, -layer.height / 2.0, layer.width, layer.height);
     canvas.save();
     if (layer.borderRadius > 0) {
-      canvas.clipRRect(RRect.fromRectAndRadius(rect, Radius.circular(layer.borderRadius)));
+      canvas.clipRRect(
+          RRect.fromRectAndRadius(rect, Radius.circular(layer.borderRadius)));
     } else {
       canvas.clipRect(rect);
     }
@@ -1137,12 +1357,21 @@ class _ArtboardPainter extends CustomPainter {
     final fit = layer.aspectLocked ? layer.objectFit : BoxFit.fill;
     final imgW = math.max(1.0, uiImg.width.toDouble());
     final imgH = math.max(1.0, uiImg.height.toDouble());
-    final fitted = applyBoxFit(fit, Size(imgW, imgH), Size(layer.width, layer.height));
-    final srcRect = Alignment.center.inscribe(fitted.source, Rect.fromLTWH(0, 0, imgW, imgH));
+    final fitted =
+        applyBoxFit(fit, Size(imgW, imgH), Size(layer.width, layer.height));
+    final srcRect = Alignment.center
+        .inscribe(fitted.source, Rect.fromLTWH(0, 0, imgW, imgH));
     final dstRect = Alignment.center.inscribe(fitted.destination, rect);
 
     final f = layer.filters;
-    final useRawGuilloche = f.guilloche && layer.processedGuillocheBytes != null;
+    // Raw guilloche bytes already carry their grade baked in — but only
+    // when they are actually the displayed source. If an AI output
+    // (background-removed / enhanced) wins the decode priority above, the
+    // live colour grade still applies to it.
+    final useRawGuilloche = f.guilloche &&
+        layer.processedGuillocheBytes != null &&
+        layer.backgroundRemovedPath == null &&
+        layer.enhancedPath == null;
     final hasColorGrade = !useRawGuilloche &&
         ((f.brightness - 1.0).abs() >= 0.005 ||
             (f.contrast - 1.0).abs() >= 0.005 ||
@@ -1150,7 +1379,8 @@ class _ArtboardPainter extends CustomPainter {
             f.sepia >= 0.005 ||
             f.grayscale >= 0.005 ||
             f.blackAndWhite);
-    final ColorFilter? gradeFilter = hasColorGrade ? buildLayerColorFilter(f) : null;
+    final ColorFilter? gradeFilter =
+        hasColorGrade ? buildLayerColorFilter(f) : null;
 
     void drawGraded({ColorFilter? extraFilter}) {
       final p = Paint()..filterQuality = FilterQuality.medium;
@@ -1320,7 +1550,9 @@ class _ArtboardPainter extends CustomPainter {
           fontFamily: layer.fontFamily,
           fontSize: layer.fontSize,
           fontWeight: FontWeight.values[weightIndex],
-          fontVariations: [ui.FontVariation('wght', layer.fontWeight.toDouble())],
+          fontVariations: [
+            ui.FontVariation('wght', layer.fontWeight.toDouble())
+          ],
           height: layer.lineHeight,
           letterSpacing:
               layer.letterSpacing.abs() < 0.01 ? null : layer.letterSpacing,
@@ -1426,17 +1658,22 @@ class _MarginGuidesPainter extends CustomPainter {
     final gap = 6.0 * invScale.clamp(0.5, 2.5);
     _drawDashedLine(canvas, rect.topLeft, rect.topRight, paint, dash, gap);
     _drawDashedLine(canvas, rect.topRight, rect.bottomRight, paint, dash, gap);
-    _drawDashedLine(canvas, rect.bottomRight, rect.bottomLeft, paint, dash, gap);
+    _drawDashedLine(
+        canvas, rect.bottomRight, rect.bottomLeft, paint, dash, gap);
     _drawDashedLine(canvas, rect.bottomLeft, rect.topLeft, paint, dash, gap);
 
     final thirdsPaint = Paint()
       ..color = const Color(0xFF06B6D4).withOpacity(0.18)
       ..strokeWidth = (0.85 * invScale).clamp(0.5, 1.8)
       ..style = PaintingStyle.stroke;
-    canvas.drawLine(Offset(size.width / 3, 0), Offset(size.width / 3, size.height), thirdsPaint);
-    canvas.drawLine(Offset(size.width * 2 / 3, 0), Offset(size.width * 2 / 3, size.height), thirdsPaint);
-    canvas.drawLine(Offset(0, size.height / 3), Offset(size.width, size.height / 3), thirdsPaint);
-    canvas.drawLine(Offset(0, size.height * 2 / 3), Offset(size.width, size.height * 2 / 3), thirdsPaint);
+    canvas.drawLine(Offset(size.width / 3, 0),
+        Offset(size.width / 3, size.height), thirdsPaint);
+    canvas.drawLine(Offset(size.width * 2 / 3, 0),
+        Offset(size.width * 2 / 3, size.height), thirdsPaint);
+    canvas.drawLine(Offset(0, size.height / 3),
+        Offset(size.width, size.height / 3), thirdsPaint);
+    canvas.drawLine(Offset(0, size.height * 2 / 3),
+        Offset(size.width, size.height * 2 / 3), thirdsPaint);
 
     final crossPaint = Paint()
       ..color = const Color(0xFFF59E0B).withOpacity(0.55)
@@ -1448,7 +1685,8 @@ class _MarginGuidesPainter extends CustomPainter {
     canvas.drawLine(Offset(cx, cy - tick), Offset(cx, cy + tick), crossPaint);
   }
 
-  void _drawDashedLine(Canvas canvas, Offset start, Offset end, Paint paint, double dash, double gap) {
+  void _drawDashedLine(Canvas canvas, Offset start, Offset end, Paint paint,
+      double dash, double gap) {
     final delta = end - start;
     final dist = delta.distance;
     if (dist <= 0) return;
@@ -1544,13 +1782,17 @@ class _ShapeLayerPainter extends CustomPainter {
       }
       path.close();
     } else if (shapeKind == 'line') {
-      final r = math.min(h / 2, math.max(4.0, borderRadius > 0 ? borderRadius : h / 2));
-      path.addRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), Radius.circular(r)));
+      final r = math.min(
+          h / 2, math.max(4.0, borderRadius > 0 ? borderRadius : h / 2));
+      path.addRRect(RRect.fromRectAndRadius(
+          Rect.fromLTWH(0, 0, w, h), Radius.circular(r)));
     } else if (shapeKind == 'rounded') {
       final r = math.max(24.0, borderRadius);
-      path.addRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), Radius.circular(r)));
+      path.addRRect(RRect.fromRectAndRadius(
+          Rect.fromLTWH(0, 0, w, h), Radius.circular(r)));
     } else {
-      path.addRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), Radius.circular(borderRadius)));
+      path.addRRect(RRect.fromRectAndRadius(
+          Rect.fromLTWH(0, 0, w, h), Radius.circular(borderRadius)));
     }
 
     if (fillColor.alpha > 0) {
@@ -1578,6 +1820,36 @@ class _ShapeLayerPainter extends CustomPainter {
       oldDelegate.borderRadius != borderRadius;
 }
 
+/// The effective image source for a layer, in the same priority order as
+/// [_LayerCanvasState._imageSourceKey]: AI background-removed file ->
+/// enhanced file -> guilloche bytes -> white-removed bytes -> original file.
+/// A file tier whose file is missing falls through to the next tier, so a
+/// deleted `qalamix_images` file degrades to the original instead of a
+/// blank layer. Exactly one of [filePath]/[bytes] is non-null when a source
+/// exists.
+({String? filePath, Uint8List? bytes}) _effectiveLayerImageSource(
+  DesignLayer layer,
+) {
+  final bg = layer.backgroundRemovedPath;
+  if (bg != null && bg.isNotEmpty && File(bg).existsSync()) {
+    return (filePath: bg, bytes: null);
+  }
+  final enh = layer.enhancedPath;
+  if (enh != null && enh.isNotEmpty && File(enh).existsSync()) {
+    return (filePath: enh, bytes: null);
+  }
+  if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
+    return (filePath: null, bytes: layer.processedGuillocheBytes);
+  }
+  if (layer.processedWhiteRemovedBytes != null) {
+    return (filePath: null, bytes: layer.processedWhiteRemovedBytes);
+  }
+  if (layer.localImagePath != null && layer.localImagePath!.isNotEmpty) {
+    return (filePath: layer.localImagePath, bytes: null);
+  }
+  return (filePath: null, bytes: null);
+}
+
 Future<Uint8List?> renderPageThumbnailBytes(
   DocumentPage page, {
   double maxSide = 180,
@@ -1587,12 +1859,11 @@ Future<Uint8List?> renderPageThumbnailBytes(
     for (final layer in page.layers) {
       if (!layer.visible || layer.type != LayerType.image) continue;
       Uint8List? bytes;
-      if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
-        bytes = layer.processedGuillocheBytes;
-      } else if (layer.processedWhiteRemovedBytes != null) {
-        bytes = layer.processedWhiteRemovedBytes;
-      } else if (layer.localImagePath != null) {
-        final f = File(layer.localImagePath!);
+      final src = _effectiveLayerImageSource(layer);
+      if (src.bytes != null) {
+        bytes = src.bytes;
+      } else if (src.filePath != null) {
+        final f = File(src.filePath!);
         if (await f.exists()) {
           bytes = await f.readAsBytes();
         }
@@ -1660,25 +1931,17 @@ Future<Uint8List?> renderPagePngBytes(
   try {
     for (final layer in page.layers) {
       if (!layer.visible || layer.type != LayerType.image) continue;
-      if (layer.filters.guilloche && layer.processedGuillocheBytes != null) {
-        final bytes = layer.processedGuillocheBytes!;
+      final src = _effectiveLayerImageSource(layer);
+      if (src.bytes != null) {
+        final bytes = src.bytes!;
         if (bytes.isEmpty) continue;
         final codec = await ui.instantiateImageCodec(bytes);
         final frame = await codec.getNextFrame();
         codec.dispose();
         uniqueImages.add(frame.image);
         decodedImages[layer.id] = frame.image;
-      } else if (layer.processedWhiteRemovedBytes != null) {
-        final bytes = layer.processedWhiteRemovedBytes!;
-        if (bytes.isEmpty) continue;
-        final codec = await ui.instantiateImageCodec(bytes);
-        final frame = await codec.getNextFrame();
-        codec.dispose();
-        uniqueImages.add(frame.image);
-        decodedImages[layer.id] = frame.image;
-      } else if (layer.localImagePath != null &&
-          layer.localImagePath!.isNotEmpty) {
-        final path = layer.localImagePath!;
+      } else if (src.filePath != null && src.filePath!.isNotEmpty) {
+        final path = src.filePath!;
         final cached = pathCache[path];
         if (cached != null) {
           decodedImages[layer.id] = cached;
