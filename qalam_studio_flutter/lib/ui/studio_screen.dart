@@ -23,8 +23,11 @@ import '../main.dart';
 import '../models/design_project.dart';
 import '../storage/local_project_store.dart';
 import 'image_crop_sheet.dart';
+import 'docs_tools_screen.dart';
+import 'home_screen.dart';
 import 'new_project_sheet.dart';
 import 'pdf_import.dart';
+import 'templates_screen.dart';
 
 class _JpgEncodeRequest {
   const _JpgEncodeRequest(this.pngBytes, this.quality);
@@ -114,7 +117,12 @@ class _StudioScreenState extends State<StudioScreen>
   late DesignProject _project;
   int _pageIndex = 0;
   String? _selectedLayerId;
-  int _navIndex = 0; // 0=Projects, 1=Fill, 2=Sign/Seal, 3=Docs
+  int _navIndex = 0; // Grade 1: 0=Home, 1=Templates, 2=Create (action),
+  // 3=Projects, 4=More (Docs Tools hub). Create never becomes selected.
+  // Docs Tools sub-view inside the More tab: null = hub grid,
+  // 'fill' | 'sign' | 'docs' = the relocated Fill / Sign & Seal / Docs
+  // views (features unchanged, only their entry point moved).
+  String? _docsTool;
   bool _inStudio = false;
   (int, String)? _studioEntrySnapshot;
   int _inspectorTab = 0; // 0=Design, 1=Overlay, 2=Effects, 3=Layers
@@ -532,24 +540,26 @@ class _StudioScreenState extends State<StudioScreen>
                 _tourTile(
                   Icons.receipt_long_rounded,
                   'Cash Memo, Letterhead & Certificate',
-                  'The Docs tab includes ready-to-edit Urdu Cash Memo, Letterhead, and Certificate templates.',
+                  'Docs Tools includes ready-to-edit Urdu Cash Memo, Letterhead, and Certificate templates.',
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() {
                       _inStudio = false;
-                      _navIndex = 3;
+                      _navIndex = 4;
+                      _docsTool = 'docs';
                     });
                   },
                 ),
                 _tourTile(
                   Icons.verified_rounded,
                   'Official Stamps & Signatures',
-                  'Create Round, Oval, or Box rubber stamps in the Sign/Seal tab and add them to the canvas in 1 tap.',
+                  'Create Round, Oval, or Box rubber stamps in Docs Tools › Sign & Seal and add them to the canvas in 1 tap.',
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() {
                       _inStudio = false;
-                      _navIndex = 2;
+                      _navIndex = 4;
+                      _docsTool = 'sign';
                       _sigMode = 3;
                     });
                   },
@@ -575,12 +585,13 @@ class _StudioScreenState extends State<StudioScreen>
                 _tourTile(
                   Icons.edit_note_rounded,
                   'Quick Fill & Portable Share',
-                  'Swap customer names or photos in seconds from the Fill tab without changing layer coordinates.',
+                  'Swap customer names or photos in seconds from Docs Tools › Fill without changing layer coordinates.',
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() {
                       _inStudio = false;
-                      _navIndex = 1;
+                      _navIndex = 4;
+                      _docsTool = 'fill';
                     });
                   },
                 ),
@@ -1391,6 +1402,45 @@ class _StudioScreenState extends State<StudioScreen>
                     ),
                   ),
                 ),
+              // Grade 1: true-black toggle — pure #000000 dark variant.
+              // Turning it on also switches Light mode to Dark (it only
+              // has an effect in dark mode).
+              ValueListenableBuilder<bool>(
+                valueListenable: appTrueBlackMode,
+                builder: (context, trueBlack, _) {
+                  return Tooltip(
+                    message: 'True black',
+                    child: InkWell(
+                      onTap: () {
+                        final next = !trueBlack;
+                        appTrueBlackMode.value = next;
+                        unawaited(saveAppTrueBlackMode(next));
+                        if (next && appThemeMode.value == ThemeMode.light) {
+                          appThemeMode.value = ThemeMode.dark;
+                          unawaited(saveAppThemeMode(ThemeMode.dark));
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        width: 36,
+                        height: 32,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: trueBlack ? _amber : Colors.transparent,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Icon(
+                          Icons.contrast,
+                          size: 14,
+                          color: trueBlack
+                              ? const Color(0xFF1C1917)
+                              : _subColor,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
         );
@@ -2825,16 +2875,28 @@ class _StudioScreenState extends State<StudioScreen>
     final stageBg = _isDark ? const Color(0xFF12141A) : const Color(0xFFE6E1D6);
 
     const hubTitles = [
+      'Home',
+      'Templates',
+      'Create',
       'Projects',
-      'Quick Fill',
-      'Sign & Seal',
-      'Docs & Scanner'
+      'Docs Tools'
     ];
+    // Subtitle for the More tab: the open Docs Tool, or the hub name.
+    final hubSubtitle = _docsTool == 'fill'
+        ? 'Quick Fill'
+        : _docsTool == 'sign'
+            ? 'Sign & Seal'
+            : _docsTool == 'docs'
+                ? 'Docs & Scanner'
+                : hubTitles[_navIndex.clamp(0, hubTitles.length - 1)];
     return PopScope(
-      canPop: !_inStudio,
+      canPop: !_inStudio && _docsTool == null,
       onPopInvoked: (didPop) {
         if (!didPop && _inStudio) {
           _confirmExitStudio();
+        } else if (!didPop && _docsTool != null) {
+          // Back from a Docs Tool returns to the Docs Tools hub.
+          setState(() => _docsTool = null);
         }
       },
       child: Stack(
@@ -2843,14 +2905,21 @@ class _StudioScreenState extends State<StudioScreen>
             appBar: AppBar(
               toolbarHeight: 56,
               automaticallyImplyLeading: false,
-              leadingWidth: _inStudio ? 48 : null,
+              leadingWidth: (_inStudio || _docsTool != null) ? 48 : null,
               leading: _inStudio
                   ? IconButton(
-                      tooltip: 'Back to Projects',
+                      tooltip: 'Back to Home',
                       icon: const Icon(Icons.arrow_back_rounded, size: 22),
                       onPressed: _confirmExitStudio,
                     )
-                  : null,
+                  : _docsTool != null
+                      ? IconButton(
+                          tooltip: 'Back to Docs Tools',
+                          icon:
+                              const Icon(Icons.arrow_back_rounded, size: 22),
+                          onPressed: () => setState(() => _docsTool = null),
+                        )
+                      : null,
               titleSpacing: _inStudio ? 4 : 12,
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(1),
@@ -2927,8 +2996,7 @@ class _StudioScreenState extends State<StudioScreen>
                                     fontSize: 15, fontWeight: FontWeight.w800),
                               ),
                               Text(
-                                hubTitles[
-                                    _navIndex.clamp(0, hubTitles.length - 1)],
+                                hubSubtitle,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style:
@@ -3070,17 +3138,19 @@ class _StudioScreenState extends State<StudioScreen>
               ],
             ),
             body: IndexedStack(
-              index: _inStudio ? 0 : (_navIndex.clamp(0, 3) + 1),
+              // 0 = Studio, 1 = Home, 2 = Templates, 3 = Projects,
+              // 4 = More (Docs Tools hub or the open Docs Tool view).
+              // Create (nav 2) is an action, not a tab, so it has no stack
+              // child: nav 0/1 map to stack 1/2, nav 3/4 map to stack 3/4.
+              index: _inStudio
+                  ? 0
+                  : (_navIndex >= 3 ? _navIndex : _navIndex + 1),
               children: [
                 _buildStudioView(stageBg),
+                _buildHomeView(),
+                _buildTemplatesView(),
                 _buildProjectsView(),
-                (!_inStudio && _navIndex == 1)
-                    ? _buildQuickFillView()
-                    : const SizedBox.shrink(),
-                (!_inStudio && _navIndex == 2)
-                    ? _buildSignatureView()
-                    : const SizedBox.shrink(),
-                _buildPagesView(),
+                _buildDocsToolsView(),
               ],
             ),
             bottomNavigationBar: _inStudio
@@ -3090,25 +3160,42 @@ class _StudioScreenState extends State<StudioScreen>
                       border: Border(top: BorderSide(color: _borderColor)),
                     ),
                     child: NavigationBar(
-                      selectedIndex: _navIndex.clamp(0, 3),
-                      onDestinationSelected: (i) => setState(() {
-                        _navIndex = i.clamp(0, 3);
-                      }),
-                      destinations: const [
+                      selectedIndex: _navIndex.clamp(0, 4),
+                      onDestinationSelected: (i) {
+                        if (i == 2) {
+                          // Centre "+" is an action, not a tab: open the
+                          // new-project sheet and stay on the current tab.
+                          unawaited(_createNewProject());
+                          return;
+                        }
+                        setState(() {
+                          _navIndex = i.clamp(0, 4);
+                          if (i != 4) _docsTool = null;
+                        });
+                      },
+                      destinations: [
+                        const NavigationDestination(
+                            icon: Icon(Icons.home_outlined),
+                            selectedIcon: Icon(Icons.home_rounded),
+                            label: 'Home'),
+                        const NavigationDestination(
+                            icon: Icon(Icons.dashboard_outlined),
+                            selectedIcon: Icon(Icons.dashboard_rounded),
+                            label: 'Templates'),
                         NavigationDestination(
+                            icon: Icon(Icons.add_circle_outline_rounded,
+                                size: 30, color: _amber),
+                            selectedIcon: Icon(Icons.add_circle_rounded,
+                                size: 30, color: _amber),
+                            label: 'Create'),
+                        const NavigationDestination(
                             icon: Icon(Icons.folder_outlined),
                             selectedIcon: Icon(Icons.folder_rounded),
                             label: 'Projects'),
-                        NavigationDestination(
-                            icon: Icon(Icons.edit_note_rounded), label: 'Fill'),
-                        NavigationDestination(
-                            icon: Icon(Icons.draw_outlined),
-                            selectedIcon: Icon(Icons.draw_rounded),
-                            label: 'Sign/Seal'),
-                        NavigationDestination(
-                            icon: Icon(Icons.description_outlined),
-                            selectedIcon: Icon(Icons.description_rounded),
-                            label: 'Docs'),
+                        const NavigationDestination(
+                            icon: Icon(Icons.more_horiz_rounded),
+                            selectedIcon: Icon(Icons.more_horiz_rounded),
+                            label: 'More'),
                       ],
                     ),
                   ),
@@ -3419,20 +3506,43 @@ class _StudioScreenState extends State<StudioScreen>
                         Row(
                           children: [
                             Expanded(
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Row(
-                                  children: [
-                                    _tabChip(0, 'Style', Icons.tune_rounded),
-                                    _tabChip(1, 'Photo', Icons.image_outlined),
-                                    _tabChip(2, 'Adjust',
-                                        Icons.auto_fix_high_rounded),
-                                    _tabChip(
-                                        3,
-                                        'Layers (${_page.layers.length})',
-                                        Icons.format_list_bulleted_rounded),
-                                  ],
-                                ),
+                              child: Row(
+                                children: [
+                                  _railItem(
+                                    icon: Icons.tune_rounded,
+                                    label: 'Tools',
+                                    selected: _inspectorTab == 0,
+                                    onTap: () => _selectInspectorTab(0),
+                                  ),
+                                  _railItem(
+                                    icon: Icons.auto_fix_high_rounded,
+                                    label: 'Adjust',
+                                    selected: _inspectorTab == 2,
+                                    onTap: () => _selectInspectorTab(2),
+                                  ),
+                                  _railItem(
+                                    icon: Icons.image_outlined,
+                                    label: 'Effects',
+                                    selected: _inspectorTab == 1,
+                                    onTap: () => _selectInspectorTab(1),
+                                  ),
+                                  _railItem(
+                                    icon:
+                                        Icons.format_list_bulleted_rounded,
+                                    label: 'Layers',
+                                    selected: _inspectorTab == 3,
+                                    badge: _page.layers.isEmpty
+                                        ? null
+                                        : '${_page.layers.length}',
+                                    onTap: () => _selectInspectorTab(3),
+                                  ),
+                                  _railItem(
+                                    icon: Icons.add_rounded,
+                                    label: 'Add',
+                                    selected: false,
+                                    onTap: _openAddSheet,
+                                  ),
+                                ],
                               ),
                             ),
                             if (_sheetExpanded)
@@ -3563,35 +3673,80 @@ class _StudioScreenState extends State<StudioScreen>
     );
   }
 
-  Widget _tabChip(int idx, String label, IconData icon) {
-    final active = _inspectorTab == idx;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
+  // Grade 1: labelled editor tool rail (icon + label per tool, amber =
+  // selected). Replaces the old text ChoiceChip row. Tools/Adjust/Effects/
+  // Layers map onto the existing inspector tabs (0 Style, 2 Adjust,
+  // 1 Photo/effects, 3 Layers); Add opens the add sheet.
+  void _selectInspectorTab(int idx) {
+    setState(() {
+      if (_inspectorTab == idx && _sheetExpanded) {
+        _sheetExpanded = false;
+        _sheetUserCollapsed = true;
+      } else {
+        _inspectorTab = idx;
+        _sheetExpanded = true;
+        _sheetUserCollapsed = false;
+      }
+    });
+  }
+
+  Widget _railItem({
+    required IconData icon,
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    String? badge,
+  }) {
+    final color = selected ? _accentText : _subColor;
+    return Expanded(
       child: InkWell(
-        onTap: () => setState(() {
-          _inspectorTab = idx;
-          _sheetExpanded = true;
-          _sheetUserCollapsed = false;
-        }),
-        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+          padding: const EdgeInsets.symmetric(vertical: 6),
           decoration: BoxDecoration(
-            color: active ? _amberTintBg : _chipBg,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: active ? _amberTintBorder : _borderColor),
+            color: selected ? _amberTintBg : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
           ),
-          child: Row(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: active ? _accentText : _subColor),
-              const SizedBox(width: 5),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(icon, size: 22, color: color),
+                  if (badge != null)
+                    Positioned(
+                      right: -8,
+                      top: -6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: _amber,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          badge,
+                          style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF1C1917),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 2),
               Text(
                 label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: active ? FontWeight.w700 : FontWeight.w600,
-                  color: active ? _accentText : _textColor,
+                  fontSize: 10.5,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                  color: color,
                 ),
               ),
             ],
@@ -3599,6 +3754,68 @@ class _StudioScreenState extends State<StudioScreen>
         ),
       ),
     );
+  }
+
+  /// Grade 1: "Add" rail action — one sheet for Add Text / Add Photo /
+  /// Add Shape, reusing the existing add flows. Nothing new is created
+  /// here; the three actions already existed in the quick strip.
+  Future<void> _openAddSheet() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 48,
+              height: 5,
+              decoration: BoxDecoration(
+                color: _mutedColor.withOpacity(0.35),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Add to canvas',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.title_rounded),
+              title: const Text('Add Text'),
+              subtitle: const Text('Type in Urdu or English'),
+              onTap: () => Navigator.pop(ctx, 'text'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_photo_alternate_outlined),
+              title: const Text('Add Photo'),
+              subtitle: const Text('Overlay an image from your gallery'),
+              onTap: () => Navigator.pop(ctx, 'photo'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.category_outlined),
+              title: const Text('Add Shape'),
+              subtitle: const Text('Rectangle, circle, arrow and more'),
+              onTap: () => Navigator.pop(ctx, 'shape'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'text') {
+      _addTextLayer();
+    } else if (choice == 'photo') {
+      await _addOverlayImage();
+    } else if (choice == 'shape') {
+      _openShapePickerSheet();
+    }
   }
 
   Widget _buildInspectorBody(DesignLayer? layer) {
@@ -7659,6 +7876,190 @@ class _StudioScreenState extends State<StudioScreen>
     );
   }
 
+  // Grade 1: hub view builders. Home / Templates / Docs Tools live in
+  // their own files; this state only wires callbacks to existing flows.
+  Widget _buildHomeView() {
+    return QalamixHomeScreen(
+      projects: _projects,
+      thumbnailFor: (proj) => _projectThumbCache[proj.id],
+      onCreate: _createNewProject,
+      onRemoveBackground: () => _openPhotoWithAiTool(removeBackground: true),
+      onEnhance: () => _openPhotoWithAiTool(removeBackground: false),
+      onOpenTemplates: () => setState(() => _navIndex = 1),
+      onUseTemplate: _useTemplate,
+      onOpenProject: _openExistingProject,
+      onSeeAllProjects: () => setState(() => _navIndex = 3),
+      onOpenDocsTools: () => setState(() {
+        _navIndex = 4;
+        _docsTool = null;
+      }),
+    );
+  }
+
+  Widget _buildTemplatesView() {
+    return QalamixTemplatesScreen(onUseTemplate: _useTemplate);
+  }
+
+  Widget _buildDocsToolsView() {
+    // Relocated Fill / Sign & Seal / Docs: same views as before, only
+    // their entry point moved from the main nav into this hub.
+    if (_docsTool == 'fill') return _buildQuickFillView();
+    if (_docsTool == 'sign') return _buildSignatureView();
+    if (_docsTool == 'docs') return _buildPagesView();
+    return QalamixDocsToolsScreen(
+      onScanner: _openDocumentScannerSheet,
+      onFill: () => _openDocsTool('fill'),
+      onSignSeal: () => _openDocsTool('sign'),
+      onDocuments: () => _openDocsTool('docs'),
+    );
+  }
+
+  void _openDocsTool(String tool) {
+    setState(() => _docsTool = tool);
+  }
+
+  /// Opens an existing project in the Studio — same steps as tapping a
+  /// project card in the Projects list.
+  Future<void> _openExistingProject(DesignProject proj) async {
+    setState(() {
+      _project = proj;
+      _pageIndex = 0;
+      _selectedLayerId = null;
+      _undoStack.clear();
+      _redoStack.clear();
+      _studioEntrySnapshot = (0, proj.encode());
+      _inStudio = true;
+      _sheetExpanded = _sheetExpandedOnStudioEntry();
+      _sheetTall = false;
+      _sheetUserCollapsed = false;
+    });
+    await _rehydrateProjectFilters(proj);
+  }
+
+  /// Grade 1: "Use template" — creates a blank portrait project named
+  /// after the template and opens it in the Studio. Template content
+  /// (real designs) comes later; the placeholder only starts the flow.
+  Future<void> _useTemplate(String templateId) async {
+    const names = {
+      'eid-post': 'Eid Post',
+      'shaadi-card': 'Shaadi Card',
+      'sale-poster': 'Sale Poster',
+      'birthday-card': 'Birthday Card',
+      'urdu-quote': 'Urdu Quote',
+      'business-card': 'Business Card',
+      'ramadan-kareem': 'Ramadan Kareem',
+      'mehndi-night': 'Mehndi Night',
+      'motivational-quote': 'Motivational Quote',
+      'birthday-invite': 'Birthday Invite',
+      'cv-modern': 'CV Modern',
+      'cv-simple': 'CV Simple',
+    };
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final fresh = DesignProject(
+      id: 'proj_tpl_$now',
+      name: names[templateId] ?? 'Template Design',
+      updatedAt: now,
+      pages: [
+        DocumentPage(
+          id: 'page_1',
+          title: 'Design 1',
+          width: 1080,
+          height: 1350,
+          backgroundColor: const Color(0xFFFAF9F6),
+          layers: const [],
+        ),
+      ],
+    );
+    await LocalProjectStore.instance.saveProject(fresh);
+    final list = await LocalProjectStore.instance.loadAllProjects();
+    if (!mounted) return;
+    setState(() {
+      _projects = list;
+      _project = fresh;
+      _pageIndex = 0;
+      _selectedLayerId = null;
+      _inspectorTab = 0;
+      _sheetExpanded = _sheetExpandedOnStudioEntry();
+      _sheetTall = false;
+      _sheetUserCollapsed = false;
+      _undoStack.clear();
+      _redoStack.clear();
+      _studioEntrySnapshot = (0, fresh.encode());
+      _inStudio = true;
+    });
+    unawaited(_generateAndCacheProjectThumb(fresh));
+  }
+
+  /// Grade 1: Home AI tools — pick a photo, open it in the Studio as a
+  /// new project, then run the same on-device tool the Studio uses
+  /// (ML Kit background remover / one-tap Enhance). No new engine code.
+  Future<void> _openPhotoWithAiTool({required bool removeBackground}) async {
+    final picked = await _picker.pickImage(source: ImageSource.gallery);
+    if (picked == null) return;
+    final permanentPath = await _persistPickedImageOffline(picked.path);
+    final bytes = await File(permanentPath).readAsBytes();
+    final decoded = img.decodeImage(bytes);
+    final natW = (decoded?.width ?? 1080).toDouble();
+    final natH = (decoded?.height ?? 1080).toDouble();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final layerId = 'img_${DateTime.now().microsecondsSinceEpoch}';
+    final fresh = DesignProject(
+      id: 'proj_ai_$now',
+      name: removeBackground ? 'Background Remover' : 'Enhance',
+      updatedAt: now,
+      pages: [
+        DocumentPage(
+          id: 'page_1',
+          title: 'Photo 1',
+          width: natW,
+          height: natH,
+          backgroundColor: const Color(0xFF111317),
+          layers: [
+            DesignLayer(
+              id: layerId,
+              name: 'Photo Layer',
+              type: LayerType.image,
+              x: 0,
+              y: 0,
+              width: natW,
+              height: natH,
+              isCanvasBackground: true,
+              aspectLocked: false,
+              objectFit: BoxFit.cover,
+              localImagePath: permanentPath,
+            ),
+          ],
+        ),
+      ],
+    );
+    await LocalProjectStore.instance.saveProject(fresh);
+    final list = await LocalProjectStore.instance.loadAllProjects();
+    if (!mounted) return;
+    setState(() {
+      _projects = list;
+      _project = fresh;
+      _pageIndex = 0;
+      _selectedLayerId = layerId;
+      _inspectorTab = 1;
+      _sheetExpanded = false;
+      _sheetTall = false;
+      _undoStack.clear();
+      _redoStack.clear();
+      _studioEntrySnapshot = (0, fresh.encode());
+      _inStudio = true;
+    });
+    unawaited(_generateAndCacheProjectThumb(fresh));
+    final layer = _page.layers.firstWhere(
+      (l) => l.id == layerId,
+      orElse: () => _page.layers.first,
+    );
+    if (removeBackground) {
+      await _applyBackgroundRemoval(layer);
+    } else {
+      await _applyEnhance(layer);
+    }
+  }
+
   Widget _buildProjectsView() {
     return Center(
       child: ConstrainedBox(
@@ -7677,7 +8078,7 @@ class _StudioScreenState extends State<StudioScreen>
                         children: [
                           const Text('Offline Projects',
                               style: TextStyle(
-                                  fontSize: 18, fontWeight: FontWeight.w700)),
+                                  fontSize: 22, fontWeight: FontWeight.w800)),
                           Text(
                               '${_projects.length} saved locally · Tap a project to edit in Studio',
                               style: TextStyle(fontSize: 12, color: _subColor)),

@@ -7,6 +7,18 @@ import 'ui/studio_screen.dart';
 
 final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier<ThemeMode>(ThemeMode.light);
 
+// Grade 1: true-black dark variant (pure #000000 scaffold) alongside the
+// regular dark theme. Persisted separately so it survives restarts.
+final ValueNotifier<bool> appTrueBlackMode = ValueNotifier<bool>(false);
+
+Future<void> saveAppTrueBlackMode(bool value) async {
+  try {
+    final docsDir = await getApplicationDocumentsDirectory();
+    final file = File(p.join(docsDir.path, 'qalamix_true_black.txt'));
+    await file.writeAsString(value ? 'true' : 'false');
+  } catch (_) {}
+}
+
 Future<void> saveAppThemeMode(ThemeMode mode) async {
   try {
     final docsDir = await getApplicationDocumentsDirectory();
@@ -32,6 +44,13 @@ Future<void> main() async {
       } else {
         appThemeMode.value = ThemeMode.light;
       }
+    }
+  } catch (_) {}
+  try {
+    final docsDir = await getApplicationDocumentsDirectory();
+    final file = File(p.join(docsDir.path, 'qalamix_true_black.txt'));
+    if (file.existsSync()) {
+      appTrueBlackMode.value = file.readAsStringSync().trim() == 'true';
     }
   } catch (_) {}
 
@@ -81,7 +100,7 @@ class QalamixApp extends StatelessWidget {
         color: Colors.white,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(20),
           side: const BorderSide(color: Color(0xFFE7E2D8)),
         ),
       ),
@@ -119,15 +138,15 @@ class QalamixApp extends StatelessWidget {
         filled: true,
         fillColor: const Color(0xFFFAF8F4),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Color(0xFFE7E2D8)),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Color(0xFFE7E2D8)),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: amberNib, width: 1.5),
         ),
       ),
@@ -166,7 +185,7 @@ class QalamixApp extends StatelessWidget {
         color: const Color(0xFF1E222B),
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(20),
           side: const BorderSide(color: Color(0xFF2C313C)),
         ),
       ),
@@ -204,15 +223,15 @@ class QalamixApp extends StatelessWidget {
         filled: true,
         fillColor: const Color(0xFF12141A),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Color(0xFF2C313C)),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Color(0xFF2C313C)),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: amberDark, width: 1.5),
         ),
       ),
@@ -224,25 +243,63 @@ class QalamixApp extends StatelessWidget {
       ),
     );
 
+    // Grade 1: true-black dark variant — pure #000000 scaffold with the
+    // same amber accents, derived from darkTheme so the two stay in sync.
+    final trueBlackTheme = darkTheme.copyWith(
+      scaffoldBackgroundColor: Colors.black,
+      colorScheme: darkTheme.colorScheme.copyWith(
+        surface: const Color(0xFF101114),
+        outline: const Color(0xFF26292F),
+        outlineVariant: const Color(0xFF1B1E24),
+      ),
+      cardTheme: darkTheme.cardTheme.copyWith(
+        color: const Color(0xFF101114),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFF1B1E24)),
+        ),
+      ),
+      appBarTheme: darkTheme.appBarTheme.copyWith(
+        backgroundColor: Colors.black,
+      ),
+      navigationBarTheme: darkTheme.navigationBarTheme.copyWith(
+        backgroundColor: Colors.black,
+      ),
+      inputDecorationTheme: darkTheme.inputDecorationTheme.copyWith(
+        fillColor: Colors.black,
+      ),
+    );
+
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: appThemeMode,
       builder: (context, mode, _) {
-        final isDark = mode == ThemeMode.dark ||
-            (mode == ThemeMode.system &&
-                MediaQuery.platformBrightnessOf(context) == Brightness.dark);
-        SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
-          systemNavigationBarColor: isDark ? const Color(0xFF1E222B) : Colors.white,
-          systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
-        ));
-        return MaterialApp(
-          title: 'Qalamix',
-          debugShowCheckedModeBanner: false,
-          themeMode: mode,
-          theme: lightTheme,
-          darkTheme: darkTheme,
-          home: const StudioScreen(),
+        return ValueListenableBuilder<bool>(
+          valueListenable: appTrueBlackMode,
+          builder: (context, trueBlack, _) {
+            final isDark = mode == ThemeMode.dark ||
+                (mode == ThemeMode.system &&
+                    MediaQuery.platformBrightnessOf(context) ==
+                        Brightness.dark);
+            final useTrueBlack = isDark && trueBlack;
+            SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness:
+                  isDark ? Brightness.light : Brightness.dark,
+              systemNavigationBarColor: useTrueBlack
+                  ? Colors.black
+                  : (isDark ? const Color(0xFF1E222B) : Colors.white),
+              systemNavigationBarIconBrightness:
+                  isDark ? Brightness.light : Brightness.dark,
+            ));
+            return MaterialApp(
+              title: 'Qalamix',
+              debugShowCheckedModeBanner: false,
+              themeMode: mode,
+              theme: lightTheme,
+              darkTheme: useTrueBlack ? trueBlackTheme : darkTheme,
+              home: const StudioScreen(),
+            );
+          },
         );
       },
     );
